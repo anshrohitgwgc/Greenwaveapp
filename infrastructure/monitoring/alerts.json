@@ -1,0 +1,15 @@
+{
+  "thresholds": {
+    "cpu": { "warningPercent": 80, "criticalPercent": 92 },
+    "ram": { "warningPercent": 85, "criticalPercent": 95 },
+    "disk": { "warningPercent": 85, "criticalPercent": 95 },
+    "thermal": {
+      "cpuPackage": { "warningCelsius": 78, "criticalCelsius": 88 },
+      "systemBoard": { "warningCelsius": 45, "criticalCelsius": 55 },
+      "ambientInlet": { "warningCelsius": 45, "criticalCelsius": 55 },
+      "chipset": { "warningCelsius": 85, "criticalCelsius": 100 },
+      "powerSupply": { "warningCelsius": 65, "criticalCelsius": 75 },
+      "storageController": { "warningCelsius": 75, "criticalCelsius": 95 }
+    }
+  }
+}
