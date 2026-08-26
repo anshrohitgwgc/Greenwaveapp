@@ -13,10 +13,12 @@ import { mockApi } from './mock';
 import { uploadImage, type PickedImage } from './upload';
 import { localDayRange } from '@/utils/format';
 import type {
+  CreateCustomerInput,
   CreateJobInput,
   CreateJobLineInput,
   CreateStaffInput,
   Customer,
+  PushTokenInput,
   Job,
   JobLine,
   JobListQuery,
@@ -67,7 +69,7 @@ export const api = {
   },
 
   changePassword(currentPassword: string, newPassword: string): Promise<void> {
-    if (mock) return Promise.resolve();
+    if (mock) return mockApi.changePassword(currentPassword, newPassword);
     return http.post<void>(endpoints.auth.changePassword(), {
       currentPassword,
       newPassword,
@@ -147,6 +149,36 @@ export const api = {
   listCustomers(search?: string): Promise<Customer[]> {
     if (mock) return mockApi.listCustomers(search);
     return http.get<Customer[]>(endpoints.customers.list(search));
+  },
+
+  createCustomer(input: CreateCustomerInput): Promise<Customer> {
+    if (mock) return mockApi.createCustomer(input);
+    return http.post<Customer>(endpoints.customers.create(), input);
+  },
+
+  updateCustomer(customerId: string, input: Partial<CreateCustomerInput>): Promise<Customer> {
+    if (mock) return mockApi.updateCustomer(customerId, input);
+    return http.patch<Customer>(endpoints.customers.update(customerId), input);
+  },
+
+  // --- push notifications --------------------------------------------------
+
+  async registerPushToken(input: PushTokenInput): Promise<void> {
+    if (mock) return;
+    try {
+      await http.post<void>(endpoints.devices.register(), input);
+    } catch {
+      // Never block sign-in because push registration failed.
+    }
+  },
+
+  async unregisterPushToken(token: string): Promise<void> {
+    if (mock) return;
+    try {
+      await http.delete<void>(`${endpoints.devices.unregister()}?token=${encodeURIComponent(token)}`);
+    } catch {
+      // Signing out locally must succeed regardless.
+    }
   },
 
   // --- staff ---------------------------------------------------------------

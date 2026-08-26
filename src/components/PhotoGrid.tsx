@@ -7,6 +7,7 @@ import { Button, Caption, IconButton, InlineError, Row } from './ui';
 import { colors, radius, spacing, typography } from '@/theme';
 import { config } from '@/api/config';
 import { useAddJobPhoto, useDeleteJobPhoto } from '@/api/queries';
+import { isLocalId } from '@/offline/optimistic';
 import { chooseSource, confirm, notify } from '@/utils/dialogs';
 import type { JobPhoto } from '@/api/types';
 import type { PickedImage } from '@/api/service';
@@ -149,7 +150,11 @@ export function PhotoGrid({
             <Pressable
               key={photo.id}
               accessibilityRole="imagebutton"
-              accessibilityLabel={photo.caption ?? 'Job photo'}
+              accessibilityLabel={
+                isLocalId(photo.id)
+                  ? 'Job photo, waiting to upload'
+                  : (photo.caption ?? 'Job photo')
+              }
               onPress={() => setPreview(photo)}
               style={({ pressed }) => [styles.tile, pressed && { opacity: 0.8 }]}
             >
@@ -159,6 +164,11 @@ export function PhotoGrid({
                 contentFit="cover"
                 transition={150}
               />
+              {isLocalId(photo.id) ? (
+                <View style={styles.pendingBadge}>
+                  <Ionicons name="cloud-upload" size={11} color={colors.white} />
+                </View>
+              ) : null}
             </Pressable>
           ))}
         </View>
@@ -212,6 +222,17 @@ const styles = StyleSheet.create({
     backgroundColor: colors.slateSoft,
   },
   tileImage: { width: '100%', height: '100%' },
+  pendingBadge: {
+    position: 'absolute',
+    right: 4,
+    bottom: 4,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.amber,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   placeholder: {
     alignItems: 'center',
     justifyContent: 'center',

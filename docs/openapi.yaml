@@ -332,6 +332,71 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Customer' }
+    post:
+      tags: [Materials]
+      summary: Add a customer
+      description: Managers and admins only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CustomerInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Customer' }
+        '409': { description: A customer with that name already exists }
+
+  /customers/{customerId}:
+    parameters:
+      - { name: customerId, in: path, required: true, schema: { type: string } }
+    patch:
+      tags: [Materials]
+      summary: Update a customer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CustomerInput' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Customer' }
+
+  /devices/push-token:
+    post:
+      tags: [Auth]
+      summary: Register this device for push notifications
+      description: |
+        Optional. Store one row per (user, token) so "you've been assigned a
+        job" can reach the right phone. Tokens expire — drop any that the push
+        service reports as invalid.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, platform]
+              properties:
+                token:
+                  type: string
+                  description: Expo push token, e.g. ExponentPushToken[xxx].
+                platform: { type: string, enum: [ios, android, web] }
+                deviceName: { type: string, nullable: true }
+      responses:
+        '204': { description: Registered }
+    delete:
+      tags: [Auth]
+      summary: Forget a device (called on sign-out)
+      parameters:
+        - { name: token, in: query, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Removed }
 
   # --------------------------------------------------------------- staff ----
   /staff:
@@ -548,6 +613,18 @@ components:
         address: { type: string, nullable: true }
         contactName: { type: string, nullable: true }
         contactPhone: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        active: { type: boolean }
+
+    CustomerInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        address: { type: string, nullable: true }
+        contactName: { type: string, nullable: true }
+        contactPhone: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
 
     Material:
       type: object

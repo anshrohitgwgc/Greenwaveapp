@@ -168,11 +168,17 @@ export function Body({
 export function Caption({
   children,
   style,
+  numberOfLines,
 }: {
   children: React.ReactNode;
   style?: StyleProp<TextStyle>;
+  numberOfLines?: number;
 }) {
-  return <Text style={[styles.caption, style]}>{children}</Text>;
+  return (
+    <Text numberOfLines={numberOfLines} style={[styles.caption, style]}>
+      {children}
+    </Text>
+  );
 }
 
 // ---------------------------------------------------------------------------

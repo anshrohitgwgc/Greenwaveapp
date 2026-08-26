@@ -59,10 +59,20 @@ export const endpoints = {
 
   materials: {
     list: () => '/materials',
+    create: () => '/materials',
+    update: (materialId: string) => `/materials/${encodeURIComponent(materialId)}`,
   },
 
   customers: {
     list: (search?: string) => `/customers${qs({ search })}`,
+    create: () => '/customers',
+    update: (customerId: string) => `/customers/${encodeURIComponent(customerId)}`,
+  },
+
+  devices: {
+    /** Register this device for push notifications. */
+    register: () => '/devices/push-token',
+    unregister: () => '/devices/push-token',
   },
 
   staff: {

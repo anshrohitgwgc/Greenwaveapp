@@ -1,16 +1,38 @@
 /**
  * React Query bindings. Screens use these hooks and never call `api` directly
  * for reads, so caching and invalidation stay in one place.
+ *
+ * The write hooks are offline-aware. When the device is offline, an
+ * offline-capable mutation patches the cache immediately and drops the real
+ * request into the persisted queue (see `src/offline/`), so a driver in a yard
+ * with no signal gets the same feedback they'd get on wifi.
  */
 
 import {
   useMutation,
   useQuery,
   useQueryClient,
+  type QueryClient,
   type UseQueryResult,
 } from '@tanstack/react-query';
 import { api, type PickedImage, type TodaySummary } from './service';
+import { ApiError } from './client';
+import { queryKeys } from './query-keys';
+import { isOnline } from '@/offline/network';
+import { canQueue, dropQueuedPhoto, enqueue } from '@/offline/queue';
+import {
+  isLocalId,
+  localId,
+  optimisticAddLine,
+  optimisticAddPhoto,
+  optimisticClockIn,
+  optimisticClockOut,
+  optimisticRemoveLine,
+  optimisticStatus,
+} from '@/offline/optimistic';
+import { useAuth } from '@/auth/store';
 import type {
+  CreateCustomerInput,
   CreateJobInput,
   CreateJobLineInput,
   CreateStaffInput,
@@ -25,19 +47,11 @@ import type {
   User,
 } from './types';
 
-export const queryKeys = {
-  jobs: (query: JobListQuery) => ['jobs', query] as const,
-  job: (jobId: string) => ['job', jobId] as const,
-  materials: ['materials'] as const,
-  customers: (search?: string) => ['customers', search ?? ''] as const,
-  staff: ['staff'] as const,
-  activeTimesheet: ['timesheet', 'active'] as const,
-  timesheets: (params: { userId?: string; from?: string; to?: string }) =>
-    ['timesheets', params] as const,
-  today: ['today-summary'] as const,
-};
+export { queryKeys };
 
-// --- reads ------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Reads
+// ---------------------------------------------------------------------------
 
 export function useJobs(query: JobListQuery = {}): UseQueryResult<Paginated<Job>> {
   return useQuery({
@@ -95,7 +109,9 @@ export function useTodaySummary(): UseQueryResult<TodaySummary> {
   return useQuery({ queryKey: queryKeys.today, queryFn: () => api.todaySummary() });
 }
 
-// --- writes -----------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Write helpers
+// ---------------------------------------------------------------------------
 
 /** Anything that changes a job invalidates lists + the dashboard too. */
 function useJobInvalidator() {
@@ -107,6 +123,32 @@ function useJobInvalidator() {
   };
 }
 
+function jobReference(client: QueryClient, jobId: string): string {
+  return client.getQueryData<Job>(queryKeys.job(jobId))?.reference ?? jobId;
+}
+
+function currentUser() {
+  return useAuth.getState().user;
+}
+
+/**
+ * Result of an offline-capable write: `queued` means it lives in the local
+ * queue and has not reached the server yet.
+ */
+export interface WriteResult {
+  queued: boolean;
+}
+
+const OFFLINE_UNSUPPORTED = new ApiError(
+  0,
+  "This needs a connection. It hasn't been saved — try again once you're back online.",
+);
+
+// ---------------------------------------------------------------------------
+// Jobs
+// ---------------------------------------------------------------------------
+
+/** Creating and editing jobs is a manager action done at a desk — online only. */
 export function useCreateJob() {
   const invalidate = useJobInvalidator();
   return useMutation({
@@ -124,48 +166,178 @@ export function useUpdateJob(jobId: string) {
 }
 
 export function useSetJobStatus(jobId: string) {
+  const client = useQueryClient();
   const invalidate = useJobInvalidator();
+
   return useMutation({
-    mutationFn: (status: JobStatus) => api.setJobStatus(jobId, status),
-    onSuccess: () => invalidate(jobId),
+    mutationFn: async (status: JobStatus): Promise<WriteResult> => {
+      if (isOnline()) {
+        await api.setJobStatus(jobId, status);
+        return { queued: false };
+      }
+      const now = new Date().toISOString();
+      optimisticStatus(client, jobId, status, now);
+      await enqueue(
+        { kind: 'job-status', jobId, jobRef: jobReference(client, jobId), status },
+        now,
+      );
+      return { queued: true };
+    },
+    onSuccess: (result) => {
+      if (!result.queued) invalidate(jobId);
+    },
   });
 }
 
 export function useAddJobLine(jobId: string) {
+  const client = useQueryClient();
   const invalidate = useJobInvalidator();
+
   return useMutation({
-    mutationFn: (input: CreateJobLineInput) => api.addJobLine(jobId, input),
-    onSuccess: () => invalidate(jobId),
+    mutationFn: async (input: CreateJobLineInput): Promise<WriteResult> => {
+      if (isOnline()) {
+        await api.addJobLine(jobId, input);
+        return { queued: false };
+      }
+
+      const now = new Date().toISOString();
+      const materials = client.getQueryData<Material[]>(queryKeys.materials) ?? [];
+      const materialName =
+        materials.find((material) => material.id === input.materialId)?.name ?? 'Material';
+
+      optimisticAddLine(
+        client,
+        jobId,
+        input,
+        materialName,
+        currentUser()?.id ?? null,
+        now,
+        localId('line'),
+      );
+      await enqueue(
+        {
+          kind: 'job-line-add',
+          jobId,
+          jobRef: jobReference(client, jobId),
+          input,
+          materialName,
+        },
+        now,
+      );
+      return { queued: true };
+    },
+    onSuccess: (result) => {
+      if (!result.queued) invalidate(jobId);
+    },
   });
 }
 
 export function useDeleteJobLine(jobId: string) {
+  const client = useQueryClient();
   const invalidate = useJobInvalidator();
+
   return useMutation({
-    mutationFn: (lineId: string) => api.deleteJobLine(jobId, lineId),
-    onSuccess: () => invalidate(jobId),
+    mutationFn: async (lineId: string): Promise<WriteResult> => {
+      if (isOnline()) {
+        await api.deleteJobLine(jobId, lineId);
+        return { queued: false };
+      }
+
+      const now = new Date().toISOString();
+      optimisticRemoveLine(client, jobId, lineId, now);
+
+      // A line that only ever existed locally is removed by dropping the
+      // optimistic row — there is nothing on the server to delete.
+      if (!isLocalId(lineId)) {
+        await enqueue(
+          { kind: 'job-line-delete', jobId, jobRef: jobReference(client, jobId), lineId },
+          now,
+        );
+      }
+      return { queued: true };
+    },
+    onSuccess: (result) => {
+      if (!result.queued) invalidate(jobId);
+    },
   });
 }
 
 export function useAddJobPhoto(jobId: string) {
+  const client = useQueryClient();
   const invalidate = useJobInvalidator();
+
   return useMutation({
-    mutationFn: (args: {
+    mutationFn: async (args: {
       image: PickedImage;
       caption?: string;
       onProgress?: (fraction: number) => void;
-    }) => api.addJobPhoto(jobId, args.image, { caption: args.caption, onProgress: args.onProgress }),
-    onSuccess: () => invalidate(jobId),
+    }): Promise<WriteResult> => {
+      if (isOnline()) {
+        await api.addJobPhoto(jobId, args.image, {
+          caption: args.caption,
+          onProgress: args.onProgress,
+        });
+        return { queued: false };
+      }
+
+      const photoLocalId = localId('photo');
+      const op = {
+        kind: 'job-photo' as const,
+        jobId,
+        jobRef: jobReference(client, jobId),
+        image: args.image,
+        localId: photoLocalId,
+      };
+      // The web build can't queue a photo — a browser File can't be persisted
+      // and rehydrated later.
+      if (!canQueue(op)) throw OFFLINE_UNSUPPORTED;
+
+      const now = new Date().toISOString();
+      optimisticAddPhoto(
+        client,
+        jobId,
+        args.image.uri,
+        currentUser()?.id ?? null,
+        now,
+        photoLocalId,
+      );
+      await enqueue(op, now);
+      return { queued: true };
+    },
+    onSuccess: (result) => {
+      if (!result.queued) invalidate(jobId);
+    },
   });
 }
 
 export function useDeleteJobPhoto(jobId: string) {
+  const client = useQueryClient();
   const invalidate = useJobInvalidator();
+
   return useMutation({
-    mutationFn: (photoId: string) => api.deleteJobPhoto(jobId, photoId),
-    onSuccess: () => invalidate(jobId),
+    mutationFn: async (photoId: string): Promise<WriteResult> => {
+      // A photo that has only ever existed on this phone is removed by dropping
+      // the optimistic row and the queued upload — there is nothing to delete
+      // on the server.
+      if (isLocalId(photoId)) {
+        await dropQueuedPhoto(photoId);
+        client.setQueryData<Job>(queryKeys.job(jobId), (job) =>
+          job ? { ...job, photos: job.photos.filter((photo) => photo.id !== photoId) } : job,
+        );
+        return { queued: true };
+      }
+      await api.deleteJobPhoto(jobId, photoId);
+      return { queued: false };
+    },
+    onSuccess: (result) => {
+      if (!result.queued) invalidate(jobId);
+    },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Staff
+// ---------------------------------------------------------------------------
 
 export function useCreateStaff() {
   const client = useQueryClient();
@@ -188,26 +360,92 @@ export function useUpdateStaff() {
   });
 }
 
-export function useClockIn() {
+export function useChangePassword() {
+  return useMutation({
+    mutationFn: (args: { currentPassword: string; newPassword: string }) =>
+      api.changePassword(args.currentPassword, args.newPassword),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Customers
+// ---------------------------------------------------------------------------
+
+export function useCreateCustomer() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: () => api.clockIn(),
+    mutationFn: (input: CreateCustomerInput) => api.createCustomer(input),
     onSuccess: () => {
-      void client.invalidateQueries({ queryKey: ['timesheet'] });
-      void client.invalidateQueries({ queryKey: ['timesheets'] });
-      void client.invalidateQueries({ queryKey: queryKeys.today });
+      void client.invalidateQueries({ queryKey: ['customers'] });
+    },
+  });
+}
+
+export function useUpdateCustomer() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (args: { customerId: string; input: Partial<CreateCustomerInput> }) =>
+      api.updateCustomer(args.customerId, args.input),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['customers'] });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Timesheets
+// ---------------------------------------------------------------------------
+
+function useTimesheetInvalidator() {
+  const client = useQueryClient();
+  return () => {
+    void client.invalidateQueries({ queryKey: ['timesheet'] });
+    void client.invalidateQueries({ queryKey: ['timesheets'] });
+    void client.invalidateQueries({ queryKey: queryKeys.today });
+  };
+}
+
+export function useClockIn() {
+  const client = useQueryClient();
+  const invalidate = useTimesheetInvalidator();
+
+  return useMutation({
+    mutationFn: async (): Promise<WriteResult> => {
+      if (isOnline()) {
+        await api.clockIn();
+        return { queued: false };
+      }
+      const user = currentUser();
+      if (!user) throw OFFLINE_UNSUPPORTED;
+
+      const now = new Date().toISOString();
+      optimisticClockIn(client, user.id, user.fullName, now, localId('shift'));
+      await enqueue({ kind: 'clock-in' }, now);
+      return { queued: true };
+    },
+    onSuccess: (result) => {
+      if (!result.queued) invalidate();
     },
   });
 }
 
 export function useClockOut() {
   const client = useQueryClient();
+  const invalidate = useTimesheetInvalidator();
+
   return useMutation({
-    mutationFn: (note?: string) => api.clockOut(note),
-    onSuccess: () => {
-      void client.invalidateQueries({ queryKey: ['timesheet'] });
-      void client.invalidateQueries({ queryKey: ['timesheets'] });
-      void client.invalidateQueries({ queryKey: queryKeys.today });
+    mutationFn: async (note?: string): Promise<WriteResult> => {
+      if (isOnline()) {
+        await api.clockOut(note);
+        return { queued: false };
+      }
+      const now = new Date().toISOString();
+      optimisticClockOut(client, now, note);
+      await enqueue({ kind: 'clock-out', note }, now);
+      return { queued: true };
+    },
+    onSuccess: (result) => {
+      if (!result.queued) invalidate();
     },
   });
 }

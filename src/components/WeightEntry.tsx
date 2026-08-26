@@ -12,6 +12,7 @@ import {
 } from './ui';
 import { colors, radius, spacing, typography } from '@/theme';
 import { useAddJobLine, useDeleteJobLine, useMaterials } from '@/api/queries';
+import { isLocalId } from '@/offline/optimistic';
 import { formatWeight, parseWeight } from '@/utils/format';
 import { confirm } from '@/utils/dialogs';
 import type { JobLine } from '@/api/types';
@@ -101,6 +102,12 @@ export function WeightEntry({
                       {line.notes}
                     </Text>
                   ) : null}
+                  {isLocalId(line.id) ? (
+                    <Row gap={4} style={{ marginTop: 2 }}>
+                      <Ionicons name="cloud-upload-outline" size={11} color={colors.amber} />
+                      <Text style={styles.pending}>Saved here — not sent yet</Text>
+                    </Row>
+                  ) : null}
                 </View>
                 <Row gap={spacing.md}>
                   <Text style={styles.weight}>{formatWeight(line.weightKg)}</Text>
@@ -182,6 +189,7 @@ const styles = StyleSheet.create({
   line: { paddingVertical: spacing.md, paddingHorizontal: spacing.md },
   material: { ...typography.bodyStrong, color: colors.ink },
   note: { ...typography.small, color: colors.muted },
+  pending: { ...typography.small, fontSize: 11, color: colors.amber, fontWeight: '600' },
   weight: { ...typography.bodyStrong, color: colors.ink },
   totalLabel: { ...typography.smallStrong, color: colors.muted, letterSpacing: 0.3 },
   totalValue: { ...typography.heading, color: colors.greenDark },

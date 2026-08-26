@@ -43,6 +43,8 @@ export interface Customer {
   address?: string | null;
   contactName?: string | null;
   contactPhone?: string | null;
+  notes?: string | null;
+  active?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,6 +123,20 @@ export interface Material {
   active: boolean;
 }
 
+export interface CreateMaterialInput {
+  name: string;
+  category?: string | null;
+  ratePerKg?: number | null;
+}
+
+export interface CreateCustomerInput {
+  name: string;
+  address?: string | null;
+  contactName?: string | null;
+  contactPhone?: string | null;
+  notes?: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Timesheets / staff hours
 // ---------------------------------------------------------------------------
@@ -167,6 +183,15 @@ export interface CreateStaffInput {
   phone?: string | null;
   /** Initial password. Staff can change it after first login. */
   password: string;
+}
+
+/** Device registration so the API can push "you've been assigned a job". */
+export interface PushTokenInput {
+  /** Expo push token, e.g. ExponentPushToken[xxx]. */
+  token: string;
+  platform: 'ios' | 'android' | 'web';
+  /** Helps an admin recognise the device in a list. */
+  deviceName?: string | null;
 }
 
 export interface JobListQuery {

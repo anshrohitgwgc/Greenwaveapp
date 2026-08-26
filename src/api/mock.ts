@@ -8,6 +8,7 @@
 
 import { ApiError } from './client';
 import type {
+  CreateCustomerInput,
   CreateJobInput,
   CreateJobLineInput,
   CreateStaffInput,
@@ -396,9 +397,57 @@ export const mockApi = {
   async listCustomers(search?: string): Promise<Customer[]> {
     const needle = search?.toLowerCase();
     const result = needle
-      ? customers.filter((customer) => customer.name.toLowerCase().includes(needle))
+      ? customers.filter(
+          (customer) =>
+            customer.name.toLowerCase().includes(needle) ||
+            (customer.address ?? '').toLowerCase().includes(needle),
+        )
       : customers;
     return delay(result.map((customer) => ({ ...customer })));
+  },
+
+  async createCustomer(input: CreateCustomerInput): Promise<Customer> {
+    requireUser();
+    if (
+      customers.some(
+        (customer) => customer.name.trim().toLowerCase() === input.name.trim().toLowerCase(),
+      )
+    ) {
+      throw new ApiError(409, 'A customer with that name already exists.');
+    }
+    const customer: Customer = {
+      id: nextId('cus'),
+      name: input.name.trim(),
+      address: input.address ?? null,
+      contactName: input.contactName ?? null,
+      contactPhone: input.contactPhone ?? null,
+      notes: input.notes ?? null,
+      active: true,
+    };
+    customers.push(customer);
+    return delay({ ...customer });
+  },
+
+  async updateCustomer(
+    customerId: string,
+    input: Partial<CreateCustomerInput>,
+  ): Promise<Customer> {
+    requireUser();
+    const customer = customers.find((candidate) => candidate.id === customerId);
+    if (!customer) throw new ApiError(404, 'Customer not found.');
+    Object.assign(customer, input);
+    return delay({ ...customer });
+  },
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    requireUser();
+    if (currentPassword.length === 0) {
+      throw new ApiError(400, 'Enter your current password.');
+    }
+    if (newPassword.length < 8) {
+      throw new ApiError(400, 'Your new password must be at least 8 characters.');
+    }
+    return delay(undefined);
   },
 
   async listStaff(): Promise<User[]> {

@@ -32,7 +32,9 @@ npx expo install \
   expo-image-picker \
   expo-camera \
   expo-file-system \
+  expo-sharing \
   expo-haptics \
+  @react-native-community/netinfo \
   react-native-safe-area-context \
   react-native-screens \
   react-native-gesture-handler \

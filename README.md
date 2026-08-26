@@ -87,8 +87,36 @@ Two ways to connect:
 | **Job detail** | everyone | Status changes, material + weight entry, photos |
 | **New / edit job** | manager, admin | Schedule a pickup or dropoff, assign a driver |
 | **Hours** | everyone | Clock in/out, live timer, your last 14 days |
+| **Pending changes** | everyone | What's saved on the phone but not sent yet |
+| **Your account** | everyone | Change your own password |
+| **Customers** | manager, admin | Sites you collect from, with contacts and notes |
+| **Reports** | manager, admin | Material moved by material and customer, CSV export |
 | **Staff hours** | manager, admin | Everyone's shifts, grouped and totalled |
 | **Staff** | manager, admin | The team; admins add and deactivate accounts |
+
+### Working offline
+
+Drivers lose signal in yards, so the app is built to keep working without one.
+
+- **Reads** come from a cache persisted for seven days — open the app with no
+  signal and yesterday's jobs are still there.
+- **Writes** (weights, status changes, photos, clock in/out) are saved to a
+  queue on the phone and shown immediately, marked *"saved here — not sent
+  yet"*. A banner at the bottom of every screen says what's outstanding.
+- The queue **replays in order** when signal returns, so "340 kg of cardboard"
+  always lands before "mark completed". It stops at the first network failure
+  rather than skipping ahead.
+- A change the server *rejects* (a 4xx) is moved to a failed list for a human
+  to look at rather than retried forever.
+- **Signing out wipes both the cache and the queue.** Work phones get shared,
+  and queued work carries no identity of its own — replaying it under the next
+  person's token would file one driver's weights against another's name. The
+  app warns before signing out with anything unsent.
+
+Two known limits: the **web build can't queue photos** (a browser `File`
+can't be persisted and rehydrated later — it uploads immediately or fails),
+and a queued photo depends on the OS keeping the file in the cache directory,
+which is usually but not always true across a reboot.
 
 **Roles.** `driver` sees and completes only jobs assigned to them.
 `manager` schedules work and sees everyone. `admin` also manages staff
@@ -113,6 +141,13 @@ app/                      expo-router routes — the file tree IS the navigation
   (app)/timesheets.tsx    all-staff hours
 
 src/
+  offline/
+    queue.ts              the persisted write queue, replayed in order
+    provider.tsx          connectivity watcher; drains the queue on reconnect
+    optimistic.ts         cache patches so offline writes show up instantly
+    network.ts            one online/offline store, sync + reactive
+    persist.ts            the cached-data key, and how to wipe it
+
   api/
     endpoints.ts          ← every URL, in one file. Edit here to remap.
     service.ts            ← the only layer screens call; switches mock ↔ HTTP
@@ -186,9 +221,13 @@ without an app-store review — worth setting up early.
 
 ## Notes and known gaps
 
-- **Offline.** The app needs a connection. Drivers in a yard with no signal
-  will see errors rather than a queue. If that matters, the next step is
-  persisting the React Query cache and queueing mutations.
+- **Push notifications** are scaffolded but not sent. `POST /devices/push-token`
+  is in the contract and `api.registerPushToken()` exists; wiring
+  `expo-notifications` needs a development build (Expo Go dropped push support
+  in SDK 53) and a sender on the API side.
+- **Reports aggregate client-side** over up to 500 jobs in the period. That's
+  the right trade at your scale; if volume outgrows it, move `summarise()` in
+  `app/(app)/reports.tsx` behind a `/reports` endpoint and keep the same shapes.
 - **Date and time entry** uses chips plus a typed `YYYY-MM-DD` / `HH:MM`
   field rather than a native picker, so it behaves identically on all three
   platforms. Swap in `@react-native-community/datetimepicker` on native if
