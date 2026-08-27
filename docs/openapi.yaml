@@ -11,16 +11,16 @@ info:
     `/docker/containers`, `/n8n/control`) — that one manages servers. This
     one manages pickups, dropoffs, materials, weights, photos and staff
     hours, and should live behind its own base URL, e.g.
-    `https://api.gwgc.cloud/api/v1`.
+    `https://api.gwgc.cloud`.
 
     Implement these paths in Fastify and the app works unchanged. If you
     prefer different route names, change `src/api/endpoints.ts` in the app
     instead — every URL the app uses is declared in that one file.
 
 servers:
-  - url: https://api.gwgc.cloud/api/v1
+  - url: https://api.gwgc.cloud
     description: Production
-  - url: https://staging.gwgcservers.ca/api/v1
+  - url: https://staging.gwgcservers.ca
     description: Staging
 
 security:

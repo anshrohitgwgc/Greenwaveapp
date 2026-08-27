@@ -13,6 +13,7 @@ import {
   Text,
   TextInput,
   View,
+  type RefreshControlProps,
   type StyleProp,
   type TextInputProps,
   type TextStyle,
@@ -37,7 +38,7 @@ export function Screen({
   children: React.ReactNode;
   scroll?: boolean;
   padded?: boolean;
-  refreshControl?: React.ReactElement;
+  refreshControl?: React.ReactElement<RefreshControlProps>;
   contentStyle?: StyleProp<ViewStyle>;
 }) {
   const inner = (

@@ -78,6 +78,6 @@ cat <<'EOF'
 
  To point at your real API, edit .env:
    EXPO_PUBLIC_USE_MOCK=0
-   EXPO_PUBLIC_API_BASE_URL=https://api.gwgc.cloud/api/v1
+   EXPO_PUBLIC_API_BASE_URL=https://api.gwgc.cloud
 ============================================================
 EOF

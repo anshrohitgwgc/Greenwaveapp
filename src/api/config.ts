@@ -17,9 +17,9 @@ export const config = {
   /** When true the app runs against in-memory demo data — no backend needed. */
   useMock: envFlag(process.env.EXPO_PUBLIC_USE_MOCK, true),
 
-  /** Base URL including the version prefix, e.g. https://api.gwgc.cloud/api/v1 */
+  /** Base URL, no version prefix — e.g. https://api.gwgc.cloud */
   apiBaseUrl: (
-    process.env.EXPO_PUBLIC_API_BASE_URL ?? 'https://api.gwgc.cloud/api/v1'
+    process.env.EXPO_PUBLIC_API_BASE_URL ?? 'https://api.gwgc.cloud'
   ).replace(/\/+$/, ''),
 
   timeoutMs: envInt(process.env.EXPO_PUBLIC_API_TIMEOUT_MS, 20_000),

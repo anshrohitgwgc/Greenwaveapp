@@ -41,7 +41,7 @@ Edit `.env`:
 
 ```bash
 EXPO_PUBLIC_USE_MOCK=0
-EXPO_PUBLIC_API_BASE_URL=https://api.gwgc.cloud/api/v1
+EXPO_PUBLIC_API_BASE_URL=https://api.gwgc.cloud
 ```
 
 Restart the dev server (env vars are read at bundle time, so a hot reload is

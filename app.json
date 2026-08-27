@@ -6,9 +6,10 @@
     "orientation": "portrait",
     "scheme": "greenwave",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
     "icon": "./assets/icon.png",
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "cloud.gwgc.greenwave",
@@ -29,8 +30,7 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.READ_MEDIA_IMAGES"
-      ],
-      "edgeToEdgeEnabled": true
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -54,7 +54,11 @@
           "resizeMode": "contain",
           "backgroundColor": "#0B3B5A"
         }
-      ]
+      ],
+      "expo-image",
+      "expo-status-bar",
+      "expo-font",
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": false
