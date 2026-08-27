@@ -1,100 +1,96 @@
 #!/usr/bin/env bash
 #
-# Push this project to github.com/anshrohitgwgc/Greenwaveapp
+# Create a new GitHub repo and push this project to it.
 #
 #   chmod +x push-to-github.sh && ./push-to-github.sh
 #
-# The commit history is already in this folder — this only wires up the
-# remote and pushes. It works whether the repo is empty or already has a
-# README, and it never force-pushes.
+# The commit is already made — this only creates the remote and pushes.
+# Change REPO below if you want a different name.
 
 set -euo pipefail
 
-REMOTE_URL="https://github.com/anshrohitgwgc/Greenwaveapp.git"
-BRANCH="main"
+OWNER="anshrohitgwgc"
+REPO="greenwave-invoicing"
+VISIBILITY="private"
 
-echo "==> Target: ${REMOTE_URL}"
+echo "==> Creating github.com/${OWNER}/${REPO} (${VISIBILITY})"
 echo
 
-# --- sanity ------------------------------------------------------------------
-if [ ! -f package.json ] || [ ! -d app ]; then
-  echo "ERROR: run this from inside the greenwave-app folder." >&2
+if [ ! -f index.html ] || [ ! -d assets ]; then
+  echo "ERROR: run this from inside the greenwave-invoicing folder." >&2
   exit 1
 fi
 
+# --- git repo -----------------------------------------------------------
 if [ ! -d .git ]; then
-  echo "==> No git repo here — creating one."
-  git init -b "${BRANCH}"
+  git init -b main
   git add -A
-  git commit -m "GreenWave staff app"
+  git commit -m "Greenwave Ops — invoice maker and stock ledger"
 fi
+git branch -M main
 
-# Make sure the branch is called main.
-git branch -M "${BRANCH}"
-
-# Commit anything still uncommitted so nothing is left behind.
 if ! git diff --quiet || ! git diff --cached --quiet; then
   echo "==> Committing local changes."
   git add -A
-  git commit -m "Local changes before push"
+  git commit -m "Local changes before first push"
 fi
 
-# --- remote ------------------------------------------------------------------
-if git remote get-url origin >/dev/null 2>&1; then
-  git remote set-url origin "${REMOTE_URL}"
-else
-  git remote add origin "${REMOTE_URL}"
-fi
-echo "==> origin -> $(git remote get-url origin)"
+# --- create the remote --------------------------------------------------
+if command -v gh >/dev/null 2>&1; then
+  gh auth status >/dev/null 2>&1 || gh auth login
 
-# --- reconcile with whatever is already on GitHub ----------------------------
-# A repo created with "Add a README" already has a commit, so a plain push
-# would be rejected. Replay our history on top of it instead of force-pushing
-# over something the user might want.
-echo
-echo "==> Checking what's already on the remote..."
-if git fetch origin "${BRANCH}" 2>/dev/null; then
-  if [ -n "$(git rev-list --count "origin/${BRANCH}" 2>/dev/null || echo '')" ]; then
-    echo "==> Remote already has commits — replaying local history on top."
-    if ! git pull --rebase --allow-unrelated-histories origin "${BRANCH}"; then
-      cat <<'EOF'
-
-The rebase hit a conflict (usually a README that exists in both places).
-Fix it, then:
-
-    git status                 # see the conflicting files
-    # edit them, then:
-    git add <file>
-    git rebase --continue
-    git push -u origin main
-
-Or, if the remote is empty apart from an auto-generated README and you
-are happy to discard it:
-
-    git rebase --abort
-    git push -u origin main --force-with-lease
-
-EOF
-      exit 1
+  if gh repo view "${OWNER}/${REPO}" >/dev/null 2>&1; then
+    echo "==> Repo already exists — reusing it."
+    git remote remove origin 2>/dev/null || true
+    git remote add origin "https://github.com/${OWNER}/${REPO}.git"
+    git fetch origin main 2>/dev/null || true
+    if git rev-parse --verify origin/main >/dev/null 2>&1; then
+      echo "==> Remote has commits — replaying local history on top."
+      git pull --rebase --allow-unrelated-histories origin main || {
+        echo
+        echo "Rebase hit a conflict (usually a README in both places)."
+        echo "Fix the files, then:  git add <file> && git rebase --continue && git push -u origin main"
+        exit 1
+      }
     fi
+  else
+    gh repo create "${OWNER}/${REPO}" \
+      --"${VISIBILITY}" \
+      --source=. \
+      --remote=origin \
+      --description "Greenwave Ops — invoice maker and stock ledger for Greenwave Recycling and Healthcare"
   fi
 else
-  echo "==> Remote branch doesn't exist yet — this will create it."
+  cat <<EOF
+==> The GitHub CLI (gh) isn't installed.
+
+On Linux Mint:
+    sudo apt install gh
+    gh auth login
+
+Or create the repo by hand at https://github.com/new
+  name:       ${REPO}
+  visibility: ${VISIBILITY}
+  do NOT tick "Add a README" — this project already has one
+
+then run:
+    git remote add origin https://github.com/${OWNER}/${REPO}.git
+    git push -u origin main
+
+EOF
+  exit 1
 fi
 
-# --- push --------------------------------------------------------------------
+# --- push ---------------------------------------------------------------
 echo
-echo "==> Pushing ${BRANCH}..."
-git push -u origin "${BRANCH}"
+echo "==> Pushing main..."
+git push -u origin main
 
-cat <<'EOF'
+cat <<EOF
 
 ============================================================
- Pushed: https://github.com/anshrohitgwgc/Greenwaveapp
+ Pushed: https://github.com/${OWNER}/${REPO}
 
- Next:
-   ./setup.sh        install dependencies
-   npm run typecheck verify it compiles
-   npm run web       open it in a browser
+ To run the app: open index.html in a browser.
 ============================================================
 EOF

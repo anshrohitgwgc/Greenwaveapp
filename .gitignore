@@ -1,28 +1,3 @@
-node_modules/
-.expo/
-dist/
-web-build/
-*.log
-npm-debug.*
-yarn-debug.*
-yarn-error.*
-
-# Local env — never commit
-.env
-.env.local
-
-# Native build output (managed workflow regenerates these)
-/ios
-/android
-*.jks
-*.p8
-*.p12
-*.key
-*.mobileprovision
-*.orig.*
-
-# macOS
 .DS_Store
-
-# EAS
-.easignore
+*.log
+node_modules/
