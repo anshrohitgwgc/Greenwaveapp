@@ -1,0 +1,19 @@
+{
+  "monitors": [
+    { "name": "Load Balancer 1 (Ingress)", "type": "http", "url": "http://192.168.1.11", "interval": 30 },
+    { "name": "API Node 1 (NestJS)", "type": "http", "url": "http://192.168.1.12:3000/health", "interval": 15 },
+    { "name": "Worker Node (BullMQ)", "type": "ping", "hostname": "192.168.1.13", "interval": 30 },
+    { "name": "Redis 7 Broker", "type": "port", "hostname": "192.168.1.14", "port": 6379, "interval": 15 },
+    { "name": "Management API", "type": "http", "url": "http://192.168.1.15:3010/health", "interval": 15 },
+    { "name": "API Node 2 (NestJS)", "type": "http", "url": "http://192.168.1.21:3000/health", "interval": 15 },
+    { "name": "PostgreSQL 16 High-Performance DB", "type": "port", "hostname": "192.168.1.22", "port": 5432, "interval": 10 },
+    { "name": "MinIO S3 Photo Storage", "type": "http", "url": "http://192.168.1.23:9000/minio/health/live", "interval": 20 },
+    { "name": "Load Balancer 2 (Aux)", "type": "http", "url": "http://192.168.1.24", "interval": 30 },
+    { "name": "API Node 3 (Fallback)", "type": "http", "url": "http://192.168.1.31:3000/health", "interval": 20 },
+    { "name": "Rack Server 1 Proxmox", "type": "port", "hostname": "192.168.1.84", "port": 8006, "interval": 30 },
+    { "name": "Rack Server 2 Proxmox", "type": "port", "hostname": "192.168.1.176", "port": 8006, "interval": 30 },
+    { "name": "Server 3 Proxmox", "type": "port", "hostname": "192.168.1.177", "port": 8006, "interval": 30 },
+    { "name": "Rack 1 iLO 4 BMC", "type": "port", "hostname": "192.168.1.79", "port": 443, "interval": 30 },
+    { "name": "Rack 2 iLO 4 BMC", "type": "port", "hostname": "192.168.1.200", "port": 443, "interval": 30 }
+  ]
+}

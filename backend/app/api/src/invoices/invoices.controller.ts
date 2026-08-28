@@ -1,0 +1,62 @@
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { Roles } from '../common/decorators/roles.decorator';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { CreateInvoiceDto } from './dto/create-invoice.dto';
+import { UpdateInvoiceDto } from './dto/update-invoice.dto';
+import { InvoicesService } from './invoices.service';
+
+@Controller('invoices')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('admin', 'manager')
+export class InvoicesController {
+  constructor(private readonly invoicesService: InvoicesService) {}
+
+  @Post()
+  create(
+    @Body() dto: CreateInvoiceDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.invoicesService.create(dto, actor);
+  }
+
+  @Post(':id/duplicate')
+  duplicate(@Param('id') id: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.invoicesService.duplicate(id, actor);
+  }
+
+  @Get()
+  findAll(
+    @Query('customerId') customerId?: string,
+    @Query('warehouseId') warehouseId?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.invoicesService.findAll({ customerId, warehouseId, status });
+  }
+
+  @Get(':id')
+  findOne(@Param('id') id: string) {
+    return this.invoicesService.findOne(id);
+  }
+
+  @Patch(':id')
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateInvoiceDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.invoicesService.update(id, dto, actor);
+  }
+}

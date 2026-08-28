@@ -1,0 +1,122 @@
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  OneToMany,
+  PrimaryColumn,
+  UpdateDateColumn,
+} from 'typeorm';
+
+import { InvoiceItem } from './invoice-item.entity';
+
+@Entity({ name: 'invoices' })
+export class Invoice {
+  @PrimaryColumn('uuid')
+  id: string;
+
+  @Column({ name: 'invoice_number', type: 'varchar', length: 32, unique: true })
+  invoiceNumber: string;
+
+  @Column({ name: 'invoice_date', type: 'date' })
+  invoiceDate: string;
+
+  @Column({ name: 'due_date', type: 'date', nullable: true })
+  dueDate: string | null;
+
+  @Column({ name: 'customer_id', type: 'uuid', nullable: true })
+  customerId: string | null;
+
+  @Column({ name: 'company_info', type: 'simple-json', nullable: true })
+  companyInfo: Record<string, unknown> | null;
+
+  @Column({ name: 'bill_to', type: 'text', nullable: true })
+  billTo: string | null;
+
+  @Column({ name: 'ship_to', type: 'text', nullable: true })
+  shipTo: string | null;
+
+  @Column({
+    name: 'po_reference',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
+  poReference: string | null;
+
+  @Column({
+    name: 'payment_terms',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
+  paymentTerms: string | null;
+
+  @Column({ type: 'numeric', precision: 12, scale: 2, default: 0 })
+  subtotal: string;
+
+  @Column({
+    name: 'discount_total',
+    type: 'numeric',
+    precision: 12,
+    scale: 2,
+    default: 0,
+  })
+  discountTotal: string;
+
+  @Column({ name: 'tax_label', type: 'varchar', length: 32, nullable: true })
+  taxLabel: string | null;
+
+  @Column({
+    name: 'tax_rate',
+    type: 'numeric',
+    precision: 6,
+    scale: 3,
+    default: 0,
+  })
+  taxRate: string;
+
+  @Column({
+    name: 'tax_total',
+    type: 'numeric',
+    precision: 12,
+    scale: 2,
+    default: 0,
+  })
+  taxTotal: string;
+
+  @Column({ type: 'numeric', precision: 12, scale: 2, default: 0 })
+  total: string;
+
+  @Column({ type: 'text', nullable: true })
+  notes: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  terms: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  footer: string | null;
+
+  @Column({ name: 'payment_instructions', type: 'text', nullable: true })
+  paymentInstructions: string | null;
+
+  @Column({ type: 'varchar', length: 16, default: 'draft' })
+  status: string;
+
+  @Column({ name: 'warehouse_id', type: 'uuid', nullable: true })
+  warehouseId: string | null;
+
+  @Column({ name: 'created_by', type: 'int' })
+  createdBy: number;
+
+  @Column({ name: 'updated_by', type: 'int', nullable: true })
+  updatedBy: number | null;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt: Date;
+
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
+  updatedAt: Date;
+
+  @OneToMany(() => InvoiceItem, (item) => item.invoice, { cascade: true })
+  items: InvoiceItem[];
+}
