@@ -1,5 +1,5 @@
 /* Offline cache for Greenwave Ops */
-var CACHE = 'greenwave-v5';
+var CACHE = 'greenwave-v6';
 var FILES = [
   '/',
   '/index.html',

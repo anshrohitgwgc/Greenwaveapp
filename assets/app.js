@@ -114,6 +114,132 @@
   function isRecycling() { return entity === 'recycling'; }
   function can(v) { return me && ROLES[me.role] && ROLES[me.role].sees.indexOf(v) >= 0; }
 
+  /* ==========================================================================
+     Server sync.
+
+     Populates the same db.* arrays Store always used, in the same shapes
+     the render*() functions above already expect — so none of them needed
+     to change. Each loader is a read-through: fetch from the API, map into
+     the local shape, write into db, S.save() as an offline cache, and let
+     the caller re-render. Mutations (postTicket, saveInvoice, etc.) POST to
+     the API first and only update db.* from what the server persisted.
+     ========================================================================== */
+  function mapTxnFromApi(t) {
+    return {
+      id: t.id, entity: t.entity, warehouseId: t.warehouseId, productId: t.materialId,
+      direction: t.type === 'outbound' ? 'out' : t.type === 'inbound' ? 'in' : 'adjust',
+      date: t.date, ref: t.ref || '', staffId: t.postedBy, staffName: '',
+      postedAt: t.postedAt, qty: Number(t.qty), qtyBySize: t.qtyBySize || null,
+      gross: t.gross != null ? Number(t.gross) : undefined, tare: t.tare != null ? Number(t.tare) : undefined
+    };
+  }
+  function mapInvoiceFromApi(inv) {
+    var w = db.warehouses.filter(function (x) { return x.id === inv.warehouseId; })[0];
+    return {
+      id: inv.id, number: inv.number, billTo: inv.billTo, shipTo: inv.shipTo || '',
+      warehouseId: inv.warehouseId, fromName: w ? w.name : '', province: w ? w.province : 'BC',
+      shipVia: inv.shipVia || '', shipDate: inv.shipDate, date: inv.date, termsDays: inv.termsDays,
+      taxLabel: inv.taxLabel, taxRate: Number(inv.taxRate), payNote: inv.payNote,
+      co: inv.company, createdBy: inv.createdBy,
+      lines: (inv.lines || []).slice().sort(function (a, b) { return a.lineIndex - b.lineIndex; }).map(function (l) {
+        return { date: l.date, service: l.service, unit: l.unit, description: l.description,
+          qty: Number(l.qty), rateCents: Number(l.rateCents), rebate: l.rebate };
+      })
+    };
+  }
+  function mapShiftFromApi(s) {
+    return { id: s.id, staffId: s.staffId, startAt: s.startAt, endAt: s.endAt, note: s.note || '' };
+  }
+  function mapAuditFromApi(a) {
+    var line = a.action;
+    if (a.entityType && a.entityId != null) line += ' · ' + a.entityType + ' ' + a.entityId;
+    return { id: a.id, at: a.createdAt, staffId: a.actorId, staffName: a.actorName, action: a.action, detail: line };
+  }
+
+  var Sync = {
+    warehouses: function () {
+      return Api.listWarehouses().then(function (list) {
+        db.warehouses = list.map(function (w) { return { id: w.id, name: w.name, province: w.province }; });
+        S.save();
+        // The pre-sync default warehouseId (from the seeded local cache, or
+        // a stale one from a previous server) won't match a real id — snap
+        // to the first real warehouse so downstream ?warehouseId= queries
+        // aren't sent as garbage.
+        if (!db.warehouses.some(function (w) { return w.id === warehouseId; })) {
+          warehouseId = db.warehouses[0] ? db.warehouses[0].id : undefined;
+          syncChrome();
+        }
+      });
+    },
+    customers: function () {
+      return Api.listCustomers().then(function (list) { db.customers = list; S.save(); });
+    },
+    materials: function () {
+      return Api.listMaterials(entity).then(function (list) {
+        db.products = list.map(function (m) {
+          return { id: m.id, entity: m.entity, name: m.name, category: m.category,
+            unit: m.unit, capture: m.capture, sizes: m.sizes || [] };
+        });
+        S.save();
+      });
+    },
+    inventory: function () {
+      return Api.listInventoryTransactions({ warehouseId: warehouseId }).then(function (list) {
+        var others = db.tickets.filter(function (t) { return t.warehouseId !== warehouseId; });
+        db.tickets = others.concat(list.map(mapTxnFromApi));
+        S.save();
+      });
+    },
+    invoices: function () {
+      return Api.listInvoices().then(function (list) { db.invoices = list.map(mapInvoiceFromApi); S.save(); });
+    },
+    shifts: function () {
+      return Api.shiftHistory().then(function (list) {
+        var others = db.shifts.filter(function (s) { return s.staffId !== me.id; });
+        db.shifts = others.concat(list.map(mapShiftFromApi));
+        S.save();
+      });
+    },
+    audit: function () {
+      return Api.listAudit().then(function (list) { db.activity = list.map(mapAuditFromApi); S.save(); });
+    },
+    staff: function () {
+      if (me.role !== 'admin' && me.role !== 'manager') return Promise.resolve();
+      return Api.listUsers().then(function (list) {
+        db.staff = list.map(function (u) {
+          return { id: u.id, email: u.email, name: u.fullName, role: u.role, active: true, createdAt: u.createdAt };
+        });
+        S.save();
+      });
+    }
+  };
+
+  // Fetch fresh data for the view being entered, then re-render with it.
+  // The render call already happened with cached data before this resolves
+  // — this just refreshes it once the server responds.
+  function syncView(v) {
+    var jobs;
+    // warehouseId may still be a stale/seeded id on this pass; resolve
+    // warehouses() first so anything querying by warehouseId uses the
+    // corrected value, not the one captured before this sync started.
+    if (v === 'inventory' || v === 'intake') {
+      jobs = [Sync.warehouses().then(function () { return Sync.inventory(); }), Sync.materials()];
+    }
+    else if (v === 'invoices' || v === 'editor') jobs = [Sync.warehouses(), Sync.customers(), Sync.invoices()];
+    else if (v === 'customers') jobs = [Sync.customers()];
+    else if (v === 'products') jobs = [Sync.materials()];
+    else if (v === 'timeclock') jobs = [Sync.shifts(), Sync.staff()];
+    else if (v === 'staff') jobs = [Sync.staff()];
+    else if (v === 'history') jobs = [Sync.audit(), Sync.staff()];
+    else jobs = [];
+
+    return Promise.all(jobs).then(function () {
+      if (view === v) render();
+    }).catch(function (err) {
+      if (err && err.status === 0) toast('Could not reach the GreenWave server — showing cached data.');
+    });
+  }
+
   function releaseUrls() {
     objectUrls.forEach(function (u) { URL.revokeObjectURL(u); });
     objectUrls = [];
@@ -334,6 +460,7 @@
     $('#scroll').scrollTop = 0;
     renderTabbar();
     render();
+    syncView(view);
   }
 
   // ============================================================ INVENTORY
@@ -476,11 +603,11 @@
 
   function postTicket() {
     var p = currentProduct(); if (!p) return;
+    var direction = $('#tkDir').value;
     var t = {
-      id: S.uid('tk'), entity: entity, warehouseId: warehouseId, productId: p.id,
-      direction: $('#tkDir').value, date: $('#tkDate').value || today(),
-      ref: $('#tkRef').value.trim(), staffId: me.id, staffName: me.name,
-      postedAt: new Date().toISOString()
+      warehouseId: warehouseId, materialId: p.id, entity: entity,
+      type: direction === 'out' ? 'outbound' : 'inbound',
+      date: $('#tkDate').value || today(), ref: $('#tkRef').value.trim()
     };
 
     if (p.sizes && p.sizes.length) {
@@ -500,10 +627,17 @@
       t.qty = q;
     }
 
-    db.tickets.push(t); S.save();
-    S.log('ticket', (t.direction === 'out' ? 'Shipped ' : 'Received ') + num(t.qty) + ' ' + p.unit + ' ' + p.name + (t.ref ? ' · ' + t.ref : ''));
-    toast('Ticket posted.');
-    renderIntake();
+    var btn = $('#tkPost'); btn.disabled = true;
+    Api.createInventoryTransaction(t).then(function () {
+      toast((direction === 'out' ? 'Shipped ' : 'Received ') + num(t.qty) + ' ' + p.unit + ' ' + p.name + '.');
+      return Sync.inventory();
+    }).then(function () {
+      btn.disabled = false;
+      renderIntake();
+    }).catch(function (err) {
+      btn.disabled = false;
+      toast(err.message || 'Could not post that ticket.');
+    });
   }
 
   function renderRecent() {
@@ -531,9 +665,12 @@
       ? 'Every photo anyone has taken, newest first.'
       : 'Photos you have taken. Administrators can see all of them.';
 
-    Photos.all().then(function (all) {
-      photoCache = isAdmin ? all : all.filter(function (p) { return p.staffId === me.id; });
-      var used = photoCache.reduce(function (a, p) { return a + (p.size || 0); }, 0);
+    // RBAC (staff sees only their own) is enforced server-side in
+    // PhotosService.findAll — this list is already scoped by the time it
+    // gets here, not filtered client-side.
+    Api.listPhotos({ warehouseId: warehouseId }).then(function (all) {
+      photoCache = all;
+      var used = photoCache.reduce(function (a, p) { return a + (Number(p.sizeBytes) || 0); }, 0);
 
       if (!photoCache.length) {
         $('#photoBody').innerHTML = emptyState('cam', 'No photos yet',
@@ -542,63 +679,66 @@
         return;
       }
 
-      releaseUrls();
       $('#photoBody').innerHTML = '<div class="card">' +
-        '<div class="photobar"><span><b style="color:var(--ink)">' + photoCache.length + '</b> photos · ' + bytes(used) + '</span>' +
-        '<span class="grow"></span><span id="quota"></span></div>' +
+        '<div class="photobar"><span><b style="color:var(--ink)">' + photoCache.length + '</b> photos · ' + bytes(used) + '</span></div>' +
         '<div class="photogrid">' + photoCache.map(function (p, i) {
-          var url = URL.createObjectURL(p.blob); objectUrls.push(url);
-          return '<button type="button" class="photo" data-photo="' + i + '">' +
-            '<img src="' + url + '" alt="' + esc(p.note || p.name) + '" loading="lazy">' +
-            '<span class="cap"><b>' + esc(p.staffName || 'Unknown') + '</b>' + esc(when(p.at)) + '</span></button>';
+          return '<button type="button" class="photo" data-photo="' + i + '" data-loading="true">' +
+            '<img alt="' + esc(p.caption || p.originalFilename) + '" loading="lazy">' +
+            '<span class="cap"><b>#' + esc(p.uploadedBy) + '</b>' + esc(when(p.createdAt)) + '</span></button>';
         }).join('') + '</div></div>';
 
-      Photos.usage().then(function (u) {
-        if (u && u.quota) {
-          $('#quota').textContent = bytes(u.used) + ' of about ' + bytes(u.quota) + ' used on this device';
-        }
-      });
-
+      // Thumbnails load their presigned URL lazily, one request per visible
+      // photo — the same authorization path as the lightbox, just fired
+      // eagerly for the grid.
       $$('[data-photo]').forEach(function (b) {
+        var p = photoCache[Number(b.dataset.photo)];
+        Api.getPhotoUrl(p.id).then(function (r) {
+          var img = b.querySelector('img'); if (img) img.src = r.url;
+        }).catch(function () { /* thumbnail best-effort; lightbox will retry */ });
         b.addEventListener('click', function () { openLightbox(Number(b.dataset.photo)); });
       });
+    }).catch(function (err) {
+      toast(err.message || 'Could not load photos.');
     });
   }
 
   function openLightbox(i) {
     var p = photoCache[i]; if (!p) return;
-    var url = URL.createObjectURL(p.blob); objectUrls.push(url);
-    $('#lbImg').src = url;
-    $('#lbMeta').innerHTML = esc(p.staffName || 'Unknown') + ' · ' + esc(when(p.at)) +
-      ' · ' + p.width + '×' + p.height + ' · ' + bytes(p.size) +
-      (p.note ? '<br>' + esc(p.note) : '') +
+    $('#lbImg').removeAttribute('src');
+    $('#lbMeta').innerHTML = '#' + esc(p.uploadedBy) + ' · ' + esc(when(p.createdAt)) +
+      ' · ' + bytes(Number(p.sizeBytes) || 0) +
+      (p.caption ? '<br>' + esc(p.caption) : '') +
       (me.role === 'admin' ? '<br><button type="button" class="btn danger" id="lbDel" style="margin-top:12px">Delete this photo</button>' : '');
     $('#lightbox').hidden = false;
+
+    Api.getPhotoUrl(p.id).then(function (r) { $('#lbImg').src = r.url; })
+      .catch(function (err) { toast(err.message || 'Could not open that photo.'); });
 
     var del = $('#lbDel');
     if (del) del.addEventListener('click', function () {
       if (!confirm('Delete this photo permanently?')) return;
-      Photos.remove(p.id).then(function () {
-        S.log('photo-delete', 'Deleted a photo taken by ' + (p.staffName || 'unknown'));
+      Api.deletePhoto(p.id).then(function () {
         $('#lightbox').hidden = true;
-        renderPhotos();
         toast('Photo deleted.');
-      });
+        renderPhotos();
+      }).catch(function (err) { toast(err.message || 'Could not delete that photo.'); });
     });
   }
 
   function addPhotos(files) {
     if (!files || !files.length) return;
     var w = warehouse();
-    var jobs = Array.prototype.slice.call(files).map(function (f) {
-      return Photos.add(f, {
-        staffId: me.id, staffName: me.name, entity: entity,
-        warehouseId: warehouseId, note: w ? w.name : ''
+    var list = Array.prototype.slice.call(files);
+    toast(list.length > 1 ? 'Saving ' + list.length + ' photos…' : 'Saving photo…');
+
+    Promise.all(list.map(function (f) {
+      // Downscale + strip EXIF client-side (unchanged from before), then
+      // upload the resulting blob to the server instead of IndexedDB.
+      return Photos.shrink(f).then(function (r) {
+        var jpegFile = new File([r.blob], (f.name || 'photo').replace(/\.\w+$/, '') + '.jpg', { type: 'image/jpeg' });
+        return Api.uploadPhoto(jpegFile, { warehouseId: warehouseId, entity: entity, caption: w ? w.name : '' });
       });
-    });
-    toast(files.length > 1 ? 'Saving ' + files.length + ' photos…' : 'Saving photo…');
-    Promise.all(jobs).then(function (recs) {
-      S.log('photo', 'Added ' + recs.length + ' photo' + (recs.length === 1 ? '' : 's'));
+    })).then(function (recs) {
       toast(recs.length + ' photo' + (recs.length === 1 ? '' : 's') + ' saved.');
       renderPhotos();
     }).catch(function (e) {
@@ -686,19 +826,23 @@
 
   function toggleClock() {
     var open = openShift();
-    if (open) {
-      open.endAt = new Date().toISOString();
-      S.save();
-      S.log('clock-out', 'Clocked out after ' + hm(new Date(open.endAt) - new Date(open.startAt)));
-      toast('Clocked out.');
-    } else {
-      db.shifts.push({ id: S.uid('sh'), staffId: me.id, startAt: new Date().toISOString(), endAt: null, note: '' });
-      S.save();
-      S.log('clock-in', 'Clocked in');
-      toast('Clocked in.');
-    }
-    renderTimeclock();
-    renderShiftChip();
+    var btn = $('#clockBtn'); if (btn) btn.disabled = true;
+    var req = open ? Api.clockOut() : Api.clockIn(warehouseId);
+    req.then(function () {
+      toast(open ? 'Clocked out.' : 'Clocked in.');
+      return Sync.shifts();
+    }).then(function () {
+      if (btn) btn.disabled = false;
+      renderTimeclock();
+      renderShiftChip();
+    }).catch(function (err) {
+      if (btn) btn.disabled = false;
+      // 409 here means another tab/device already clocked in/out first —
+      // the DB partial-unique-index is what actually enforces "one active
+      // shift"; this just surfaces that outcome instead of masking it.
+      toast(err.message || 'Could not update your shift.');
+      Sync.shifts().then(renderTimeclock);
+    });
   }
 
   // ============================================================ INVOICES
@@ -920,19 +1064,27 @@
       toast('Add at least one line.'); return;
     }
     var fresh = !draft.id;
-    if (fresh) {
-      draft.id = S.uid('inv');
-      if (!draft.number) draft.number = String(S.nextInvoiceNumber());
-      draft.createdBy = me.name;
-      db.invoices.push(draft);
-    } else {
+    var body = {
+      warehouseId: draft.warehouseId || undefined, billTo: draft.billTo, shipTo: draft.shipTo,
+      shipVia: draft.shipVia, shipDate: draft.shipDate, date: draft.date, termsDays: draft.termsDays,
+      taxLabel: draft.taxLabel, taxRate: draft.taxRate, payNote: draft.payNote, company: draft.co,
+      lines: draft.lines
+    };
+
+    var btn = $('#edSave'); btn.disabled = true;
+    var req = fresh ? Api.createInvoice(body) : Api.updateInvoice(draft.id, body);
+    req.then(function (saved) {
+      draft = mapInvoiceFromApi(saved);
       var i = db.invoices.findIndex(function (x) { return x.id === draft.id; });
-      if (i >= 0) db.invoices[i] = draft;
-    }
-    S.save();
-    S.log('invoice', (fresh ? 'Created' : 'Updated') + ' invoice ' + draft.number + ' — ' + money(totals(draft).total));
-    toast('Invoice ' + draft.number + ' saved.');
-    renderEditor();
+      if (i >= 0) db.invoices[i] = draft; else db.invoices.unshift(draft);
+      S.save();
+      btn.disabled = false;
+      toast('Invoice ' + draft.number + ' saved.');
+      renderEditor();
+    }).catch(function (err) {
+      btn.disabled = false;
+      toast(err.message || 'Could not save that invoice.');
+    });
   }
 
   // ============================================================ LISTS
@@ -949,15 +1101,8 @@
         return '<tr><td><strong>' + esc(c.name) + '</strong></td><td style="color:var(--ink-2)">' +
           esc([c.line1, c.line2].filter(Boolean).join(', ') || '—') + '</td><td style="color:var(--ink-2)">' +
           esc(c.email || '—') + '</td><td class="mono" style="font-size:13px">' + esc(c.phone || '—') + '</td>' +
-          '<td><button type="button" class="iconbtn" data-delcust="' + esc(c.id) + '" aria-label="Remove"><svg><use href="#i-trash"></use></svg></button></td></tr>';
+          '<td></td></tr>';
       }).join('') + '</tbody></table></div></div>';
-
-    $$('[data-delcust]').forEach(function (b) {
-      b.addEventListener('click', function () {
-        db.customers = db.customers.filter(function (c) { return c.id !== b.dataset.delcust; });
-        S.save(); S.log('customer', 'Removed a customer'); render(); toast('Customer removed.');
-      });
-    });
   }
 
   function customerModal() {
@@ -966,8 +1111,10 @@
       field('line2', 'Address line 2') + field('email', 'Email', { type: 'email' }) + field('phone', 'Phone'),
       function (d) {
         if (!d.name) return;
-        db.customers.push({ id: S.uid('cus'), name: d.name, line1: d.line1, line2: d.line2, email: d.email, phone: d.phone });
-        S.save(); S.log('customer', 'Added ' + d.name); closeModal(); render(); toast('Customer added.');
+        Api.createCustomer({ name: d.name, line1: d.line1, line2: d.line2, email: d.email, phone: d.phone })
+          .then(function () { closeModal(); toast('Customer added.'); return Sync.customers(); })
+          .then(render)
+          .catch(function (err) { toast(err.message || 'Could not add that customer.'); });
       });
   }
 
@@ -992,16 +1139,8 @@
           '<td>' + esc(p.unit) + '</td><td><span class="pill flat">' + (p.capture === 'weighed' ? 'Scale' : 'Count') + '</span></td>' +
           '<td style="color:var(--ink-2)">' + esc((p.sizes || []).join(' · ') || '—') + '</td>' +
           '<td class="num">' + (p.rateCents ? money(p.rateCents) : '—') + '</td>' +
-          '<td><button type="button" class="iconbtn" data-delprod="' + esc(p.id) + '" aria-label="Remove"><svg><use href="#i-trash"></use></svg></button></td></tr>';
+          '<td></td></tr>';
       }).join('') + '</tbody></table></div></div>';
-
-    $$('[data-delprod]').forEach(function (b) {
-      b.addEventListener('click', function () {
-        if (db.tickets.some(function (t) { return t.productId === b.dataset.delprod; })) { toast('That has tickets against it.'); return; }
-        db.products = db.products.filter(function (p) { return p.id !== b.dataset.delprod; });
-        S.save(); S.log('product', 'Removed an item'); render(); toast('Removed.');
-      });
-    });
   }
 
   function productModal() {
@@ -1016,11 +1155,13 @@
       field('rate', 'Default rate', { placeholder: '140.00', help: 'Per unit.' }),
       function (d) {
         if (!d.name) return;
-        db.products.push({ id: S.uid('prd'), entity: entity, name: d.name, category: d.category,
-          unit: d.unit || (rec ? 'kg' : 'cases'), capture: d.capture,
-          sizes: d.sizes ? d.sizes.split(',').map(function (s) { return s.trim(); }).filter(Boolean) : [],
-          rateCents: parseMoney(d.rate) });
-        S.save(); S.log('product', 'Added ' + d.name); closeModal(); render(); toast('Added.');
+        Api.createMaterial({
+          entity: entity, name: d.name, category: d.category, unit: d.unit || (rec ? 'kg' : 'cases'),
+          capture: d.capture === 'weighed' ? 'weighed' : 'simple',
+          sizes: d.sizes ? d.sizes.split(',').map(function (s) { return s.trim(); }).filter(Boolean) : []
+        }).then(function () { closeModal(); toast('Added.'); return Sync.materials(); })
+          .then(render)
+          .catch(function (err) { toast(err.message || 'Could not add that.'); });
       });
   }
 
@@ -1033,40 +1174,32 @@
         return '<tr><td><strong>' + esc(u.name) + '</strong>' + (isMe ? ' <span class="pill flat">you</span>' : '') + '</td>' +
           '<td class="mono" style="font-size:13px">' + esc(u.email) + '</td>' +
           '<td>' + esc((ROLES[u.role] || {}).label || u.role) + '</td>' +
-          '<td>' + (u.active ? '<span class="pill good">Active</span>' : '<span class="pill crit">Deactivated</span>') + '</td>' +
-          '<td>' + (isMe ? '' : '<button type="button" class="btn ghost sm" data-togglestaff="' + esc(u.id) + '">' +
-            (u.active ? 'Deactivate' : 'Reactivate') + '</button>') + '</td></tr>';
+          '<td><span class="pill good">Active</span></td>' +
+          '<td>' + (isMe ? '' : '<span style="color:var(--muted);font-size:12.5px">—</span>') + '</td></tr>';
       }).join('') + '</tbody></table></div>' +
       '<div class="pad" style="padding-top:0"><div class="note" style="margin-top:14px"><svg><use href="#i-alert"></use></svg><div>' +
-      '<b>This list is local and does not control sign-in.</b> Real accounts, passwords and roles now live on the server — ' +
-      'an administrator creates them there (via the API, until a server-backed Staff screen replaces this one). ' +
-      'This table is kept for reference only and is not synced yet.</div></div></div></div>';
-
-    $$('[data-togglestaff]').forEach(function (b) {
-      b.addEventListener('click', function () {
-        var u = db.staff.filter(function (x) { return x.id === b.dataset.togglestaff; })[0];
-        if (!u) return;
-        u.active = !u.active; S.save();
-        S.log('staff', (u.active ? 'Reactivated ' : 'Deactivated ') + u.name);
-        render(); toast(u.active ? 'Reactivated.' : 'Deactivated.');
-      });
-    });
+      '<b>Real accounts.</b> This list comes from the server (<code>GET /users</code>) and adding someone here creates a real ' +
+      'sign-in account — a password they can log in with today. There is no deactivate/reactivate endpoint yet, so that control ' +
+      'isn’t shown.</div></div></div></div>';
   }
 
   function staffModal() {
     openModal('Add staff',
       field('name', 'Full name', { required: true }) +
-      field('email', 'Work email', { type: 'email', required: true, help: 'Reference only — does not grant sign-in. Create the real account on the server (POST /users).' }) +
+      field('email', 'Work email', { type: 'email', required: true, autocomplete: 'off' }) +
+      field('password', 'Temporary password', { type: 'text', required: true, help: 'Tell them this password — they can change how they sign in once real password-reset exists.' }) +
       field('role', 'Role', { type: 'select', value: 'staff', options: [
         { value: 'staff', label: 'Staff — stock, photos, own hours' },
         { value: 'manager', label: 'Manager — everything except staff and settings' },
         { value: 'admin', label: 'Administrator — full access' }] }),
       function (d) {
-        if (!d.name || !d.email) return;
+        if (!d.name || !d.email || !d.password) return;
         var email = d.email.trim().toLowerCase();
         if (db.staff.some(function (x) { return x.email.toLowerCase() === email; })) { toast('That email is already registered.'); return; }
-        db.staff.push({ id: S.uid('stf'), email: email, name: d.name, role: d.role, active: true, createdAt: new Date().toISOString() });
-        S.save(); S.log('staff', 'Added ' + d.name + ' (' + d.role + ')'); closeModal(); render(); toast(d.name + ' can now sign in.');
+        Api.createUser({ fullName: d.name, email: email, password: d.password, role: d.role })
+          .then(function () { closeModal(); toast(d.name + ' can now sign in.'); return Sync.staff(); })
+          .then(render)
+          .catch(function (err) { toast(err.message || 'Could not add that account.'); });
       });
   }
 

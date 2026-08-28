@@ -100,7 +100,9 @@
 
     listWarehouses: function () { return request('GET', '/warehouses'); },
     listCustomers: function () { return request('GET', '/customers'); },
-    listMaterials: function () { return request('GET', '/materials'); },
+    createCustomer: function (data) { return request('POST', '/customers', data); },
+    listMaterials: function (entity) { return request('GET', '/materials' + qs({ entity: entity })); },
+    createMaterial: function (data) { return request('POST', '/materials', data); },
 
     listInventoryTransactions: function (params) {
       return request('GET', '/inventory/transactions' + qs(params));
@@ -123,6 +125,40 @@
     shiftHistory: function () { return request('GET', '/timesheets/me/history'); },
 
     listPhotos: function (params) { return request('GET', '/photos' + qs(params)); },
+
+    // Multipart upload — the JSON-only `request()` helper above can't carry
+    // a File, so this builds its own fetch() call.
+    uploadPhoto: function (file, meta) {
+      var form = new FormData();
+      form.append('file', file, file.name);
+      if (meta && meta.warehouseId != null) form.append('warehouseId', String(meta.warehouseId));
+      if (meta && meta.entity) form.append('entity', meta.entity);
+      if (meta && meta.caption) form.append('caption', meta.caption);
+
+      var headers = {};
+      var token = getToken();
+      if (token) headers.Authorization = 'Bearer ' + token;
+
+      return global.fetch(baseUrl() + '/photos', { method: 'POST', headers: headers, body: form })
+        .then(function (res) {
+          return res.text().then(function (text) {
+            var data = null;
+            try { data = text ? JSON.parse(text) : null; } catch (e) { /* non-JSON */ }
+            if (!res.ok) {
+              var err = new Error((data && data.message) || ('Upload failed (' + res.status + ')'));
+              err.status = res.status; err.body = data;
+              throw err;
+            }
+            return data;
+          });
+        }, function () {
+          var err = new Error('Could not reach the GreenWave server.');
+          err.status = 0;
+          throw err;
+        });
+    },
+    getPhotoUrl: function (id) { return request('GET', '/photos/' + id + '/url'); },
+    deletePhoto: function (id) { return request('DELETE', '/photos/' + id); },
 
     listAudit: function (params) { return request('GET', '/audit' + qs(params)); }
   };

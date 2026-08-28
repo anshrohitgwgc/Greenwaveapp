@@ -53,12 +53,17 @@ hides buttons a role can't use — it isn't what stops them):
 | **Manager** | ✅ | ✅ | |
 | **Administrator** | ✅ | ✅ | ✅ |
 
-**Status note:** this pass wires sign-in/sign-out fully to the server. The
-rest of this app's data (invoices, inventory, customers, photos, staff list)
-still reads/writes the local browser storage described below — the backend
-already has real endpoints for all of it (`assets/api.js`), that wiring is
-the next step. The in-app **Staff** screen is local-only display for now and
-does not create real accounts.
+**Status note:** sign-in/sign-out, invoices, inventory, customers, materials,
+warehouses, photos, time clock and history are all wired to the real server
+(`assets/api.js`) as of Gate 1 staging — `localStorage`/IndexedDB now act as
+a read-through cache, refreshed from the API on each view, not the source of
+truth. The in-app **Staff** screen creates real accounts via `POST /users`;
+there is no deactivate/reactivate endpoint yet, so that control isn't shown.
+Customer and material **delete** aren't wired either — no `DELETE` endpoint
+exists for either yet, so those buttons were removed rather than left as
+fake local-only deletes that would resurrect on reload. See
+`docs/V2_IMPLEMENTATION.md` for the full list of what changed and what's
+still outstanding.
 
 ## Invoices *(Recycling only)*
 

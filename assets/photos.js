@@ -100,6 +100,10 @@
   }
 
   global.Photos = {
+    // Downscale to MAX_EDGE and re-encode as JPEG (this also strips EXIF —
+    // canvas re-encoding never carries it forward) without writing to
+    // IndexedDB. Used by the server-backed upload path in app.js.
+    shrink: shrink,
     add: function (file, meta) {
       return shrink(file).then(function (r) {
         var rec = {

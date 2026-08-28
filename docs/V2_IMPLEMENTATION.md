@@ -1,53 +1,58 @@
 # GreenWave V2 Implementation Status — Frontend
 
-Full backend status lives in `docs/V2_IMPLEMENTATION.md` in the
-`FULL-INFRA-V.0001` repo (branch `greenwave-v2`). This is the frontend-only
-summary.
+Full backend status lives in `docs/V2_STAGING_REPORT.md` in the
+`FULL-INFRA-V.0001-main` repo (branch `greenwave-v2`). This is the
+frontend-only summary.
 
-## Done this pass
+## Done — Gate 1 (this pass)
 
-- `assets/api.js` — new API client (fetch-based, root routes, JWT in
-  `sessionStorage`, no password ever stored client-side).
-- Sign-in gate (`showGate()` in `assets/app.js`) rewritten to call the real
-  `POST /auth/login` and bootstrap-only `POST /auth/register`, replacing
-  the old "trusts the typed email" check. Generic error messages on 401 (no
-  email enumeration).
-- `boot()` now also checks `Api.isAuthenticated()` — fixes a real bug the
-  session-model change would otherwise have introduced: a closed tab clears
-  the JWT (sessionStorage) but previously left `db.session` (localStorage)
-  looking valid, which would have shown the full app UI with no working
-  session behind it.
-- `Store.log()` (history/audit) now denormalizes the actor's name at write
-  time — it used to key off `db.session`, which was a per-staff-record id
-  and is now the single literal string `'server'` for every signed-in user,
-  so the old lookup would have shown "Unknown" for every history entry.
-- Staff view and invoice-add-staff help text corrected — they previously
-  implied the local staff list controls sign-in; it no longer does.
-- Service worker cache bumped (`greenwave-v5`) and `assets/api.js` added to
-  its precache list.
+- Every remaining view wired to the real API, replacing direct
+  `db.*`/`Store` reads with a `Sync` read-through layer
+  (`assets/app.js`) that fetches on view entry and maps API responses into
+  the exact local shapes the existing render functions already expected —
+  so none of the render functions themselves needed rewriting:
+  **Invoices** (create/update/duplicate, server-assigned sequential
+  numbers), **Inventory/Weigh-in** (inbound/outbound tickets,
+  warehouse-scoped balances), **Photos** (client-side resize/EXIF-strip
+  unchanged, now uploads to `/photos`/MinIO instead of IndexedDB;
+  thumbnails and lightbox load via presigned URLs), **Time clock**
+  (clock-in/out against the server, with 409 surfaced honestly on a race
+  rather than silently overwritten), **Customers**, **Materials**,
+  **Warehouses**, **Staff** (now creates real accounts via `POST /users`),
+  **History** (real audit trail via `GET /audit`).
+- `assets/api.js` gained `uploadPhoto`/`getPhotoUrl`/`deletePhoto`
+  (multipart — the JSON-only `request()` helper can't carry a `File`),
+  `createCustomer`, `createMaterial`.
+- `assets/photos.js` exposes `shrink()` (the existing downscale/EXIF-strip
+  step) so `app.js` can reuse it ahead of a server upload instead of an
+  IndexedDB write.
+- Service worker cache bumped to `greenwave-v6`.
 
-## Not done this pass (known limitation, not an oversight)
+## Known limitations (not fixed in this pass — see the backend's staging report §11 for why)
 
-Every other view — Invoices, Inventory/Weigh-in, Photos, Time clock,
-Customers, Materials, the real Staff CRUD — still reads and writes
-`localStorage`/IndexedDB (`assets/store.js`, `assets/photos.js`)
-exactly as before. The backend already implements and tests all of this
-(see the backend repo's implementation doc); `assets/api.js` already has
-client methods ready (`createInvoice`, `createInventoryTransaction`,
-`listPhotos`, `clockIn`/`clockOut`, `listAudit`, etc.). Wiring each view is
-the next increment of work, sequenced after auth deliberately — auth was
-the brief's explicitly highest-priority item and the one place the old
-model had no real security at all.
+- Materials have no server-side "default rate" column — that field is
+  dropped for server-sourced materials (shows "—").
+- Staff deactivate/reactivate and customer/material delete have no backend
+  endpoints yet — those controls were removed from the UI rather than left
+  as fake local-only actions that would resurrect on reload.
+- The inventory ticket list's "By" column shows "—" for server-sourced
+  tickets (the API returns a numeric `postedBy`, not a name, and this pass
+  didn't add a lookup for it).
 
 ## Testing
 
-- `node --check` passed on all four script files (syntax only).
-- No browser QA was performed — no display/browser was available in the
-  environment this was implemented in, and a real run needs the backend
-  actually serving requests (Postgres/Redis/MinIO), which this sandbox also
-  doesn't have. See the backend repo's `V2_DEPLOYMENT_PLAN.md` §4 for the
-  checklist to run before any real rollout.
+- `node --check` passed on all five script files (syntax only).
+- **Real browser QA performed** — Playwright + Chromium against the actual
+  staging backend (Postgres/Redis/MinIO, all real, no mocks), at all five
+  required viewports (1920×1080 / 1440×900 / 1280×720 / 390×844 / 430×932):
+  no blank screen, no console errors, no failed requests, no horizontal
+  overflow, every nav view reachable including the off-canvas mobile menu.
+  A separate interactive run drove real clicks/fills through sign-in, add
+  customer, create invoice, upload photo, clock in — all persisted and
+  visible without a reload, zero console errors. PWA fresh-install and a
+  genuine (not simulated) old-version-to-new-version upgrade were also
+  verified. Full detail in the backend repo's `docs/V2_STAGING_REPORT.md`.
 - No JS unit-test framework exists in this repo (it's intentionally a
-  no-build-step, plain-script app). Automated coverage for this pass lives
-  entirely in the backend's 54 tests, which cover the auth logic this
-  frontend now calls.
+  no-build-step, plain-script app). Automated coverage lives in the
+  backend's test suite plus the live functional/security tests described
+  in the staging report.
