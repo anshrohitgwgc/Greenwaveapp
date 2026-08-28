@@ -39,6 +39,28 @@
     } catch (e) { /* ignore */ }
   }
 
+  function handleResponse(res) {
+    return res.text().then(function (text) {
+      var data = null;
+      try { data = text ? JSON.parse(text) : null; } catch (e) { /* non-JSON response */ }
+      if (!res.ok) {
+        var err = new Error((data && data.message) || ('Request failed (' + res.status + ')'));
+        err.status = res.status;
+        err.body = data;
+        throw err;
+      }
+      return data;
+    });
+  }
+
+  function networkError() {
+    // Network failure (API unreachable, offline, DNS, etc.) — never let
+    // this bubble as an unhandled rejection that could blank the screen.
+    var err = new Error('Could not reach the GreenWave server. Check your connection and try again.');
+    err.status = 0;
+    throw err;
+  }
+
   function request(method, path, body) {
     var headers = { 'Content-Type': 'application/json' };
     var token = getToken();
@@ -48,25 +70,21 @@
       method: method,
       headers: headers,
       body: body !== undefined ? JSON.stringify(body) : undefined
-    }).then(function (res) {
-      return res.text().then(function (text) {
-        var data = null;
-        try { data = text ? JSON.parse(text) : null; } catch (e) { /* non-JSON response */ }
-        if (!res.ok) {
-          var err = new Error((data && data.message) || ('Request failed (' + res.status + ')'));
-          err.status = res.status;
-          err.body = data;
-          throw err;
-        }
-        return data;
-      });
-    }, function () {
-      // Network failure (API unreachable, offline, DNS, etc.) — never let
-      // this bubble as an unhandled rejection that could blank the screen.
-      var err = new Error('Could not reach the GreenWave server. Check your connection and try again.');
-      err.status = 0;
-      throw err;
-    });
+    }).then(handleResponse, networkError);
+  }
+
+  // Multipart upload (photos) — no Content-Type here, the browser sets the
+  // correct multipart boundary itself when the body is a FormData.
+  function upload(path, formData) {
+    var headers = {};
+    var token = getToken();
+    if (token) headers.Authorization = 'Bearer ' + token;
+
+    return global.fetch(baseUrl() + path, {
+      method: 'POST',
+      headers: headers,
+      body: formData
+    }).then(handleResponse, networkError);
   }
 
   var Api = {
@@ -97,10 +115,26 @@
     // second round of API-client design.
     listUsers: function () { return request('GET', '/users'); },
     createUser: function (data) { return request('POST', '/users', data); },
+    updateUser: function (id, data) { return request('PATCH', '/users/' + id, data); },
 
-    listWarehouses: function () { return request('GET', '/warehouses'); },
-    listCustomers: function () { return request('GET', '/customers'); },
-    listMaterials: function () { return request('GET', '/materials'); },
+    listWarehouses: function (includeInactive) {
+      return request('GET', '/warehouses' + qs({ includeInactive: includeInactive ? 'true' : undefined }));
+    },
+    createWarehouse: function (data) { return request('POST', '/warehouses', data); },
+    updateWarehouse: function (id, data) { return request('PATCH', '/warehouses/' + id, data); },
+
+    listCustomers: function (warehouseId) { return request('GET', '/customers' + qs({ warehouseId: warehouseId })); },
+    createCustomer: function (data) { return request('POST', '/customers', data); },
+    updateCustomer: function (id, data) { return request('PATCH', '/customers/' + id, data); },
+
+    listMaterials: function (includeInactive) {
+      return request('GET', '/materials' + qs({ includeInactive: includeInactive ? 'true' : undefined }));
+    },
+    createMaterial: function (data) { return request('POST', '/materials', data); },
+    updateMaterial: function (id, data) { return request('PATCH', '/materials/' + id, data); },
+
+    listContainers: function (warehouseId) { return request('GET', '/containers' + qs({ warehouseId: warehouseId })); },
+    createContainer: function (data) { return request('POST', '/containers', data); },
 
     listInventoryTransactions: function (params) {
       return request('GET', '/inventory/transactions' + qs(params));
@@ -113,6 +147,7 @@
     },
 
     listInvoices: function (params) { return request('GET', '/invoices' + qs(params)); },
+    getInvoice: function (id) { return request('GET', '/invoices/' + id); },
     createInvoice: function (data) { return request('POST', '/invoices', data); },
     updateInvoice: function (id, data) { return request('PATCH', '/invoices/' + id, data); },
     duplicateInvoice: function (id) { return request('POST', '/invoices/' + id + '/duplicate'); },
@@ -120,9 +155,20 @@
     clockIn: function (warehouseId) { return request('POST', '/timesheets/clock-in', { warehouseId: warehouseId }); },
     clockOut: function () { return request('POST', '/timesheets/clock-out'); },
     currentShift: function () { return request('GET', '/timesheets/me/current'); },
-    shiftHistory: function () { return request('GET', '/timesheets/me/history'); },
+    shiftHistory: function (from, to) { return request('GET', '/timesheets/me/history' + qs({ from: from, to: to })); },
+    teamShifts: function () { return request('GET', '/timesheets/team'); },
 
     listPhotos: function (params) { return request('GET', '/photos' + qs(params)); },
+    getPhoto: function (id) { return request('GET', '/photos/' + id); },
+    uploadPhoto: function (file, meta) {
+      var fd = new FormData();
+      fd.append('file', file, file.name || 'photo.jpg');
+      Object.keys(meta || {}).forEach(function (k) {
+        if (meta[k] !== undefined && meta[k] !== null && meta[k] !== '') fd.append(k, meta[k]);
+      });
+      return upload('/photos', fd);
+    },
+    deletePhoto: function (id) { return request('DELETE', '/photos/' + id); },
 
     listAudit: function (params) { return request('GET', '/audit' + qs(params)); }
   };

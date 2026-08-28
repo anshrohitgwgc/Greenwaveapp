@@ -1,5 +1,12 @@
 /* ==========================================================================
    Greenwave Ops
+
+   Frontend for the real GreenWave API (see assets/api.js). Every business
+   record — customers, materials, staff, invoices, inventory, photos, time
+   clock, history — is fetched from and written to the server on every view;
+   the browser is a client, not the source of truth. Local storage
+   (assets/store.js) is now limited to the session pointer, UI preferences
+   and the invoice letterhead defaults, none of which the API models.
    ========================================================================== */
 (function () {
   'use strict';
@@ -10,7 +17,9 @@
   /* Sales tax follows the province goods ship FROM, so it belongs to the
      warehouse. Every invoice keeps its own copy of the label and rate, so a
      rate change tomorrow never rewrites an invoice raised today — and you
-     can type over either one when a job needs it. */
+     can type over either one when a job needs it. The API stores the rate
+     as a percentage (5 means 5%), not a fraction — TAX below is decimal for
+     display convenience and converted at the api.js boundary. */
   var TAX = {
     AB: { label: 'GST @ 5%',  rate: 0.05 }, BC: { label: 'GST @ 5%',  rate: 0.05 },
     SK: { label: 'GST @ 5%',  rate: 0.05 }, MB: { label: 'GST @ 5%',  rate: 0.05 },
@@ -38,7 +47,9 @@
     var n = c < 0, v = Math.abs(c) / 100;
     return (n ? '-$' : '$') + v.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
+  function moneyDollars(d) { return money(Math.round((Number(d) || 0) * 100)); }
   function parseMoney(s) { var n = parseFloat(String(s).replace(/[^0-9.\-]/g, '')); return isFinite(n) ? Math.round(n * 100) : 0; }
+  function parseDollars(s) { var n = parseFloat(String(s).replace(/[^0-9.\-]/g, '')); return isFinite(n) ? Math.round(n * 100) / 100 : 0; }
   function parseQty(s)   { var n = parseFloat(String(s).replace(/[^0-9.\-]/g, '')); return isFinite(n) ? n : 0; }
   function num(n, dp) {
     return Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: dp || 0, maximumFractionDigits: dp === undefined ? 3 : dp });
@@ -78,19 +89,41 @@
       '</div></div>';
   }
 
+  function loadingState(sel) {
+    $(sel).innerHTML = '<div class="card"><div class="pad" style="text-align:center;color:var(--muted)">Loading…</div></div>';
+  }
+
+  /* A failed fetch (API down, network offline, no permission) must render an
+     actionable message in place, never leave the section blank or throw an
+     unhandled rejection that could blank the whole screen — see the
+     white-screen regression notes in docs/V2_IMPLEMENTATION.md. */
+  function apiErrorState(sel, err) {
+    var msg = (err && err.status === 0) ? (err.message || "Can't reach the GreenWave server.")
+      : (err && err.status === 403) ? "You don't have permission to see this."
+      : (err && err.message) || 'Something went wrong loading this.';
+    $(sel).innerHTML = '<div class="card"><div class="empty">' +
+      '<span class="eico"><svg><use href="#i-alert"></use></svg></span>' +
+      '<h3>Could not load this</h3><p>' + esc(msg) + '</p>' +
+      '<button type="button" class="btn ghost" data-action="retry">Try again</button>' +
+      '</div></div>';
+    var b = $(sel + ' [data-action="retry"]');
+    if (b) b.addEventListener('click', render);
+  }
+
   function field(name, label, o) {
     o = o || {};
     var v = o.value == null ? '' : o.value, input;
     if (o.type === 'select') {
-      input = '<select name="' + name + '"' + (o.required ? ' required' : '') + '>' + o.options.map(function (x) {
+      input = '<select name="' + name + '"' + (o.required ? ' required' : '') + (o.disabled ? ' disabled' : '') + '>' + o.options.map(function (x) {
         return '<option value="' + esc(x.value) + '"' + (String(x.value) === String(v) ? ' selected' : '') + '>' + esc(x.label) + '</option>';
       }).join('') + '</select>';
     } else if (o.type === 'textarea') {
-      input = '<textarea name="' + name + '"' + (o.rows ? ' rows="' + o.rows + '"' : '') + '>' + esc(v) + '</textarea>';
+      input = '<textarea name="' + name + '"' + (o.rows ? ' rows="' + o.rows + '"' : '') + (o.disabled ? ' disabled' : '') + '>' + esc(v) + '</textarea>';
     } else {
       input = '<input type="' + (o.type || 'text') + '" name="' + name + '" value="' + esc(v) + '"' +
         (o.placeholder ? ' placeholder="' + esc(o.placeholder) + '"' : '') +
         (o.step ? ' step="' + o.step + '"' : '') + (o.required ? ' required' : '') +
+        (o.disabled ? ' disabled' : '') +
         (o.autocomplete ? ' autocomplete="' + o.autocomplete + '"' : '') + '>';
     }
     return '<div class="field"><label for="' + name + '">' + esc(label) + '</label>' + input +
@@ -100,23 +133,45 @@
   // ------------------------------------------------------------- state
   var db = S.get();
   var entity = db.lastEntity || 'recycling';
-  var warehouseId = (db.warehouses[0] || {}).id;
+  var warehouses = [];
+  var warehouseId = null;
   var view = 'inventory';
   var draft = null;
   var me = null;
-  var photoCache = [];
-  var objectUrls = [];
+  var usersCache = null;          // admin/manager only — used to resolve names for history/photos/team clock
+  var customersCache = [];
+  var invoiceListCache = [];
+  var currentShiftCache = null;
   var clockTimer = null;
 
-  function warehouse() { return db.warehouses.filter(function (w) { return w.id === warehouseId; })[0] || db.warehouses[0]; }
+  function warehouse() { return warehouses.filter(function (w) { return w.id === warehouseId; })[0] || warehouses[0]; }
+  function warehouseById(id) { return warehouses.filter(function (w) { return w.id === id; })[0]; }
+  function warehouseName(id) { var w = warehouseById(id); return w ? w.name : '—'; }
   function taxFor(p) { return TAX[p] || TAX.BC; }
-  function products() { return db.products.filter(function (p) { return p.entity === entity; }); }
   function isRecycling() { return entity === 'recycling'; }
   function can(v) { return me && ROLES[me.role] && ROLES[me.role].sees.indexOf(v) >= 0; }
+  function isAdminOrManager() { return me && (me.role === 'admin' || me.role === 'manager'); }
 
-  function releaseUrls() {
-    objectUrls.forEach(function (u) { URL.revokeObjectURL(u); });
-    objectUrls = [];
+  function loadUsersCache() {
+    if (usersCache) return Promise.resolve(usersCache);
+    if (!isAdminOrManager()) return Promise.resolve(null);
+    return Api.listUsers().then(function (list) { usersCache = list; return usersCache; }).catch(function () { return null; });
+  }
+  function userName(id) {
+    if (me && id === me.id) return me.name;
+    if (usersCache) { var u = usersCache.filter(function (x) { return x.id === id; })[0]; if (u) return u.fullName; }
+    return 'User #' + id;
+  }
+
+  // Client-only tag on a material: which company it's shown under, and how
+  // Intake captures its quantity. The backend material record has no such
+  // column — see assets/store.js. Untagged materials (created elsewhere, or
+  // before tagging) show under both companies as a plain count.
+  function materialMeta(m) { return S.materialMeta(m.id) || {}; }
+  function materialEntity(m) { var t = materialMeta(m).entity; return t || null; }
+  function materialCapture(m) { return materialMeta(m).capture || 'counted'; }
+  function visibleMaterials(list) {
+    return list.filter(function (m) { var e = materialEntity(m); return e === null || e === entity; });
   }
 
   // ============================================================ SIGN IN
@@ -155,7 +210,6 @@
       Api.login(email, password).then(function (user) {
         S.setServerSession(user);
         db = S.get();
-        S.log('signin', user.fullName + ' signed in');
         boot();
       }).catch(function (err) {
         btn.disabled = false;
@@ -207,7 +261,6 @@
       Api.registerFirstAdmin(name, email, password).then(function (user) {
         S.setServerSession(user);
         db = S.get();
-        S.log('signin', 'First administrator created');
         boot();
       }).catch(function (err) {
         btn.disabled = false;
@@ -238,13 +291,12 @@
   }
 
   function signOut() {
-    var open = openShift();
-    if (open && !confirm('You are still clocked in. Sign out anyway?\n\nYour shift stays open and keeps counting.')) return;
-    S.log('signout', me ? me.name + ' signed out' : '');
+    if (currentShiftCache && !confirm('You are still clocked in. Sign out anyway?\n\nYour shift stays open and keeps counting.')) return;
     S.clearSession();
     Api.clearSession();
     me = null;
-    releaseUrls();
+    usersCache = null;
+    currentShiftCache = null;
     if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
     showGate();
   }
@@ -270,7 +322,7 @@
     $('#meRole').textContent = me ? (ROLES[me.role] || {}).label || me.role : '';
 
     var sel = $('#wh');
-    sel.innerHTML = db.warehouses.map(function (w) {
+    sel.innerHTML = warehouses.map(function (w) {
       return '<option value="' + esc(w.id) + '">' + esc(w.name) + '</option>';
     }).join('');
     sel.value = warehouseId;
@@ -307,12 +359,20 @@
   }
 
   function renderShiftChip() {
-    var open = openShift();
     var chip = $('#shiftChip');
+    var open = currentShiftCache;
     chip.hidden = !open;
     if (open) {
-      chip.innerHTML = '<span class="dot"></span>On shift · ' + hm(Date.now() - new Date(open.startAt).getTime());
+      chip.innerHTML = '<span class="dot"></span>On shift · ' + hm(Date.now() - new Date(open.clockIn).getTime());
     }
+  }
+
+  function refreshShiftChip() {
+    return Api.currentShift().then(function (open) {
+      currentShiftCache = open;
+      renderShiftChip();
+      return open;
+    }).catch(function () { return null; });
   }
 
   function show(next) {
@@ -320,7 +380,6 @@
     if (!can(next) && next !== 'editor') next = 'inventory';
     if (next === 'editor' && !can('invoices')) next = 'inventory';
 
-    releaseUrls();
     view = next;
     $$('.view').forEach(function (v) { v.classList.remove('on'); });
     var el = $('#v-' + view);
@@ -337,127 +396,143 @@
   }
 
   // ============================================================ INVENTORY
-  function balances() {
-    var map = {};
-    products().forEach(function (p) {
-      map[p.id] = { product: p, bySize: {}, total: 0 };
-      (p.sizes || []).forEach(function (z) { map[p.id].bySize[z] = 0; });
-    });
-    db.tickets.forEach(function (t) {
-      if (t.entity !== entity || t.warehouseId !== warehouseId) return;
-      var row = map[t.productId]; if (!row) return;
-      var sign = t.direction === 'out' ? -1 : 1;
-      if (t.qtyBySize) {
-        Object.keys(t.qtyBySize).forEach(function (z) {
-          var q = Number(t.qtyBySize[z]) || 0;
-          if (row.bySize[z] === undefined) row.bySize[z] = 0;
-          row.bySize[z] += sign * q; row.total += sign * q;
-        });
-      } else { row.total += sign * (Number(t.qty) || 0); }
-    });
-    return Object.keys(map).map(function (k) { return map[k]; });
-  }
+  var SIZE_KEYS = ['xl', 'l', 'm', 's'];
+  var SIZE_LABELS = { xl: 'XL', l: 'L', m: 'M', s: 'S' };
 
   function renderInventory() {
     var w = warehouse();
-    $('#invenSub').textContent = w ? 'On hand at ' + w.name + ', derived from posted tickets.' : '';
+    $('#invenSub').textContent = w ? 'On hand at ' + w.name + ', derived from the server transaction ledger.' : '';
     $('#invenCta').textContent = isRecycling() ? 'Record a load' : 'Receive stock';
+    if (!w) { $('#invenBody').innerHTML = ''; return; }
 
-    var list = products();
-    if (!list.length) {
-      $('#invenBody').innerHTML = emptyState('tag', isRecycling() ? 'No materials yet' : 'No products yet',
-        'Inventory is what you received less what you shipped. Add what you handle first.',
-        can('products') ? (isRecycling() ? 'Add material' : 'Add product') : null, 'goProducts');
-      return;
-    }
+    loadingState('#invenBody');
+    Promise.all([
+      Api.listMaterials(),
+      Api.listInventoryTransactions({ warehouseId: w.id })
+    ]).then(function (r) {
+      var list = visibleMaterials(r[0]);
+      var txs = r[1];
 
-    var rows = balances(), sizes = [];
-    rows.forEach(function (r) { (r.product.sizes || []).forEach(function (z) { if (sizes.indexOf(z) < 0) sizes.push(z); }); });
+      if (!list.length) {
+        $('#invenBody').innerHTML = emptyState('tag', isRecycling() ? 'No materials yet' : 'No products yet',
+          'Inventory is what you received less what you shipped. Add what you handle first.',
+          can('products') ? (isRecycling() ? 'Add material' : 'Add product') : null, 'goProducts');
+        return;
+      }
 
-    var head = '<tr><th>' + (isRecycling() ? 'Material' : 'Product') + '</th><th>Category</th>' +
-      sizes.map(function (z) { return '<th class="num">' + esc(z) + '</th>'; }).join('') +
-      '<th class="num">On hand</th><th>Unit</th></tr>';
+      var showSizes = list.some(function (m) { return materialCapture(m) === 'sized'; });
 
-    var body = rows.map(function (r) {
-      var cells = sizes.map(function (z) {
-        return (r.product.sizes || []).indexOf(z) < 0
-          ? '<td class="num" style="color:var(--muted)">–</td>'
-          : '<td class="num">' + num(r.bySize[z] || 0) + '</td>';
+      var map = {};
+      list.forEach(function (m) { map[m.id] = { material: m, xl: 0, l: 0, m: 0, s: 0, total: 0 }; });
+      txs.forEach(function (t) {
+        var row = map[t.materialId]; if (!row) return;
+        var sign = t.type === 'outbound' ? -1 : 1;
+        SIZE_KEYS.forEach(function (k) { row[k] += sign * (Number(t[k]) || 0); });
+        row.total += sign * (Number(t.total) || 0);
+      });
+      var rows = Object.keys(map).map(function (k) { return map[k]; });
+
+      var head = '<tr><th>' + (isRecycling() ? 'Material' : 'Product') + '</th><th>Category</th>' +
+        (showSizes ? SIZE_KEYS.map(function (k) { return '<th class="num">' + SIZE_LABELS[k] + '</th>'; }).join('') : '') +
+        '<th class="num">On hand</th><th>Unit</th></tr>';
+
+      var body = rows.map(function (r) {
+        var sized = materialCapture(r.material) === 'sized';
+        var cells = showSizes ? SIZE_KEYS.map(function (k) {
+          return sized ? '<td class="num">' + num(r[k]) + '</td>' : '<td class="num" style="color:var(--muted)">–</td>';
+        }).join('') : '';
+        return '<tr><td><strong>' + esc(r.material.name) + '</strong></td><td style="color:var(--muted)">' +
+          esc(r.material.category || '—') + '</td>' + cells +
+          '<td class="num"><strong>' + num(r.total) + '</strong></td><td style="color:var(--muted)">' + esc(r.material.unit) + '</td></tr>';
       }).join('');
-      return '<tr><td><strong>' + esc(r.product.name) + '</strong></td><td style="color:var(--muted)">' +
-        esc(r.product.category || '—') + '</td>' + cells +
-        '<td class="num"><strong>' + num(r.total) + '</strong></td><td style="color:var(--muted)">' + esc(r.product.unit) + '</td></tr>';
-    }).join('');
 
-    var colTotals = sizes.map(function (z) { return rows.reduce(function (a, r) { return a + (r.bySize[z] || 0); }, 0); });
-    var grand = rows.reduce(function (a, r) { return a + r.total; }, 0);
+      var colTotals = showSizes ? SIZE_KEYS.map(function (k) { return rows.reduce(function (a, r) { return a + r[k]; }, 0); }) : [];
+      var grand = rows.reduce(function (a, r) { return a + r.total; }, 0);
 
-    $('#invenBody').innerHTML =
-      '<div class="card"><div class="cardhead"><h3>On hand — ' + esc(w ? w.name : '') + '</h3>' +
-      '<span class="sub">' + db.tickets.filter(function (t) { return t.entity === entity && t.warehouseId === warehouseId; }).length +
-      ' tickets here</span></div><div class="tablewrap"><table><thead>' + head + '</thead><tbody>' + body + '</tbody>' +
-      '<tfoot><tr><td>Total</td><td></td>' + colTotals.map(function (c) { return '<td class="num">' + num(c) + '</td>'; }).join('') +
-      '<td class="num">' + num(grand) + '</td><td style="font-weight:400;color:var(--muted)">summed from rows</td></tr></tfoot></table></div></div>';
+      $('#invenBody').innerHTML =
+        '<div class="card"><div class="cardhead"><h3>On hand — ' + esc(w.name) + '</h3>' +
+        '<span class="sub">' + txs.length + ' ledger entries here</span></div><div class="tablewrap"><table><thead>' + head + '</thead><tbody>' + body + '</tbody>' +
+        '<tfoot><tr><td>Total</td><td></td>' + (showSizes ? colTotals.map(function (c) { return '<td class="num">' + num(c) + '</td>'; }).join('') : '') +
+        '<td class="num">' + num(grand) + '</td><td style="font-weight:400;color:var(--muted)">from the server ledger</td></tr></tfoot></table></div></div>';
+    }).catch(function (err) { apiErrorState('#invenBody', err); });
   }
 
   // ============================================================ INTAKE
+  var intakeMaterials = [];
+
   function renderIntake() {
     var w = warehouse();
     $('#intakeTitle').textContent = isRecycling() ? 'Weigh-in' : 'Receive stock';
     $('#intakeSub').textContent = isRecycling()
       ? 'Gross less tare gives net. It posts to ' + (w ? w.name : 'the warehouse') + '.'
       : 'Count what arrived. It posts to ' + (w ? w.name : 'the warehouse') + '.';
+    if (!w) { $('#intakeBody').innerHTML = ''; return; }
 
-    var list = products();
-    if (!list.length) {
-      $('#intakeBody').innerHTML = emptyState('tag', 'Nothing to record against',
-        'Add what you handle first, then come back.',
-        can('products') ? (isRecycling() ? 'Add material' : 'Add product') : null, 'goProducts');
-      return;
-    }
+    loadingState('#intakeBody');
+    Api.listMaterials().then(function (all) {
+      var list = visibleMaterials(all);
+      intakeMaterials = list;
+      if (!list.length) {
+        $('#intakeBody').innerHTML = emptyState('tag', 'Nothing to record against',
+          'Add what you handle first, then come back.',
+          can('products') ? (isRecycling() ? 'Add material' : 'Add product') : null, 'goProducts');
+        return;
+      }
 
-    $('#intakeBody').innerHTML =
-      '<div class="card"><div class="cardhead"><h3>' + (isRecycling() ? 'Inbound ticket' : 'Receipt') + '</h3></div>' +
-      '<div class="pad"><div class="grid g2">' +
-        '<div class="field"><label>' + (isRecycling() ? 'Material' : 'Product') + '</label><select id="tkProduct">' +
-          list.map(function (p) { return '<option value="' + esc(p.id) + '">' + esc(p.name) + ' (' + esc(p.unit) + ')</option>'; }).join('') +
-        '</select></div>' +
-        '<div class="field"><label>Direction</label><select id="tkDir"><option value="in">In — arriving</option><option value="out">Out — shipping</option></select></div>' +
-        '<div class="field"><label>Date</label><input type="date" id="tkDate" value="' + today() + '"></div>' +
-        '<div class="field"><label>Reference</label><input type="text" id="tkRef" class="mono" placeholder="Container, truck or BOL"></div>' +
-      '</div><div id="tkQty" style="margin-top:16px"></div>' +
-      '<button type="button" class="btn" id="tkPost" style="margin-top:18px"><svg><use href="#i-check"></use></svg>Post ticket</button>' +
-      '<p style="margin:12px 0 0;color:var(--muted);font-size:13px">Posting is final. A mistake is corrected with an opposite ticket, so both stay on the record.</p>' +
-      '</div></div><div id="tkRecent"></div>';
+      var dirOptions = '<option value="in">In — arriving</option><option value="out">Out — shipping</option>' +
+        (isAdminOrManager() ? '<option value="adj">Adjustment — correct a count</option>' : '');
 
-    $('#tkProduct').addEventListener('change', renderQtyFields);
-    $('#tkPost').addEventListener('click', postTicket);
-    renderQtyFields();
-    renderRecent();
+      $('#intakeBody').innerHTML =
+        '<div class="card"><div class="cardhead"><h3>' + (isRecycling() ? 'Inbound ticket' : 'Receipt') + '</h3></div>' +
+        '<div class="pad"><div class="grid g2">' +
+          '<div class="field"><label>' + (isRecycling() ? 'Material' : 'Product') + '</label><select id="tkMaterial">' +
+            list.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + ' (' + esc(m.unit) + ')</option>'; }).join('') +
+          '</select></div>' +
+          '<div class="field"><label>Direction</label><select id="tkDir">' + dirOptions + '</select></div>' +
+          '<div class="field"><label>Date</label><input type="date" id="tkDate" value="' + today() + '"></div>' +
+          '<div class="field"><label>Reference</label><input type="text" id="tkRef" class="mono" placeholder="Container, truck or BOL"></div>' +
+        '</div><div id="tkReasonWrap" hidden style="margin-top:16px">' + field('reason', 'Reason for adjustment', { required: true }) + '</div>' +
+        '<div id="tkQty" style="margin-top:16px"></div>' +
+        '<div id="tkContainer" style="margin-top:16px"></div>' +
+        '<button type="button" class="btn" id="tkPost" style="margin-top:18px"><svg><use href="#i-check"></use></svg>Post ticket</button>' +
+        '<p style="margin:12px 0 0;color:var(--muted);font-size:13px">Posting is final. A mistake is corrected with an opposite ticket, so both stay on the record.</p>' +
+        '</div></div><div id="tkRecent"></div>';
+
+      $('#tkMaterial').addEventListener('change', renderQtyFields);
+      $('#tkDir').addEventListener('change', function () {
+        $('#tkReasonWrap').hidden = $('#tkDir').value !== 'adj';
+        renderContainerFields();
+      });
+      $('#tkPost').addEventListener('click', postTicket);
+      renderQtyFields();
+      renderContainerFields();
+      renderRecent(w);
+    }).catch(function (err) { apiErrorState('#intakeBody', err); });
   }
 
-  function currentProduct() {
-    var el = $('#tkProduct'); if (!el) return null;
-    return products().filter(function (p) { return p.id === el.value; })[0];
+  function currentMaterial() {
+    var el = $('#tkMaterial'); if (!el) return null;
+    return intakeMaterials.filter(function (m) { return m.id === el.value; })[0];
   }
 
   function renderQtyFields() {
-    var p = currentProduct(); if (!p) return;
+    var m = currentMaterial(); if (!m) return;
     var host = $('#tkQty');
-    if (p.sizes && p.sizes.length) {
-      host.innerHTML = '<div class="grid g3">' + p.sizes.map(function (z) {
-        return '<div class="field"><label>' + esc(z) + '</label><input type="number" step="any" min="0" data-size="' + esc(z) + '" placeholder="0"></div>';
-      }).join('') + '</div><div class="trow" style="margin-top:14px"><span class="lb">Total this ticket</span><span class="vl" id="tkTotal">0 ' + esc(p.unit) + '</span></div>';
+    var capture = materialCapture(m);
+    if (capture === 'sized') {
+      host.innerHTML = '<div class="grid g3">' + SIZE_KEYS.map(function (k) {
+        return '<div class="field"><label>' + SIZE_LABELS[k] + '</label><input type="number" step="any" min="0" data-size="' + k + '" placeholder="0"></div>';
+      }).join('') + '</div><div class="trow" style="margin-top:14px"><span class="lb">Total this ticket</span><span class="vl" id="tkTotal">0 ' + esc(m.unit) + '</span></div>';
       $$('#tkQty input').forEach(function (i) {
         i.addEventListener('input', function () {
           var t = 0; $$('#tkQty input[data-size]').forEach(function (x) { t += parseQty(x.value); });
-          $('#tkTotal').textContent = num(t) + ' ' + p.unit;
+          $('#tkTotal').textContent = num(t) + ' ' + m.unit;
         });
       });
-    } else if (p.capture === 'weighed') {
+    } else if (capture === 'weighed') {
       host.innerHTML = '<div class="grid g3">' +
-        '<div class="field"><label>Gross (' + esc(p.unit) + ')</label><input type="number" step="any" min="0" id="tkGross" placeholder="0"></div>' +
-        '<div class="field"><label>Tare (' + esc(p.unit) + ')</label><input type="number" step="any" min="0" id="tkTare" placeholder="0"></div>' +
+        '<div class="field"><label>Gross (' + esc(m.unit) + ')</label><input type="number" step="any" min="0" id="tkGross" placeholder="0"></div>' +
+        '<div class="field"><label>Tare (' + esc(m.unit) + ')</label><input type="number" step="any" min="0" id="tkTare" placeholder="0"></div>' +
         '<div class="field"><label>Net</label><input type="text" id="tkNet" value="0" readonly style="background:var(--panel-2);font-weight:700"></div>' +
         '</div><div id="tkWarn"></div>';
       ['tkGross', 'tkTare'].forEach(function (id) {
@@ -469,71 +544,126 @@
         });
       });
     } else {
-      host.innerHTML = '<div class="grid g3"><div class="field"><label>Quantity (' + esc(p.unit) + ')</label>' +
+      host.innerHTML = '<div class="grid g3"><div class="field"><label>Quantity (' + esc(m.unit) + ')</label>' +
         '<input type="number" step="any" min="0" id="tkQtyOne" placeholder="0"></div></div>';
     }
   }
 
-  function postTicket() {
-    var p = currentProduct(); if (!p) return;
-    var t = {
-      id: S.uid('tk'), entity: entity, warehouseId: warehouseId, productId: p.id,
-      direction: $('#tkDir').value, date: $('#tkDate').value || today(),
-      ref: $('#tkRef').value.trim(), staffId: me.id, staffName: me.name,
-      postedAt: new Date().toISOString()
-    };
+  function renderContainerFields() {
+    var host = $('#tkContainer'); if (!host) return;
+    if ($('#tkDir').value !== 'in') { host.innerHTML = ''; return; }
+    host.innerHTML = '<details><summary style="cursor:pointer;color:var(--ink-2);font-size:13.5px">Container / shipping details (optional)</summary>' +
+      '<div class="grid g3" style="margin-top:12px">' +
+        field('ctOrder', 'Order number') + field('ctBl', 'BL number') + field('ctLine', 'Shipping line') +
+        field('ctNum', 'Container number') + field('ctSeal', 'Seal number') + field('ctEta', 'ETA', { type: 'date' }) +
+      '</div></details>';
+  }
 
-    if (p.sizes && p.sizes.length) {
-      var by = {}, total = 0;
-      $$('#tkQty input[data-size]').forEach(function (i) {
-        var q = parseQty(i.value); if (q) { by[i.dataset.size] = q; total += q; }
+  function maybeCreateContainer(w) {
+    if ($('#tkDir').value !== 'in') return Promise.resolve(null);
+    var host = $('#tkContainer');
+    // field() only sets `name`, not `id` (an id here could collide with a
+    // same-named field in a modal opened over this view) — so look these up
+    // by name, scoped to the container section.
+    var val = function (name) { var el = host && host.querySelector('[name="' + name + '"]'); return el ? el.value.trim() : ''; };
+    var fields = { orderNumber: val('ctOrder'), blNumber: val('ctBl'), shippingLine: val('ctLine'), containerNumber: val('ctNum'), sealNumber: val('ctSeal'), eta: val('ctEta') };
+    var has = Object.keys(fields).some(function (k) { return fields[k]; });
+    if (!has) return Promise.resolve(null);
+    var payload = { warehouseId: w.id };
+    Object.keys(fields).forEach(function (k) { if (fields[k]) payload[k] = fields[k]; });
+    return Api.createContainer(payload).then(function (c) { return c.id; });
+  }
+
+  function postTicket() {
+    var m = currentMaterial(); if (!m) return;
+    var w = warehouse(); if (!w) return;
+    var dir = $('#tkDir').value;
+    var type = dir === 'out' ? 'outbound' : dir === 'adj' ? 'adjustment' : 'inbound';
+    var capture = materialCapture(m);
+    var ref = $('#tkRef').value.trim();
+    var payload = { warehouseId: w.id, materialId: m.id, type: type };
+
+    if (capture === 'sized') {
+      var vals = {}, total = 0;
+      SIZE_KEYS.forEach(function (k) {
+        var el = $('#tkQty input[data-size="' + k + '"]');
+        var q = el ? parseQty(el.value) : 0;
+        vals[k] = q; total += q;
       });
       if (!total) { toast('Enter a quantity for at least one size.'); return; }
-      t.qtyBySize = by; t.qty = total;
-    } else if (p.capture === 'weighed') {
+      SIZE_KEYS.forEach(function (k) { if (vals[k]) payload[k] = vals[k]; });
+      payload.reference = ref || undefined;
+    } else if (capture === 'weighed') {
       var g = parseQty($('#tkGross').value), ta = parseQty($('#tkTare').value), net = g - ta;
       if (net <= 0) { toast('Net must be more than zero.'); return; }
-      t.gross = g; t.tare = ta; t.qty = net;
+      payload.s = net;
+      payload.reference = (ref ? ref + ' · ' : '') + 'Gross ' + num(g) + ' / Tare ' + num(ta);
     } else {
       var q = parseQty($('#tkQtyOne').value);
       if (q <= 0) { toast('Enter a quantity.'); return; }
-      t.qty = q;
+      payload.s = q;
+      payload.reference = ref || undefined;
     }
 
-    db.tickets.push(t); S.save();
-    S.log('ticket', (t.direction === 'out' ? 'Shipped ' : 'Received ') + num(t.qty) + ' ' + p.unit + ' ' + p.name + (t.ref ? ' · ' + t.ref : ''));
-    toast('Ticket posted.');
-    renderIntake();
+    if (type === 'adjustment') {
+      var reason = ($('[name="reason"]') || {}).value;
+      reason = reason ? reason.trim() : '';
+      if (!reason) { toast('Adjustments need a reason.'); return; }
+      payload.reason = reason;
+    }
+
+    var btn = $('#tkPost'); btn.disabled = true;
+    maybeCreateContainer(w).then(function (containerId) {
+      if (containerId) payload.containerId = containerId;
+      return Api.createInventoryTransaction(payload);
+    }).then(function () {
+      toast('Ticket posted.');
+      renderIntake();
+    }).catch(function (err) {
+      btn.disabled = false;
+      toast(err.message || 'Could not post that ticket.');
+    });
   }
 
-  function renderRecent() {
-    var mine = db.tickets.filter(function (t) { return t.entity === entity && t.warehouseId === warehouseId; }).slice(-8).reverse();
-    if (!mine.length) { $('#tkRecent').innerHTML = ''; return; }
-    var byId = {}; db.products.forEach(function (p) { byId[p.id] = p; });
+  function renderRecent(w) {
+    Api.listInventoryTransactions({ warehouseId: w.id }).then(function (txs) {
+      var host = $('#tkRecent'); if (!host) return;
+      var mine = txs.slice(0, 8);
+      if (!mine.length) { host.innerHTML = ''; return; }
+      var byId = {}; intakeMaterials.forEach(function (m) { byId[m.id] = m; });
 
-    $('#tkRecent').innerHTML = '<div class="card"><div class="cardhead"><h3>Recent tickets here</h3></div>' +
-      '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Item</th><th>Reference</th><th>By</th><th></th><th class="num">Qty</th></tr></thead><tbody>' +
-      mine.map(function (t) {
-        var p = byId[t.productId] || { name: '—', unit: '' };
-        var q = t.qtyBySize ? Object.keys(t.qtyBySize).map(function (z) { return z + ' ' + num(t.qtyBySize[z]); }).join(' · ') : num(t.qty) + ' ' + p.unit;
-        return '<tr><td class="mono" style="font-size:13px">' + esc(t.date) + '</td><td>' + esc(p.name) + '</td>' +
-          '<td class="mono" style="font-size:12.5px;color:var(--muted)">' + esc(t.ref || '—') + '</td>' +
-          '<td style="color:var(--ink-2)">' + esc(t.staffName || '—') + '</td>' +
-          '<td><span class="pill ' + (t.direction === 'out' ? 'warn' : 'good') + '">' + (t.direction === 'out' ? 'Out' : 'In') + '</span></td>' +
-          '<td class="num">' + esc(q) + '</td></tr>';
-      }).join('') + '</tbody></table></div></div>';
+      host.innerHTML = '<div class="card"><div class="cardhead"><h3>Recent tickets here</h3></div>' +
+        '<div class="tablewrap"><table><thead><tr><th>Date</th><th>Item</th><th>Reference</th><th>By</th><th></th><th class="num">Qty</th></tr></thead><tbody>' +
+        mine.map(function (t) {
+          var m = byId[t.materialId] || { name: '—', unit: '' };
+          var q = num(t.total) + ' ' + m.unit;
+          var by = (me && t.createdBy === me.id) ? me.name : (usersCache ? userName(t.createdBy) : ('Staff #' + t.createdBy));
+          var kind = t.type === 'outbound' ? 'Out' : t.type === 'adjustment' ? 'Adj' : 'In';
+          var pillClass = t.type === 'outbound' ? 'warn' : t.type === 'adjustment' ? 'flat' : 'good';
+          return '<tr><td class="mono" style="font-size:13px">' + esc(when(t.createdAt).split(' ')[0]) + '</td><td>' + esc(m.name) + '</td>' +
+            '<td class="mono" style="font-size:12.5px;color:var(--muted)">' + esc(t.reference || t.reason || '—') + '</td>' +
+            '<td style="color:var(--ink-2)">' + esc(by) + '</td>' +
+            '<td><span class="pill ' + pillClass + '">' + kind + '</span></td>' +
+            '<td class="num">' + esc(q) + '</td></tr>';
+        }).join('') + '</tbody></table></div></div>';
+    }).catch(function () { var host = $('#tkRecent'); if (host) host.innerHTML = ''; });
   }
 
   // ============================================================ PHOTOS
+  var photoCache = [];
+
   function renderPhotos() {
-    var isAdmin = me.role === 'admin' || me.role === 'manager';
+    var isAdmin = isAdminOrManager();
     $('#photoSub').textContent = isAdmin
       ? 'Every photo anyone has taken, newest first.'
       : 'Photos you have taken. Administrators can see all of them.';
 
-    Photos.all().then(function (all) {
-      photoCache = isAdmin ? all : all.filter(function (p) { return p.staffId === me.id; });
-      var used = photoCache.reduce(function (a, p) { return a + (p.size || 0); }, 0);
+    loadingState('#photoBody');
+    loadUsersCache();
+    var w = warehouse();
+    Api.listPhotos({ warehouseId: w ? w.id : undefined }).then(function (all) {
+      photoCache = all; // the server already scopes staff/driver to their own photos — no client filtering needed
+      var used = photoCache.reduce(function (a, p) { return a + (p.sizeBytes || 0); }, 0);
 
       if (!photoCache.length) {
         $('#photoBody').innerHTML = emptyState('cam', 'No photos yet',
@@ -542,48 +672,38 @@
         return;
       }
 
-      releaseUrls();
       $('#photoBody').innerHTML = '<div class="card">' +
         '<div class="photobar"><span><b style="color:var(--ink)">' + photoCache.length + '</b> photos · ' + bytes(used) + '</span>' +
-        '<span class="grow"></span><span id="quota"></span></div>' +
+        '<span class="grow"></span></div>' +
         '<div class="photogrid">' + photoCache.map(function (p, i) {
-          var url = URL.createObjectURL(p.blob); objectUrls.push(url);
           return '<button type="button" class="photo" data-photo="' + i + '">' +
-            '<img src="' + url + '" alt="' + esc(p.note || p.name) + '" loading="lazy">' +
-            '<span class="cap"><b>' + esc(p.staffName || 'Unknown') + '</b>' + esc(when(p.at)) + '</span></button>';
+            '<img src="' + esc(p.url) + '" alt="' + esc(p.jobReference || p.originalFilename || 'photo') + '" loading="lazy">' +
+            '<span class="cap"><b>' + esc(userName(p.takenBy)) + '</b>' + esc(when(p.takenAt)) + '</span></button>';
         }).join('') + '</div></div>';
-
-      Photos.usage().then(function (u) {
-        if (u && u.quota) {
-          $('#quota').textContent = bytes(u.used) + ' of about ' + bytes(u.quota) + ' used on this device';
-        }
-      });
 
       $$('[data-photo]').forEach(function (b) {
         b.addEventListener('click', function () { openLightbox(Number(b.dataset.photo)); });
       });
-    });
+    }).catch(function (err) { apiErrorState('#photoBody', err); });
   }
 
   function openLightbox(i) {
     var p = photoCache[i]; if (!p) return;
-    var url = URL.createObjectURL(p.blob); objectUrls.push(url);
-    $('#lbImg').src = url;
-    $('#lbMeta').innerHTML = esc(p.staffName || 'Unknown') + ' · ' + esc(when(p.at)) +
-      ' · ' + p.width + '×' + p.height + ' · ' + bytes(p.size) +
-      (p.note ? '<br>' + esc(p.note) : '') +
+    $('#lbImg').src = p.url;
+    $('#lbMeta').innerHTML = esc(userName(p.takenBy)) + ' · ' + esc(when(p.takenAt)) +
+      ' · ' + bytes(p.sizeBytes) +
+      (p.jobReference ? '<br>' + esc(p.jobReference) : '') +
       (me.role === 'admin' ? '<br><button type="button" class="btn danger" id="lbDel" style="margin-top:12px">Delete this photo</button>' : '');
     $('#lightbox').hidden = false;
 
     var del = $('#lbDel');
     if (del) del.addEventListener('click', function () {
       if (!confirm('Delete this photo permanently?')) return;
-      Photos.remove(p.id).then(function () {
-        S.log('photo-delete', 'Deleted a photo taken by ' + (p.staffName || 'unknown'));
+      Api.deletePhoto(p.id).then(function () {
         $('#lightbox').hidden = true;
         renderPhotos();
         toast('Photo deleted.');
-      });
+      }).catch(function (err) { toast(err.message || 'Could not delete that photo.'); });
     });
   }
 
@@ -591,165 +711,191 @@
     if (!files || !files.length) return;
     var w = warehouse();
     var jobs = Array.prototype.slice.call(files).map(function (f) {
-      return Photos.add(f, {
-        staffId: me.id, staffName: me.name, entity: entity,
-        warehouseId: warehouseId, note: w ? w.name : ''
+      return Photos.prepare(f).then(function (r) {
+        return Api.uploadPhoto(r.file, { warehouseId: w ? w.id : undefined });
       });
     });
-    toast(files.length > 1 ? 'Saving ' + files.length + ' photos…' : 'Saving photo…');
-    Promise.all(jobs).then(function (recs) {
-      S.log('photo', 'Added ' + recs.length + ' photo' + (recs.length === 1 ? '' : 's'));
-      toast(recs.length + ' photo' + (recs.length === 1 ? '' : 's') + ' saved.');
+    toast(files.length > 1 ? 'Uploading ' + files.length + ' photos…' : 'Uploading photo…');
+
+    var settle = Promise.allSettled ? Promise.allSettled(jobs) : Promise.all(jobs.map(function (p) {
+      return p.then(function (v) { return { status: 'fulfilled', value: v }; }, function (e) { return { status: 'rejected', reason: e }; });
+    }));
+
+    settle.then(function (results) {
+      var ok = results.filter(function (r) { return r.status === 'fulfilled'; }).length;
+      var fail = results.length - ok;
+      if (ok && !fail) toast(ok + ' photo' + (ok === 1 ? '' : 's') + ' uploaded.');
+      else if (ok) toast(ok + ' uploaded, ' + fail + ' failed.');
+      else toast('Could not upload ' + (fail === 1 ? 'that photo.' : 'those photos.'));
       renderPhotos();
-    }).catch(function (e) {
-      toast(e.message || 'Could not save that photo.');
     });
   }
 
   // ============================================================ TIME CLOCK
-  function openShift() {
-    if (!me) return null;
-    return db.shifts.filter(function (s) { return s.staffId === me.id && !s.endAt; })[0] || null;
-  }
-
   function renderTimeclock() {
-    var open = openShift();
-    $('#clockSub').textContent = open ? 'You are on shift.' : 'Clock in when you start, out when you finish.';
+    loadingState('#clockBody');
+    loadUsersCache();
+    Promise.all([Api.currentShift(), Api.shiftHistory()]).then(function (r) {
+      var open = r[0], mine = r[1];
+      currentShiftCache = open;
+      renderShiftChip();
 
-    var mine = db.shifts.filter(function (s) { return s.staffId === me.id; })
-      .sort(function (a, b) { return b.startAt.localeCompare(a.startAt); });
-
-    var weekAgo = Date.now() - 7 * 864e5;
-    var weekMs = mine.reduce(function (a, s) {
-      var st = new Date(s.startAt).getTime();
-      if (st < weekAgo) return a;
-      return a + ((s.endAt ? new Date(s.endAt).getTime() : Date.now()) - st);
-    }, 0);
-
-    $('#clockBody').innerHTML =
-      '<div class="card"><div class="clockcard">' +
-        '<div class="clockstate">' + (open ? 'On shift since ' + new Date(open.startAt).toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit' }) : 'Clocked out') + '</div>' +
-        '<div class="clocktime ' + (open ? 'on' : 'off') + '" id="clockTime">' +
-          (open ? hm(Date.now() - new Date(open.startAt).getTime()) : '—') + '</div>' +
-        '<div class="clocksince">' + hm(weekMs) + ' in the last 7 days</div>' +
-        '<button type="button" class="btn' + (open ? ' ghost' : '') + '" id="clockBtn">' +
-          '<svg><use href="#i-' + (open ? 'stop' : 'play') + '"></use></svg>' + (open ? 'Clock out' : 'Clock in') + '</button>' +
-      '</div></div>' +
-
-      (mine.length ? '<div class="card"><div class="cardhead"><h3>Your shifts</h3><span class="sub">' + mine.length + ' recorded</span></div>' +
-        '<div class="tablewrap"><table><thead><tr><th>Started</th><th>Ended</th><th class="num">Length</th></tr></thead><tbody>' +
-        mine.slice(0, 30).map(function (s) {
-          return '<tr><td class="mono" style="font-size:13px">' + esc(when(s.startAt)) + '</td>' +
-            '<td class="mono" style="font-size:13px">' + (s.endAt ? esc(when(s.endAt)) : '<span class="pill good">open</span>') + '</td>' +
-            '<td class="num">' + (s.endAt ? hm(new Date(s.endAt) - new Date(s.startAt)) : hm(Date.now() - new Date(s.startAt))) + '</td></tr>';
-        }).join('') + '</tbody></table></div></div>' : '') +
-
-      ((me.role === 'admin' || me.role === 'manager') ? renderTeamClock() : '');
-
-    $('#clockBtn').addEventListener('click', toggleClock);
-
-    if (clockTimer) clearInterval(clockTimer);
-    if (open) {
-      clockTimer = setInterval(function () {
-        var el = $('#clockTime');
-        if (!el) { clearInterval(clockTimer); clockTimer = null; return; }
-        el.textContent = hm(Date.now() - new Date(open.startAt).getTime());
-        renderShiftChip();
-      }, 30000);
-    }
-  }
-
-  function renderTeamClock() {
-    var weekAgo = Date.now() - 7 * 864e5;
-    var rows = db.staff.map(function (u) {
-      var shifts = db.shifts.filter(function (s) { return s.staffId === u.id; });
-      var ms = shifts.reduce(function (a, s) {
-        var st = new Date(s.startAt).getTime();
+      var weekAgo = Date.now() - 7 * 864e5;
+      var weekMs = mine.reduce(function (a, s) {
+        var st = new Date(s.clockIn).getTime();
         if (st < weekAgo) return a;
-        return a + ((s.endAt ? new Date(s.endAt).getTime() : Date.now()) - st);
+        return a + ((s.clockOut ? new Date(s.clockOut).getTime() : Date.now()) - st);
       }, 0);
-      var on = shifts.some(function (s) { return !s.endAt; });
-      return { u: u, ms: ms, on: on, n: shifts.length };
-    }).filter(function (r) { return r.n > 0; }).sort(function (a, b) { return b.ms - a.ms; });
 
-    if (!rows.length) return '';
-    return '<div class="card"><div class="cardhead"><h3>The team, last 7 days</h3>' +
-      '<span class="sub">' + rows.filter(function (r) { return r.on; }).length + ' on shift now</span></div>' +
-      '<div class="tablewrap"><table><thead><tr><th>Name</th><th>Role</th><th></th><th class="num">Hours</th></tr></thead><tbody>' +
-      rows.map(function (r) {
-        return '<tr><td><strong>' + esc(r.u.name) + '</strong></td>' +
-          '<td style="color:var(--muted)">' + esc((ROLES[r.u.role] || {}).label || r.u.role) + '</td>' +
-          '<td>' + (r.on ? '<span class="pill good">On shift</span>' : '') + '</td>' +
-          '<td class="num">' + hm(r.ms) + '</td></tr>';
-      }).join('') + '</tbody></table></div></div>';
+      $('#clockBody').innerHTML =
+        '<div class="card"><div class="clockcard">' +
+          '<div class="clockstate">' + (open ? 'On shift since ' + new Date(open.clockIn).toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit' }) : 'Clocked out') + '</div>' +
+          '<div class="clocktime ' + (open ? 'on' : 'off') + '" id="clockTime">' +
+            (open ? hm(Date.now() - new Date(open.clockIn).getTime()) : '—') + '</div>' +
+          '<div class="clocksince">' + hm(weekMs) + ' in the last 7 days</div>' +
+          '<button type="button" class="btn' + (open ? ' ghost' : '') + '" id="clockBtn">' +
+            '<svg><use href="#i-' + (open ? 'stop' : 'play') + '"></use></svg>' + (open ? 'Clock out' : 'Clock in') + '</button>' +
+        '</div></div>' +
+
+        (mine.length ? '<div class="card"><div class="cardhead"><h3>Your shifts</h3><span class="sub">' + mine.length + ' recorded</span></div>' +
+          '<div class="tablewrap"><table><thead><tr><th>Started</th><th>Ended</th><th class="num">Length</th></tr></thead><tbody>' +
+          mine.slice(0, 30).map(function (s) {
+            return '<tr><td class="mono" style="font-size:13px">' + esc(when(s.clockIn)) + '</td>' +
+              '<td class="mono" style="font-size:13px">' + (s.clockOut ? esc(when(s.clockOut)) : '<span class="pill good">open</span>') + '</td>' +
+              '<td class="num">' + (s.clockOut ? hm(new Date(s.clockOut) - new Date(s.clockIn)) : hm(Date.now() - new Date(s.clockIn))) + '</td></tr>';
+          }).join('') + '</tbody></table></div></div>' : '') +
+        '<div id="teamClockCard"></div>';
+
+      $('#clockBtn').addEventListener('click', toggleClock);
+
+      if (isAdminOrManager()) {
+        Api.teamShifts().then(function (rows) {
+          var host = $('#teamClockCard'); if (!host) return;
+          if (!rows.length) { host.innerHTML = ''; return; }
+          host.innerHTML = '<div class="card"><div class="cardhead"><h3>On shift right now</h3>' +
+            '<span class="sub">' + rows.length + ' clocked in</span></div>' +
+            '<div class="tablewrap"><table><thead><tr><th>Name</th><th>Warehouse</th><th class="num">Since</th></tr></thead><tbody>' +
+            rows.map(function (s) {
+              return '<tr><td><strong>' + esc(userName(s.userId)) + '</strong></td>' +
+                '<td style="color:var(--muted)">' + esc(warehouseName(s.warehouseId)) + '</td>' +
+                '<td class="num">' + esc(when(s.clockIn)) + '</td></tr>';
+            }).join('') + '</tbody></table></div>' +
+            '<p style="margin:0;padding:0 16px 16px;color:var(--muted);font-size:13px">Shows who is on shift right now. Historical hours for other staff aren\'t available from the server yet — each person can only see their own past shifts.</p></div>';
+        }).catch(function () { var host = $('#teamClockCard'); if (host) host.innerHTML = ''; });
+      }
+
+      if (clockTimer) clearInterval(clockTimer);
+      if (open) {
+        clockTimer = setInterval(function () {
+          var el = $('#clockTime');
+          if (!el) { clearInterval(clockTimer); clockTimer = null; return; }
+          el.textContent = hm(Date.now() - new Date(open.clockIn).getTime());
+          renderShiftChip();
+        }, 30000);
+      }
+    }).catch(function (err) { apiErrorState('#clockBody', err); });
   }
 
   function toggleClock() {
-    var open = openShift();
-    if (open) {
-      open.endAt = new Date().toISOString();
-      S.save();
-      S.log('clock-out', 'Clocked out after ' + hm(new Date(open.endAt) - new Date(open.startAt)));
-      toast('Clocked out.');
-    } else {
-      db.shifts.push({ id: S.uid('sh'), staffId: me.id, startAt: new Date().toISOString(), endAt: null, note: '' });
-      S.save();
-      S.log('clock-in', 'Clocked in');
-      toast('Clocked in.');
-    }
-    renderTimeclock();
-    renderShiftChip();
+    var btn = $('#clockBtn'); if (btn) btn.disabled = true;
+    var open = currentShiftCache;
+    var call = open ? Api.clockOut() : Api.clockIn(warehouseId);
+    call.then(function () {
+      toast(open ? 'Clocked out.' : 'Clocked in.');
+      renderTimeclock();
+    }).catch(function (err) {
+      if (btn) btn.disabled = false;
+      toast(err.status === 409 ? 'You are already clocked in.' : (err.message || 'Could not update your shift.'));
+    });
   }
 
   // ============================================================ INVOICES
   function newDraft() {
     var w = warehouse(), co = db.company, t = taxFor(w ? w.province : 'BC');
     return {
-      id: null, number: null,
-      billTo: '', shipTo: '',
-      warehouseId: w ? w.id : null, fromName: w ? w.name : '', province: w ? w.province : 'BC',
-      shipVia: 'Greenwave Recycling Truck', shipDate: today(),
-      date: today(), termsDays: 15,
-      taxLabel: t.label, taxRate: t.rate,
-      co: { name: co.name, line1: co.line1, line2: co.line2, email: co.email, phone: co.phone, bn: co.bn, gst: co.gst },
-      lines: [blankLine()]
+      id: null, invoiceNumber: null,
+      customerId: '', billTo: '', shipTo: '',
+      warehouseId: w ? w.id : null, province: w ? w.province : 'BC',
+      poReference: '', termsDays: 15,
+      invoiceDate: today(),
+      taxLabel: t.label, taxRatePct: t.rate * 100,
+      companyInfo: { name: co.name, line1: co.line1, line2: co.line2, email: co.email, phone: co.phone, bn: co.bn, gst: co.gst },
+      notes: '', status: 'draft',
+      items: [blankLine()]
     };
   }
-  function blankLine() {
-    return { date: today(), service: 'supply', unit: '', description: '', qty: 0, rateCents: 0, rebate: false };
+  function blankLine() { return { description: '', unit: '', quantity: 0, unitPrice: 0, discount: 0, isRebate: false }; }
+
+  function invoiceToDraft(inv) {
+    var termsDays = 15;
+    if (inv.dueDate && inv.invoiceDate) {
+      termsDays = Math.round((new Date(inv.dueDate) - new Date(inv.invoiceDate)) / 864e5);
+    }
+    var items = (inv.items || []).map(function (it) {
+      return { description: it.description, unit: it.unit || '', quantity: Number(it.quantity), unitPrice: Number(it.unitPrice), discount: Number(it.discount) || 0, isRebate: !!it.isRebate };
+    });
+    if (!items.length) items = [blankLine()];
+    var wh = warehouseById(inv.warehouseId);
+    return {
+      id: inv.id, invoiceNumber: inv.invoiceNumber,
+      customerId: inv.customerId || '', billTo: inv.billTo || '', shipTo: inv.shipTo || '',
+      warehouseId: inv.warehouseId || null, province: wh ? wh.province : 'BC',
+      poReference: inv.poReference || '', termsDays: termsDays,
+      invoiceDate: inv.invoiceDate,
+      taxLabel: inv.taxLabel || '', taxRatePct: Number(inv.taxRate) || 0,
+      companyInfo: inv.companyInfo || {}, notes: inv.notes || '',
+      status: inv.status || 'draft',
+      items: items
+    };
   }
-  function lineAmount(l) {
-    // Round each line, then sum the rounded lines. Summing raw products and
-    // rounding once at the end leaves an invoice a cent off its own lines.
-    var a = Math.round((Number(l.qty) || 0) * (Number(l.rateCents) || 0));
-    return l.rebate ? -a : a;
+
+  function lineAmountDollars(l) {
+    var gross = Math.round(((Number(l.quantity) || 0) * (Number(l.unitPrice) || 0) - (Number(l.discount) || 0)) * 100) / 100;
+    return l.isRebate ? -gross : gross;
   }
-  function totals(inv) {
-    var sub = inv.lines.reduce(function (a, l) { return a + lineAmount(l); }, 0);
-    var tax = Math.round(sub * (Number(inv.taxRate) || 0));
-    return { subtotal: sub, tax: tax, total: sub + tax };
+  function totalsLocal(inv) {
+    var sub = 0;
+    inv.items.forEach(function (l) { sub = Math.round((sub + lineAmountDollars(l)) * 100) / 100; });
+    var tax = Math.round(sub * ((Number(inv.taxRatePct) || 0) / 100) * 100) / 100;
+    return { subtotal: sub, tax: tax, total: Math.round((sub + tax) * 100) / 100 };
   }
 
   function renderInvoiceList() {
-    if (!db.invoices.length) {
-      $('#invoiceList').innerHTML = emptyState('doc', 'No invoices yet',
-        'Numbering continues from <b>1114</b>, so your next one is <b>1115</b>. Every field is free text.',
-        'New invoice', 'newInvoice');
-      return;
-    }
-    $('#invoiceList').innerHTML = '<div class="card"><div class="tablewrap"><table><thead><tr>' +
-      '<th>No.</th><th>Bill to</th><th>Date</th><th>Due</th><th class="num">Total</th><th>Status</th></tr></thead><tbody>' +
-      db.invoices.slice().sort(function (a, b) { return String(b.number).localeCompare(String(a.number), undefined, { numeric: true }); })
-      .map(function (inv) {
-        var t = totals(inv), due = addDays(inv.date, inv.termsDays), late = due < today();
-        return '<tr class="click" data-invoice="' + esc(inv.id) + '">' +
-          '<td class="mono"><strong>' + esc(inv.number) + '</strong></td>' +
-          '<td>' + esc((inv.billTo || '').split('\n')[0] || '—') + '</td>' +
-          '<td class="mono" style="font-size:13px">' + esc(inv.date) + '</td>' +
-          '<td class="mono" style="font-size:13px">' + esc(due) + '</td>' +
-          '<td class="num">' + money(t.total) + '</td>' +
-          '<td><span class="pill ' + (late ? 'crit' : 'flat') + '">' + (late ? 'Overdue' : 'Open') + '</span></td></tr>';
-      }).join('') + '</tbody></table></div></div>';
+    loadingState('#invoiceList');
+    Api.listInvoices({ warehouseId: warehouseId }).then(function (list) {
+      invoiceListCache = list;
+      if (!list.length) {
+        $('#invoiceList').innerHTML = emptyState('doc', 'No invoices yet',
+          'Numbering is assigned by the server when you save. Every field is free text.',
+          'New invoice', 'newInvoice');
+        return;
+      }
+      $('#invoiceList').innerHTML = '<div class="card"><div class="tablewrap"><table><thead><tr>' +
+        '<th>No.</th><th>Bill to</th><th>Date</th><th>Due</th><th class="num">Total</th><th>Status</th><th class="coldel"></th></tr></thead><tbody>' +
+        list.slice().sort(function (a, b) { return String(b.invoiceNumber).localeCompare(String(a.invoiceNumber), undefined, { numeric: true }); })
+        .map(function (inv) {
+          var due = inv.dueDate || '', late = due && due < today();
+          return '<tr class="click" data-invoice="' + esc(inv.id) + '">' +
+            '<td class="mono"><strong>' + esc(inv.invoiceNumber) + '</strong></td>' +
+            '<td>' + esc((inv.billTo || '').split('\n')[0] || '—') + '</td>' +
+            '<td class="mono" style="font-size:13px">' + esc(inv.invoiceDate) + '</td>' +
+            '<td class="mono" style="font-size:13px">' + esc(due || '—') + '</td>' +
+            '<td class="num">' + moneyDollars(inv.total) + '</td>' +
+            '<td><span class="pill ' + (late ? 'crit' : 'flat') + '">' + (late ? 'Overdue' : (inv.status === 'draft' ? 'Draft' : 'Open')) + '</span></td>' +
+            '<td><button type="button" class="iconbtn" data-dupe="' + esc(inv.id) + '" aria-label="Duplicate"><svg><use href="#i-doc"></use></svg></button></td></tr>';
+        }).join('') + '</tbody></table></div></div>';
+
+      $$('[data-dupe]').forEach(function (b) {
+        b.addEventListener('click', function (e) {
+          e.stopPropagation();
+          Api.duplicateInvoice(b.dataset.dupe).then(function (saved) {
+            draft = invoiceToDraft(saved);
+            toast('Duplicated as invoice ' + saved.invoiceNumber + '.');
+            show('editor');
+          }).catch(function (err) { toast(err.message || 'Could not duplicate that invoice.'); });
+        });
+      });
+    }).catch(function (err) { apiErrorState('#invoiceList', err); });
   }
 
   /* Every field on the sheet is an input. Customers and warehouses only
@@ -757,32 +903,31 @@
      one-off change somewhere. */
   function renderEditor() {
     if (!draft) draft = newDraft();
-    var inv = draft, t = totals(inv), due = addDays(inv.date, inv.termsDays);
-    $('#edTitle').textContent = inv.number ? ('Invoice ' + inv.number) : 'New invoice';
+    var inv = draft, t = totalsLocal(inv), due = addDays(inv.invoiceDate, inv.termsDays);
+    $('#edTitle').textContent = inv.invoiceNumber ? ('Invoice ' + inv.invoiceNumber) : 'New invoice';
 
-    var lineRows = inv.lines.map(function (l, i) {
+    var lineRows = inv.items.map(function (l, i) {
       return '<tr>' +
         '<td class="colno" data-lbl="#">' + (i + 1) + '.</td>' +
-        '<td data-lbl="Service date"><input type="date" data-li="' + i + '" data-k="date" value="' + esc(l.date) + '"></td>' +
-        '<td data-lbl="Product/service"><input type="text" data-li="' + i + '" data-k="service" value="' + esc(l.service) + '" placeholder="supply"></td>' +
-        '<td data-lbl="Unit"><input type="text" data-li="' + i + '" data-k="unit" value="' + esc(l.unit) + '" placeholder="tonne"></td>' +
         '<td class="wide" data-lbl="Description"><input type="text" data-li="' + i + '" data-k="description" value="' + esc(l.description) + '" placeholder="What was supplied"></td>' +
-        '<td class="colqty" data-lbl="Qty"><input type="number" step="0.001" data-li="' + i + '" data-k="qty" value="' + (l.qty || '') + '" placeholder="0.000"></td>' +
-        '<td class="colrate" data-lbl="Rate"><input type="text" data-li="' + i + '" data-k="rate" value="' + (l.rateCents ? (l.rateCents / 100).toFixed(2) : '') + '" placeholder="0.00"></td>' +
-        '<td class="colamt num" data-lbl="Amount">' + money(lineAmount(l)) + '</td>' +
-        '<td data-lbl="Direction"><label class="pill ' + (l.rebate ? 'warn' : 'flat') + '" style="cursor:pointer">' +
-          '<input type="checkbox" data-li="' + i + '" data-k="rebate"' + (l.rebate ? ' checked' : '') + ' style="width:auto;min-height:0;margin:0">Rebate</label></td>' +
+        '<td data-lbl="Unit"><input type="text" data-li="' + i + '" data-k="unit" value="' + esc(l.unit) + '" placeholder="tonne"></td>' +
+        '<td class="colqty" data-lbl="Qty"><input type="number" step="0.001" data-li="' + i + '" data-k="quantity" value="' + (l.quantity || '') + '" placeholder="0.000"></td>' +
+        '<td class="colrate" data-lbl="Rate"><input type="text" data-li="' + i + '" data-k="unitPrice" value="' + (l.unitPrice ? Number(l.unitPrice).toFixed(2) : '') + '" placeholder="0.00"></td>' +
+        '<td class="colrate" data-lbl="Discount"><input type="text" data-li="' + i + '" data-k="discount" value="' + (l.discount ? Number(l.discount).toFixed(2) : '') + '" placeholder="0.00"></td>' +
+        '<td class="colamt num" data-lbl="Amount">' + moneyDollars(lineAmountDollars(l)) + '</td>' +
+        '<td data-lbl="Direction"><label class="pill ' + (l.isRebate ? 'warn' : 'flat') + '" style="cursor:pointer">' +
+          '<input type="checkbox" data-li="' + i + '" data-k="isRebate"' + (l.isRebate ? ' checked' : '') + ' style="width:auto;min-height:0;margin:0">Rebate</label></td>' +
         '<td class="coldel" data-lbl=""><button type="button" class="iconbtn" data-del="' + i + '" aria-label="Remove line ' + (i + 1) + '"><svg><use href="#i-trash"></use></svg></button></td></tr>';
     }).join('');
 
     var prefill = '<div class="card noprint"><div class="pad"><div class="grid gset">' +
       '<div class="field"><label>Prefill from customer</label><select id="edCust">' +
         '<option value="">— type it below instead —</option>' +
-        db.customers.map(function (c) { return '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>'; }).join('') +
+        customersCache.map(function (c) { return '<option value="' + esc(c.id) + '"' + (c.id === inv.customerId ? ' selected' : '') + '>' + esc(c.name) + '</option>'; }).join('') +
       '</select><span class="help">Optional. Fills Bill to and Ship to; you can still type over them.</span></div>' +
       '<div class="field"><label>Prefill tax from warehouse</label><select id="edWh">' +
         '<option value="">— keep what I typed —</option>' +
-        db.warehouses.map(function (w) { return '<option value="' + esc(w.id) + '"' + (w.id === inv.warehouseId ? ' selected' : '') + '>' + esc(w.name) + ' (' + esc(w.province) + ')</option>'; }).join('') +
+        warehouses.map(function (w) { return '<option value="' + esc(w.id) + '"' + (w.id === inv.warehouseId ? ' selected' : '') + '>' + esc(w.name) + ' (' + esc(w.province || '') + ')</option>'; }).join('') +
       '</select><span class="help">Sets ships-from and the tax line.</span></div>' +
       '<div class="field"><label>Terms (days)</label><input type="number" id="edTerms" value="' + esc(inv.termsDays) + '" min="0"><span class="help">Due ' + esc(due) + '</span></div>' +
     '</div></div></div>';
@@ -791,13 +936,13 @@
       '<div class="sheet" style="margin-top:16px">' +
         '<div class="shhead">' +
           '<div><div class="shword">INVOICE</div>' +
-            '<input type="text" data-co="name" value="' + esc(inv.co.name) + '" style="font-weight:700;margin-bottom:5px" placeholder="Company name">' +
-            '<input type="text" data-co="bn" value="' + esc(inv.co.bn) + '" style="margin-bottom:4px" placeholder="Business number">' +
-            '<input type="text" data-co="gst" value="' + esc(inv.co.gst) + '" placeholder="GST/HST registration"></div>' +
-          '<div><input type="text" data-co="line1" value="' + esc(inv.co.line1) + '" style="margin-bottom:4px" placeholder="Address line 1">' +
-            '<input type="text" data-co="line2" value="' + esc(inv.co.line2) + '" style="margin-bottom:4px" placeholder="Address line 2">' +
-            '<input type="text" data-co="email" value="' + esc(inv.co.email) + '" style="margin-bottom:4px" placeholder="Email">' +
-            '<input type="text" data-co="phone" value="' + esc(inv.co.phone) + '" placeholder="Phone"></div>' +
+            '<input type="text" data-co="name" value="' + esc(inv.companyInfo.name || '') + '" style="font-weight:700;margin-bottom:5px" placeholder="Company name">' +
+            '<input type="text" data-co="bn" value="' + esc(inv.companyInfo.bn || '') + '" style="margin-bottom:4px" placeholder="Business number">' +
+            '<input type="text" data-co="gst" value="' + esc(inv.companyInfo.gst || '') + '" placeholder="GST/HST registration"></div>' +
+          '<div><input type="text" data-co="line1" value="' + esc(inv.companyInfo.line1 || '') + '" style="margin-bottom:4px" placeholder="Address line 1">' +
+            '<input type="text" data-co="line2" value="' + esc(inv.companyInfo.line2 || '') + '" style="margin-bottom:4px" placeholder="Address line 2">' +
+            '<input type="text" data-co="email" value="' + esc(inv.companyInfo.email || '') + '" style="margin-bottom:4px" placeholder="Email">' +
+            '<input type="text" data-co="phone" value="' + esc(inv.companyInfo.phone || '') + '" placeholder="Phone"></div>' +
           '<div class="shlogo"><img src="assets/logo.png" alt="Greenwave Recycling Inc." style="width:150px;height:auto"></div>' +
         '</div>' +
 
@@ -807,35 +952,34 @@
         '</div>' +
 
         '<div class="shband split">' +
-          '<div><span class="shk">Shipping info</span>' +
+          '<div><span class="shk">Reference</span>' +
             '<div class="grid" style="gap:8px">' +
-              '<div class="field"><label>Ship via</label><input type="text" data-f="shipVia" value="' + esc(inv.shipVia) + '"></div>' +
-              '<div class="field"><label>Ship date</label><input type="date" data-f="shipDate" value="' + esc(inv.shipDate) + '"></div>' +
-              '<div class="field"><label>From</label><input type="text" data-f="fromName" value="' + esc(inv.fromName) + '"></div>' +
+              '<div class="field"><label>PO reference</label><input type="text" data-f="poReference" value="' + esc(inv.poReference) + '"></div>' +
+              '<div class="field"><label>From</label><input type="text" value="' + esc(warehouseName(inv.warehouseId)) + '" readonly style="background:var(--panel-2)"></div>' +
             '</div></div>' +
           '<div><span class="shk">Invoice details</span>' +
             '<div class="grid" style="gap:8px">' +
-              '<div class="field"><label>Invoice no.</label><input type="text" data-f="number" value="' + esc(inv.number || '') + '" placeholder="assigned on save"></div>' +
-              '<div class="field"><label>Invoice date</label><input type="date" data-f="date" value="' + esc(inv.date) + '"></div>' +
+              '<div class="field"><label>Invoice no.</label><input type="text" value="' + esc(inv.invoiceNumber || 'assigned on save') + '" readonly style="background:var(--panel-2)"></div>' +
+              '<div class="field"><label>Invoice date</label><input type="date" data-f="invoiceDate" value="' + esc(inv.invoiceDate) + '"></div>' +
               '<div class="field"><label>Due date</label><input type="text" value="' + esc(due) + '" readonly style="background:var(--panel-2)"></div>' +
             '</div></div>' +
         '</div>' +
 
         '<div class="lines"><div class="tablewrap"><table><thead><tr>' +
-          '<th>#</th><th>Service date</th><th>Product/service</th><th>Unit</th><th>Description</th>' +
-          '<th class="num">Qty</th><th class="num">Rate</th><th class="num">Amount</th><th></th><th class="coldel"></th>' +
+          '<th>#</th><th>Description</th><th>Unit</th>' +
+          '<th class="num">Qty</th><th class="num">Rate</th><th class="num">Discount</th><th class="num">Amount</th><th></th><th class="coldel"></th>' +
         '</tr></thead><tbody>' + lineRows + '</tbody></table></div>' +
         '<button type="button" class="btn ghost sm addline noprint" id="edAddLine"><svg><use href="#i-plus"></use></svg>Add line</button></div>' +
 
         '<div class="shfoot">' +
-          '<div><span class="shk">Ways to pay</span><textarea data-f="payNote" rows="3" placeholder="How you want to be paid">' + esc(inv.payNote || (inv.co.email + '\n' + inv.co.phone)) + '</textarea></div>' +
+          '<div><span class="shk">Ways to pay</span><textarea data-f="notes" rows="3" placeholder="How you want to be paid">' + esc(inv.notes || ((inv.companyInfo.email || '') + '\n' + (inv.companyInfo.phone || ''))) + '</textarea></div>' +
           '<div class="totals">' +
-            '<div class="trow"><span class="lb">Subtotal</span><span class="vl" id="tSub">' + money(t.subtotal) + '</span></div>' +
+            '<div class="trow"><span class="lb">Subtotal</span><span class="vl" id="tSub">' + moneyDollars(t.subtotal) + '</span></div>' +
             '<div class="trow" style="gap:8px"><input type="text" data-f="taxLabel" value="' + esc(inv.taxLabel) + '" style="flex:1" placeholder="GST @ 5%">' +
-              '<input type="number" step="0.001" data-f="taxRate" value="' + esc(inv.taxRate) + '" style="width:82px" title="Rate as a decimal, e.g. 0.05">' +
-              '<span class="vl" id="tTax" style="min-width:86px;text-align:right">' + money(t.tax) + '</span></div>' +
+              '<input type="number" step="0.01" data-f="taxRatePct" value="' + esc(inv.taxRatePct) + '" style="width:82px" title="Rate as a percentage, e.g. 5 for 5%">' +
+              '<span class="vl" id="tTax" style="min-width:86px;text-align:right">' + moneyDollars(t.tax) + '</span></div>' +
             '<div class="tgrand"><span class="lb" id="tLbl">' + (t.total < 0 ? 'Payable to customer' : 'Total') + '</span>' +
-              '<span class="vl' + (t.total < 0 ? ' neg' : '') + '" id="tTot">' + money(Math.abs(t.total)) + '</span></div>' +
+              '<span class="vl' + (t.total < 0 ? ' neg' : '') + '" id="tTot">' + moneyDollars(Math.abs(t.total)) + '</span></div>' +
           '</div>' +
         '</div>' +
       '</div>';
@@ -845,38 +989,38 @@
 
   function wireEditor() {
     $('#edCust').addEventListener('change', function (e) {
-      var c = db.customers.filter(function (x) { return x.id === e.target.value; })[0];
+      var c = customersCache.filter(function (x) { return x.id === e.target.value; })[0];
       if (!c) return;
-      var block = [c.name, c.line1, c.line2].filter(Boolean).join('\n');
-      draft.billTo = block;
-      if (!draft.shipTo) draft.shipTo = block;
+      draft.customerId = c.id;
+      draft.billTo = c.billTo || c.name;
+      if (!draft.shipTo) draft.shipTo = c.shipTo || draft.billTo;
       renderEditor();
     });
 
     $('#edWh').addEventListener('change', function (e) {
-      var w = db.warehouses.filter(function (x) { return x.id === e.target.value; })[0];
+      var w = warehouseById(e.target.value);
       if (!w) return;
       var t = taxFor(w.province);
-      draft.warehouseId = w.id; draft.fromName = w.name; draft.province = w.province;
-      draft.taxLabel = t.label; draft.taxRate = t.rate;
+      draft.warehouseId = w.id; draft.province = w.province;
+      draft.taxLabel = t.label; draft.taxRatePct = t.rate * 100;
       renderEditor();
     });
 
     $('#edTerms').addEventListener('change', function (e) {
       draft.termsDays = parseInt(e.target.value, 10) || 0; renderEditor();
     });
-    $('#edAddLine').addEventListener('click', function () { draft.lines.push(blankLine()); renderEditor(); });
+    $('#edAddLine').addEventListener('click', function () { draft.items.push(blankLine()); renderEditor(); });
 
     $$('#editorBody [data-co]').forEach(function (el) {
-      el.addEventListener('input', function () { draft.co[el.dataset.co] = el.value; });
+      el.addEventListener('input', function () { draft.companyInfo[el.dataset.co] = el.value; });
     });
 
     $$('#editorBody [data-f]').forEach(function (el) {
       var evt = el.type === 'date' ? 'change' : 'input';
       el.addEventListener(evt, function () {
         var k = el.dataset.f;
-        if (k === 'taxRate') { draft.taxRate = parseFloat(el.value) || 0; updateTotals(); }
-        else if (k === 'date') { draft.date = el.value; renderEditor(); }
+        if (k === 'taxRatePct') { draft.taxRatePct = parseFloat(el.value) || 0; updateTotals(); }
+        else if (k === 'invoiceDate') { draft.invoiceDate = el.value; renderEditor(); }
         else draft[k] = el.value;
       });
     });
@@ -884,213 +1028,266 @@
     $$('#editorBody [data-li]').forEach(function (el) {
       var evt = (el.type === 'checkbox' || el.type === 'date') ? 'change' : 'input';
       el.addEventListener(evt, function () {
-        var l = draft.lines[Number(el.dataset.li)], k = el.dataset.k;
-        if (k === 'rebate') { l.rebate = el.checked; renderEditor(); return; }
-        if (k === 'qty') l.qty = parseQty(el.value);
-        else if (k === 'rate') l.rateCents = parseMoney(el.value);
+        var l = draft.items[Number(el.dataset.li)], k = el.dataset.k;
+        if (k === 'isRebate') { l.isRebate = el.checked; renderEditor(); return; }
+        if (k === 'quantity') l.quantity = parseQty(el.value);
+        else if (k === 'unitPrice') l.unitPrice = parseDollars(el.value);
+        else if (k === 'discount') l.discount = parseDollars(el.value);
         else l[k] = el.value;
         var row = el.closest('tr');
-        if (row) row.querySelector('.colamt').textContent = money(lineAmount(l));
+        if (row) row.querySelector('.colamt').textContent = moneyDollars(lineAmountDollars(l));
         updateTotals();
       });
     });
 
     $$('#editorBody [data-del]').forEach(function (b) {
       b.addEventListener('click', function () {
-        if (draft.lines.length === 1) { toast('An invoice needs at least one line.'); return; }
-        draft.lines.splice(Number(b.dataset.del), 1);
+        if (draft.items.length === 1) { toast('An invoice needs at least one line.'); return; }
+        draft.items.splice(Number(b.dataset.del), 1);
         renderEditor();
       });
     });
   }
 
   function updateTotals() {
-    var t = totals(draft);
-    $('#tSub').textContent = money(t.subtotal);
-    $('#tTax').textContent = money(t.tax);
+    var t = totalsLocal(draft);
+    $('#tSub').textContent = moneyDollars(t.subtotal);
+    $('#tTax').textContent = moneyDollars(t.tax);
     $('#tLbl').textContent = t.total < 0 ? 'Payable to customer' : 'Total';
     var v = $('#tTot');
-    v.textContent = money(Math.abs(t.total));
+    v.textContent = moneyDollars(Math.abs(t.total));
     v.classList.toggle('neg', t.total < 0);
   }
 
   function saveInvoice() {
     if (!draft.billTo.trim()) { toast('Type who this is billed to.'); return; }
-    if (!draft.lines.some(function (l) { return l.description || l.qty || l.rateCents; })) {
-      toast('Add at least one line.'); return;
-    }
-    var fresh = !draft.id;
-    if (fresh) {
-      draft.id = S.uid('inv');
-      if (!draft.number) draft.number = String(S.nextInvoiceNumber());
-      draft.createdBy = me.name;
-      db.invoices.push(draft);
-    } else {
-      var i = db.invoices.findIndex(function (x) { return x.id === draft.id; });
-      if (i >= 0) db.invoices[i] = draft;
-    }
-    S.save();
-    S.log('invoice', (fresh ? 'Created' : 'Updated') + ' invoice ' + draft.number + ' — ' + money(totals(draft).total));
-    toast('Invoice ' + draft.number + ' saved.');
-    renderEditor();
-  }
+    var items = draft.items.filter(function (l) { return l.description || l.quantity || l.unitPrice; });
+    if (!items.length) { toast('Add at least one line.'); return; }
 
-  // ============================================================ LISTS
-  function renderCustomers() {
-    if (!db.customers.length) {
-      $('#customerBody').innerHTML = emptyState('users', 'No saved customers',
-        'Saving a customer just prefills the invoice. You can always type the details straight onto the invoice instead.',
-        'Add customer', 'newCustomer');
-      return;
-    }
-    $('#customerBody').innerHTML = '<div class="card"><div class="tablewrap"><table><thead><tr>' +
-      '<th>Name</th><th>Address</th><th>Email</th><th>Phone</th><th class="coldel"></th></tr></thead><tbody>' +
-      db.customers.map(function (c) {
-        return '<tr><td><strong>' + esc(c.name) + '</strong></td><td style="color:var(--ink-2)">' +
-          esc([c.line1, c.line2].filter(Boolean).join(', ') || '—') + '</td><td style="color:var(--ink-2)">' +
-          esc(c.email || '—') + '</td><td class="mono" style="font-size:13px">' + esc(c.phone || '—') + '</td>' +
-          '<td><button type="button" class="iconbtn" data-delcust="' + esc(c.id) + '" aria-label="Remove"><svg><use href="#i-trash"></use></svg></button></td></tr>';
-      }).join('') + '</tbody></table></div></div>';
+    var payload = {
+      invoiceDate: draft.invoiceDate,
+      dueDate: addDays(draft.invoiceDate, draft.termsDays),
+      customerId: draft.customerId || undefined,
+      companyInfo: draft.companyInfo,
+      billTo: draft.billTo, shipTo: draft.shipTo || undefined,
+      poReference: draft.poReference || undefined,
+      paymentTerms: 'Net ' + (draft.termsDays || 0) + ' days',
+      taxLabel: draft.taxLabel || undefined,
+      taxRate: Number(draft.taxRatePct) || 0,
+      notes: draft.notes || undefined,
+      warehouseId: draft.warehouseId || undefined,
+      status: draft.status || 'draft',
+      items: items.map(function (l) {
+        return { description: l.description || '(no description)', quantity: Number(l.quantity) || 0, unit: l.unit || undefined,
+          unitPrice: Number(l.unitPrice) || 0, discount: Number(l.discount) || 0, isRebate: !!l.isRebate };
+      })
+    };
 
-    $$('[data-delcust]').forEach(function (b) {
-      b.addEventListener('click', function () {
-        db.customers = db.customers.filter(function (c) { return c.id !== b.dataset.delcust; });
-        S.save(); S.log('customer', 'Removed a customer'); render(); toast('Customer removed.');
-      });
+    var btn = $('#edSave'); btn.disabled = true;
+    var call = draft.id ? Api.updateInvoice(draft.id, payload) : Api.createInvoice(payload);
+    call.then(function (saved) {
+      draft = invoiceToDraft(saved);
+      btn.disabled = false;
+      toast('Invoice ' + saved.invoiceNumber + ' saved.');
+      renderEditor();
+    }).catch(function (err) {
+      btn.disabled = false;
+      toast(err.message || 'Could not save this invoice.');
     });
   }
 
-  function customerModal() {
-    openModal('Add customer',
-      field('name', 'Company name', { required: true }) + field('line1', 'Address line 1') +
-      field('line2', 'Address line 2') + field('email', 'Email', { type: 'email' }) + field('phone', 'Phone'),
+  // ============================================================ CUSTOMERS
+  function renderCustomers() {
+    loadingState('#customerBody');
+    Api.listCustomers().then(function (list) {
+      customersCache = list;
+      if (!list.length) {
+        $('#customerBody').innerHTML = emptyState('users', 'No saved customers',
+          'Saving a customer just prefills the invoice. You can always type the details straight onto the invoice instead.',
+          'Add customer', 'newCustomer');
+        return;
+      }
+      $('#customerBody').innerHTML = '<div class="card"><div class="tablewrap"><table><thead><tr>' +
+        '<th>Name</th><th>Bill to</th><th>Email</th><th>Phone</th><th class="coldel"></th></tr></thead><tbody>' +
+        list.map(function (c) {
+          return '<tr><td><strong>' + esc(c.name) + '</strong></td><td style="color:var(--ink-2)">' +
+            esc((c.billTo || '').split('\n')[0] || '—') + '</td><td style="color:var(--ink-2)">' +
+            esc(c.email || '—') + '</td><td class="mono" style="font-size:13px">' + esc(c.phone || '—') + '</td>' +
+            '<td><button type="button" class="btn ghost sm" data-editcust="' + esc(c.id) + '">Edit</button></td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<p style="margin:0;padding:14px 16px;color:var(--muted);font-size:13px">Customers can be edited but not deleted from here — ask an administrator if one needs to be removed.</p></div>';
+
+      $$('[data-editcust]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var c = customersCache.filter(function (x) { return x.id === b.dataset.editcust; })[0];
+          if (c) customerModal(c);
+        });
+      });
+    }).catch(function (err) { apiErrorState('#customerBody', err); });
+  }
+
+  function customerModal(existing) {
+    openModal(existing ? 'Edit customer' : 'Add customer',
+      field('name', 'Company name', { required: true, value: existing ? existing.name : '' }) +
+      field('billTo', 'Bill to (address)', { type: 'textarea', rows: 3, value: existing ? existing.billTo : '' }) +
+      field('shipTo', 'Ship to (if different)', { type: 'textarea', rows: 3, value: existing ? existing.shipTo : '' }) +
+      field('email', 'Email', { type: 'email', value: existing ? existing.email : '' }) +
+      field('phone', 'Phone', { value: existing ? existing.phone : '' }),
       function (d) {
         if (!d.name) return;
-        db.customers.push({ id: S.uid('cus'), name: d.name, line1: d.line1, line2: d.line2, email: d.email, phone: d.phone });
-        S.save(); S.log('customer', 'Added ' + d.name); closeModal(); render(); toast('Customer added.');
+        var payload = { name: d.name, billTo: d.billTo || undefined, shipTo: d.shipTo || undefined, email: d.email || undefined, phone: d.phone || undefined };
+        if (!existing) payload.warehouseId = warehouseId || undefined;
+        var call = existing ? Api.updateCustomer(existing.id, payload) : Api.createCustomer(payload);
+        call.then(function () {
+          closeModal(); render(); toast(existing ? 'Customer updated.' : 'Customer added.');
+        }).catch(function (err) { toast(err.message || 'Could not save that customer.'); });
       });
   }
 
+  // ============================================================ MATERIALS
   function renderProducts() {
     var rec = isRecycling();
     $('#prodTitle').textContent = rec ? 'Materials' : 'Products';
     $('#prodCta').textContent = rec ? 'Add material' : 'Add product';
     $('#prodSub').textContent = rec ? 'What you collect and sell, with the unit you weigh it in.' : 'What you import and distribute, with sizes if they have them.';
 
-    var list = products();
-    if (!list.length) {
-      $('#productBody').innerHTML = emptyState('tag', rec ? 'No materials yet' : 'No products yet',
-        rec ? 'Add what you handle — cardboard, copper, aluminium. Each carries its own unit and default rate.'
-            : 'Add what you distribute. List the sizes and inventory breaks out by size like your spreadsheet.',
-        rec ? 'Add material' : 'Add product', 'newProduct');
-      return;
-    }
-    $('#productBody').innerHTML = '<div class="card"><div class="tablewrap"><table><thead><tr>' +
-      '<th>Name</th><th>Category</th><th>Unit</th><th>Captured by</th><th>Sizes</th><th class="num">Default rate</th><th class="coldel"></th>' +
-      '</tr></thead><tbody>' + list.map(function (p) {
-        return '<tr><td><strong>' + esc(p.name) + '</strong></td><td style="color:var(--muted)">' + esc(p.category || '—') + '</td>' +
-          '<td>' + esc(p.unit) + '</td><td><span class="pill flat">' + (p.capture === 'weighed' ? 'Scale' : 'Count') + '</span></td>' +
-          '<td style="color:var(--ink-2)">' + esc((p.sizes || []).join(' · ') || '—') + '</td>' +
-          '<td class="num">' + (p.rateCents ? money(p.rateCents) : '—') + '</td>' +
-          '<td><button type="button" class="iconbtn" data-delprod="' + esc(p.id) + '" aria-label="Remove"><svg><use href="#i-trash"></use></svg></button></td></tr>';
+    loadingState('#productBody');
+    Api.listMaterials(true).then(function (all) {
+      var list = visibleMaterials(all);
+      if (!list.length) {
+        $('#productBody').innerHTML = emptyState('tag', rec ? 'No materials yet' : 'No products yet',
+          rec ? 'Add what you handle — cardboard, copper, aluminium. Each carries its own unit and default rate.'
+              : 'Add what you distribute. Sizes break inventory out into XL/L/M/S like your spreadsheet.',
+          rec ? 'Add material' : 'Add product', 'newProduct');
+        return;
+      }
+      $('#productBody').innerHTML = '<div class="card"><div class="tablewrap"><table><thead><tr>' +
+        '<th>Name</th><th>Category</th><th>Unit</th><th>Captured by</th><th class="num">Default rate</th><th>Status</th><th class="coldel"></th>' +
+        '</tr></thead><tbody>' + list.map(function (m) {
+        var cap = materialCapture(m);
+        var capLabel = cap === 'sized' ? 'XL/L/M/S' : cap === 'weighed' ? 'Scale' : 'Count';
+        return '<tr><td><strong>' + esc(m.name) + '</strong></td><td style="color:var(--muted)">' + esc(m.category || '—') + '</td>' +
+          '<td>' + esc(m.unit) + '</td><td><span class="pill flat">' + capLabel + '</span></td>' +
+          '<td class="num">' + (m.defaultPrice != null ? moneyDollars(m.defaultPrice) : '—') + '</td>' +
+          '<td>' + (m.active ? '<span class="pill good">Active</span>' : '<span class="pill crit">Archived</span>') + '</td>' +
+          '<td style="display:flex;gap:6px"><button type="button" class="btn ghost sm" data-editprod="' + esc(m.id) + '">Edit</button>' +
+          '<button type="button" class="btn ghost sm" data-archiveprod="' + esc(m.id) + '">' + (m.active ? 'Archive' : 'Reactivate') + '</button></td></tr>';
       }).join('') + '</tbody></table></div></div>';
 
-    $$('[data-delprod]').forEach(function (b) {
-      b.addEventListener('click', function () {
-        if (db.tickets.some(function (t) { return t.productId === b.dataset.delprod; })) { toast('That has tickets against it.'); return; }
-        db.products = db.products.filter(function (p) { return p.id !== b.dataset.delprod; });
-        S.save(); S.log('product', 'Removed an item'); render(); toast('Removed.');
+      $$('[data-editprod]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var m = list.filter(function (x) { return x.id === b.dataset.editprod; })[0];
+          if (m) productModal(m);
+        });
       });
-    });
+      $$('[data-archiveprod]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var m = list.filter(function (x) { return x.id === b.dataset.archiveprod; })[0];
+          if (!m) return;
+          Api.updateMaterial(m.id, { active: !m.active }).then(function () { render(); toast(m.active ? 'Archived.' : 'Reactivated.'); })
+            .catch(function (err) { toast(err.message || 'Could not update that.'); });
+        });
+      });
+    }).catch(function (err) { apiErrorState('#productBody', err); });
   }
 
-  function productModal() {
+  function productModal(existing) {
     var rec = isRecycling();
-    openModal(rec ? 'Add material' : 'Add product',
-      field('name', 'Name', { required: true, placeholder: rec ? 'OCC Cardboard' : 'Synguard 100' }) +
-      field('category', 'Category', { placeholder: rec ? 'Paper' : 'Gloves' }) +
-      field('unit', 'Unit', { value: rec ? 'kg' : 'cases', help: 'kg, tonne, cases, each.' }) +
-      field('capture', 'Captured by', { type: 'select', value: rec ? 'weighed' : 'counted',
-        options: [{ value: 'weighed', label: 'Scale — gross and tare' }, { value: 'counted', label: 'Count — a quantity' }] }) +
-      field('sizes', 'Sizes', { placeholder: 'XL, L, M, S', help: 'Leave empty if it has none.' }) +
-      field('rate', 'Default rate', { placeholder: '140.00', help: 'Per unit.' }),
+    var meta = existing ? materialMeta(existing) : {};
+    openModal(existing ? (rec ? 'Edit material' : 'Edit product') : (rec ? 'Add material' : 'Add product'),
+      field('name', 'Name', { required: true, value: existing ? existing.name : '', placeholder: rec ? 'OCC Cardboard' : 'Synguard 100' }) +
+      field('category', 'Category', { value: existing ? existing.category : '', placeholder: rec ? 'Paper' : 'Gloves' }) +
+      field('unit', 'Unit', { value: existing ? existing.unit : (rec ? 'kg' : 'cases'), help: 'kg, tonne, cases, each.' }) +
+      field('capture', 'Captured by', { type: 'select', value: meta.capture || (rec ? 'weighed' : 'sized'),
+        options: [{ value: 'weighed', label: 'Scale — gross and tare' }, { value: 'sized', label: 'Sizes — XL / L / M / S' }, { value: 'counted', label: 'Count — a single quantity' }] }) +
+      field('rate', 'Default rate', { value: existing && existing.defaultPrice != null ? Number(existing.defaultPrice) : '', placeholder: '140.00', help: 'Per unit, in dollars.' }),
       function (d) {
         if (!d.name) return;
-        db.products.push({ id: S.uid('prd'), entity: entity, name: d.name, category: d.category,
-          unit: d.unit || (rec ? 'kg' : 'cases'), capture: d.capture,
-          sizes: d.sizes ? d.sizes.split(',').map(function (s) { return s.trim(); }).filter(Boolean) : [],
-          rateCents: parseMoney(d.rate) });
-        S.save(); S.log('product', 'Added ' + d.name); closeModal(); render(); toast('Added.');
+        var payload = { name: d.name, category: d.category || undefined, unit: d.unit || undefined, defaultPrice: d.rate ? parseDollars(d.rate) : undefined };
+        var call = existing ? Api.updateMaterial(existing.id, payload) : Api.createMaterial(payload);
+        call.then(function (saved) {
+          S.setMaterialMeta(saved.id, { entity: entity, capture: d.capture });
+          closeModal(); render(); toast(existing ? 'Updated.' : 'Added.');
+        }).catch(function (err) { toast(err.message || 'Could not save that.'); });
       });
   }
 
   // ============================================================ STAFF
   function renderStaff() {
-    $('#staffBody').innerHTML = '<div class="card"><div class="tablewrap"><table><thead><tr>' +
-      '<th>Name</th><th>Email</th><th>Role</th><th>Status</th><th class="coldel"></th></tr></thead><tbody>' +
-      db.staff.map(function (u) {
-        var isMe = !!(u.email && me.email && u.email.toLowerCase() === me.email.toLowerCase());
-        return '<tr><td><strong>' + esc(u.name) + '</strong>' + (isMe ? ' <span class="pill flat">you</span>' : '') + '</td>' +
-          '<td class="mono" style="font-size:13px">' + esc(u.email) + '</td>' +
-          '<td>' + esc((ROLES[u.role] || {}).label || u.role) + '</td>' +
-          '<td>' + (u.active ? '<span class="pill good">Active</span>' : '<span class="pill crit">Deactivated</span>') + '</td>' +
-          '<td>' + (isMe ? '' : '<button type="button" class="btn ghost sm" data-togglestaff="' + esc(u.id) + '">' +
-            (u.active ? 'Deactivate' : 'Reactivate') + '</button>') + '</td></tr>';
-      }).join('') + '</tbody></table></div>' +
-      '<div class="pad" style="padding-top:0"><div class="note" style="margin-top:14px"><svg><use href="#i-alert"></use></svg><div>' +
-      '<b>This list is local and does not control sign-in.</b> Real accounts, passwords and roles now live on the server — ' +
-      'an administrator creates them there (via the API, until a server-backed Staff screen replaces this one). ' +
-      'This table is kept for reference only and is not synced yet.</div></div></div></div>';
+    loadingState('#staffBody');
+    Api.listUsers().then(function (list) {
+      usersCache = list;
+      $('#staffBody').innerHTML = '<div class="card"><div class="tablewrap"><table><thead><tr>' +
+        '<th>Name</th><th>Email</th><th>Role</th><th class="coldel"></th></tr></thead><tbody>' +
+        list.map(function (u) {
+          var isMe = me && u.id === me.id;
+          return '<tr><td><strong>' + esc(u.fullName) + '</strong>' + (isMe ? ' <span class="pill flat">you</span>' : '') + '</td>' +
+            '<td class="mono" style="font-size:13px">' + esc(u.email) + '</td>' +
+            '<td>' + esc((ROLES[u.role] || {}).label || u.role) + '</td>' +
+            '<td><button type="button" class="btn ghost sm" data-editstaff="' + esc(u.id) + '">Edit</button></td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<p style="margin:0;padding:14px 16px;color:var(--muted);font-size:13px">Accounts are created and edited here directly against the server — passwords are never shown or stored in the browser. Deactivating an account isn\'t available from the server yet.</p></div>';
 
-    $$('[data-togglestaff]').forEach(function (b) {
-      b.addEventListener('click', function () {
-        var u = db.staff.filter(function (x) { return x.id === b.dataset.togglestaff; })[0];
-        if (!u) return;
-        u.active = !u.active; S.save();
-        S.log('staff', (u.active ? 'Reactivated ' : 'Deactivated ') + u.name);
-        render(); toast(u.active ? 'Reactivated.' : 'Deactivated.');
+      $$('[data-editstaff]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var u = list.filter(function (x) { return x.id === Number(b.dataset.editstaff); })[0];
+          if (u) staffModal(u);
+        });
       });
-    });
+    }).catch(function (err) { apiErrorState('#staffBody', err); });
   }
 
-  function staffModal() {
-    openModal('Add staff',
-      field('name', 'Full name', { required: true }) +
-      field('email', 'Work email', { type: 'email', required: true, help: 'Reference only — does not grant sign-in. Create the real account on the server (POST /users).' }) +
-      field('role', 'Role', { type: 'select', value: 'staff', options: [
+  function staffModal(existing) {
+    var isSelf = !!(existing && me && existing.id === me.id);
+    openModal(existing ? 'Edit staff' : 'Add staff',
+      field('name', 'Full name', { required: true, value: existing ? existing.fullName : '' }) +
+      field('email', 'Work email', { type: 'email', required: true, value: existing ? existing.email : '' }) +
+      (existing ? '' : field('password', 'Temporary password', { type: 'password', required: true, help: 'At least 8 characters, with upper, lower and a number.' })) +
+      field('role', 'Role', { type: 'select', value: existing ? existing.role : 'staff', disabled: isSelf, options: [
         { value: 'staff', label: 'Staff — stock, photos, own hours' },
         { value: 'manager', label: 'Manager — everything except staff and settings' },
-        { value: 'admin', label: 'Administrator — full access' }] }),
+        { value: 'admin', label: 'Administrator — full access' }] }) +
+      (isSelf ? '<p class="help" style="margin-top:-8px">You can\'t change your own role.</p>' : ''),
       function (d) {
         if (!d.name || !d.email) return;
-        var email = d.email.trim().toLowerCase();
-        if (db.staff.some(function (x) { return x.email.toLowerCase() === email; })) { toast('That email is already registered.'); return; }
-        db.staff.push({ id: S.uid('stf'), email: email, name: d.name, role: d.role, active: true, createdAt: new Date().toISOString() });
-        S.save(); S.log('staff', 'Added ' + d.name + ' (' + d.role + ')'); closeModal(); render(); toast(d.name + ' can now sign in.');
+        if (existing) {
+          var patch = { fullName: d.name, email: d.email };
+          if (!isSelf) patch.role = d.role;
+          Api.updateUser(existing.id, patch).then(function () { closeModal(); render(); toast('Updated.'); })
+            .catch(function (err) { toast(err.message || 'Could not update that account.'); });
+        } else {
+          if (!d.password) { toast('Set a temporary password.'); return; }
+          Api.createUser({ fullName: d.name, email: d.email, password: d.password, role: d.role }).then(function () {
+            closeModal(); render(); toast(d.name + ' can now sign in.');
+          }).catch(function (err) { toast(err.message || 'Could not create that account.'); });
+        }
       });
   }
 
   // ============================================================ HISTORY
   function renderHistory() {
-    var byId = {}; db.staff.forEach(function (u) { byId[u.id] = u; });
-    var acts = db.activity.slice().reverse();
-    if (!acts.length) { $('#historyBody').innerHTML = emptyState('history', 'Nothing recorded yet', 'Every action anyone takes shows up here.'); return; }
+    loadingState('#historyBody');
+    loadUsersCache().then(function () {
+      return Api.listAudit({ limit: 200 });
+    }).then(function (res) {
+      var items = (res && res.items) || [];
+      if (!items.length) { $('#historyBody').innerHTML = emptyState('history', 'Nothing recorded yet', 'Every action anyone takes shows up here.'); return; }
 
-    $('#historyBody').innerHTML = '<div class="card">' + acts.slice(0, 400).map(function (a) {
-      var u = byId[a.staffId];
-      var who = a.staffName || (u ? u.name : null) || 'Unknown';
-      return '<div class="histrow"><span class="histwhen">' + esc(when(a.at)) + '</span>' +
-        '<span class="histwho">' + esc(who) + '</span>' +
-        '<span class="histwhat">' + esc(a.detail || a.action) + '</span></div>';
-    }).join('') + '</div>' +
-    (acts.length > 400 ? '<p style="color:var(--muted);font-size:13px;margin-top:12px">Showing the 400 most recent of ' + acts.length + '.</p>' : '');
+      $('#historyBody').innerHTML = '<div class="card">' + items.map(function (a) {
+        var who = a.actorUserId != null ? userName(a.actorUserId) : 'System';
+        return '<div class="histrow"><span class="histwhen">' + esc(when(a.occurredAt)) + '</span>' +
+          '<span class="histwho">' + esc(who) + '</span>' +
+          '<span class="histwhat">' + esc(a.summary || a.action) + '</span></div>';
+      }).join('') + '</div>' +
+      (res.total > items.length ? '<p style="color:var(--muted);font-size:13px;margin-top:12px">Showing the ' + items.length + ' most recent of ' + res.total + '.</p>' : '');
+    }).catch(function (err) { apiErrorState('#historyBody', err); });
   }
 
   // ============================================================ SETTINGS
   function renderSettings() {
     var co = db.company;
     $('#settingsBody').innerHTML =
-      '<div class="card"><div class="cardhead"><h3>Company</h3><span class="sub">Prefills every new invoice</span></div>' +
+      '<div class="card"><div class="cardhead"><h3>Company</h3><span class="sub">Prefills every new invoice (local to this device)</span></div>' +
       '<div class="pad"><div class="grid g2" id="coFields">' +
         field('name', 'Legal name', { value: co.name }) + field('line1', 'Address line 1', { value: co.line1 }) +
         field('line2', 'Address line 2', { value: co.line2 }) + field('email', 'Email', { value: co.email }) +
@@ -1100,61 +1297,38 @@
 
       '<div class="card"><div class="cardhead"><h3>Warehouses</h3>' +
         '<button type="button" class="btn ghost sm" id="addWh"><svg><use href="#i-plus"></use></svg>Add</button></div>' +
-      '<div class="tablewrap"><table><thead><tr><th>Name</th><th>Province</th><th>Sales tax</th><th class="coldel"></th></tr></thead><tbody>' +
-      db.warehouses.map(function (w) {
-        return '<tr><td><strong>' + esc(w.name) + '</strong></td><td>' + esc(w.province) + '</td>' +
-          '<td style="color:var(--ink-2)">' + esc(taxFor(w.province).label) + '</td>' +
-          '<td><button type="button" class="iconbtn" data-delwh="' + esc(w.id) + '" aria-label="Remove"><svg><use href="#i-trash"></use></svg></button></td></tr>';
-      }).join('') + '</tbody></table></div>' +
+      '<div id="whBody"><div class="pad" style="text-align:center;color:var(--muted)">Loading…</div></div>' +
       '<div class="pad" style="padding-top:0"><div class="note" style="margin-top:14px"><svg><use href="#i-alert"></use></svg><div>' +
       '<b>BC PST is not applied.</b> Only GST and HST. Whether PST applies to recyclable material sold for reprocessing is a question for your accountant — ' +
       'and every invoice lets you type the tax label and rate directly if a job needs something different.</div></div></div></div>' +
 
-      '<div class="card"><div class="cardhead"><h3>Your data</h3><span class="sub">This browser only</span></div>' +
+      '<div class="card"><div class="cardhead"><h3>Local preferences</h3><span class="sub">This browser only</span></div>' +
       '<div class="pad"><p style="margin:0 0 14px;color:var(--ink-2);font-size:14px;max-width:64ch">' +
-      'No server. Everything — staff, invoices, tickets and photos — lives in this browser on this device. ' +
-      'It is private and works offline, and it is <b>gone if you clear site data</b>. Export regularly.</p>' +
+      'Invoices, inventory, customers, materials, staff, photos and history all live on the GreenWave server now — clearing this browser\'s data does not lose any of them. ' +
+      'This backup only covers your company letterhead defaults and which company/warehouse you last had open.</p>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
       '<button type="button" class="btn ghost" id="exportData">Export backup (.json)</button>' +
       '<button type="button" class="btn ghost" id="importData">Import backup</button>' +
-      '<button type="button" class="btn danger" id="wipeData">Erase everything</button></div>' +
-      '<p style="margin:14px 0 0;color:var(--muted);font-size:13px">Photos are large and are <b>not</b> in the JSON backup — they stay on the device.</p>' +
+      '<button type="button" class="btn danger" id="wipeData">Reset local preferences</button></div>' +
       '<input type="file" id="importFile" accept="application/json" hidden></div></div>';
 
     $('#saveCo').addEventListener('click', function () {
       $$('#coFields [name]').forEach(function (el) { db.company[el.name] = el.value.trim(); });
-      S.save(); S.log('settings', 'Updated company details'); render(); toast('Saved.');
+      S.save(); toast('Saved.');
     });
 
-    $('#addWh').addEventListener('click', function () {
-      openModal('Add warehouse', field('name', 'Name', { required: true, placeholder: 'Mississauga, ON' }) +
-        field('province', 'Province', { type: 'select', value: 'ON',
-          options: PROVINCES.map(function (p) { return { value: p, label: p + ' — ' + TAX[p].label }; }) }),
-        function (d) {
-          if (!d.name) return;
-          db.warehouses.push({ id: S.uid('wh'), name: d.name, province: d.province });
-          S.save(); S.log('settings', 'Added warehouse ' + d.name); closeModal(); syncChrome(); render(); toast('Added.');
-        });
-    });
+    renderWarehousesTable();
 
-    $$('[data-delwh]').forEach(function (b) {
-      b.addEventListener('click', function () {
-        if (db.warehouses.length === 1) { toast('You need at least one warehouse.'); return; }
-        if (db.tickets.some(function (t) { return t.warehouseId === b.dataset.delwh; })) { toast('That warehouse has tickets.'); return; }
-        db.warehouses = db.warehouses.filter(function (w) { return w.id !== b.dataset.delwh; });
-        if (warehouseId === b.dataset.delwh) warehouseId = db.warehouses[0].id;
-        S.save(); S.log('settings', 'Removed a warehouse'); syncChrome(); render(); toast('Removed.');
-      });
-    });
+    $('#addWh').addEventListener('click', function () { warehouseModal(); });
 
     $('#exportData').addEventListener('click', function () {
       var blob = new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'greenwave-backup-' + today() + '.json';
+      a.download = 'greenwave-local-prefs-' + today() + '.json';
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
-      S.log('export', 'Downloaded a backup'); toast('Backup downloaded.');
+      toast('Backup downloaded.');
     });
 
     $('#importData').addEventListener('click', function () { $('#importFile').click(); });
@@ -1164,23 +1338,71 @@
       r.onload = function () {
         try {
           var next = JSON.parse(r.result);
-          if (!next || !next.company || !Array.isArray(next.warehouses)) throw new Error('bad');
-          db = S.replace(next); warehouseId = db.warehouses[0].id;
-          me = S.me();
-          if (!me) { showGate(); return; }
-          syncChrome(); render(); toast('Backup restored.');
-        } catch (err) { toast("That file isn't a Greenwave backup."); }
+          if (!next || !next.company) throw new Error('bad');
+          db = S.replace ? S.replace(next) : next;
+          render(); toast('Backup restored.');
+        } catch (err) { toast("That file isn't a Greenwave preferences backup."); }
       };
       r.readAsText(f); e.target.value = '';
     });
 
     $('#wipeData').addEventListener('click', function () {
-      if (!confirm('Erase all staff, customers, materials, tickets, invoices and photos on this device?\n\nThis cannot be undone.')) return;
-      Photos.clear().then(function () {
-        db = S.reset(); warehouseId = db.warehouses[0].id; me = null; draft = null;
-        showGate(); toast('Everything erased.');
-      });
+      if (!confirm('Reset company letterhead defaults and local preferences on this device?\n\nThis does not touch anything on the server.')) return;
+      var session = { session: db.session, serverUser: db.serverUser };
+      db = S.reset();
+      db.session = session.session; db.serverUser = session.serverUser; S.save();
+      render(); toast('Local preferences reset.');
     });
+  }
+
+  function renderWarehousesTable() {
+    var host = $('#whBody'); if (!host) return;
+    Api.listWarehouses(true).then(function (list) {
+      warehouses = warehouses.length ? warehouses : list; // keep the app usable even if this call races boot's
+      host.innerHTML = '<div class="tablewrap"><table><thead><tr><th>Name</th><th>Code</th><th>Province</th><th>Sales tax</th><th>Status</th><th class="coldel"></th></tr></thead><tbody>' +
+        list.map(function (w) {
+          return '<tr><td><strong>' + esc(w.name) + '</strong></td><td class="mono">' + esc(w.code) + '</td><td>' + esc(w.province || '—') + '</td>' +
+            '<td style="color:var(--ink-2)">' + esc(taxFor(w.province).label) + '</td>' +
+            '<td>' + (w.active ? '<span class="pill good">Active</span>' : '<span class="pill crit">Archived</span>') + '</td>' +
+            '<td style="display:flex;gap:6px"><button type="button" class="btn ghost sm" data-editwh="' + esc(w.id) + '">Edit</button>' +
+            '<button type="button" class="btn ghost sm" data-archivewh="' + esc(w.id) + '">' + (w.active ? 'Archive' : 'Reactivate') + '</button></td></tr>';
+        }).join('') + '</tbody></table></div>';
+
+      $$('[data-editwh]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var w = list.filter(function (x) { return x.id === b.dataset.editwh; })[0];
+          if (w) warehouseModal(w);
+        });
+      });
+      $$('[data-archivewh]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var w = list.filter(function (x) { return x.id === b.dataset.archivewh; })[0];
+          if (!w) return;
+          Api.updateWarehouse(w.id, { active: !w.active }).then(function () {
+            return Api.listWarehouses().then(function (active) { warehouses = active; syncChrome(); });
+          }).then(function () { renderWarehousesTable(); toast(w.active ? 'Archived.' : 'Reactivated.'); })
+            .catch(function (err) { toast(err.message || 'Could not update that warehouse.'); });
+        });
+      });
+    }).catch(function (err) { apiErrorState('#whBody', err); });
+  }
+
+  function warehouseModal(existing) {
+    openModal(existing ? 'Edit warehouse' : 'Add warehouse',
+      field('name', 'Name', { required: true, value: existing ? existing.name : '', placeholder: 'Mississauga, ON' }) +
+      field('code', 'Short code', { required: true, value: existing ? existing.code : '', placeholder: 'MISS', help: 'Unique, used internally.' }) +
+      field('province', 'Province', { type: 'select', value: existing ? existing.province : 'ON',
+        options: PROVINCES.map(function (p) { return { value: p, label: p + ' — ' + TAX[p].label }; }) }) +
+      field('address', 'Address', { value: existing ? existing.address : '' }),
+      function (d) {
+        if (!d.name || !d.code) return;
+        var payload = { name: d.name, code: d.code, province: d.province, address: d.address || undefined };
+        var call = existing ? Api.updateWarehouse(existing.id, payload) : Api.createWarehouse(payload);
+        call.then(function () {
+          return Api.listWarehouses().then(function (active) { warehouses = active; syncChrome(); });
+        }).then(function () { closeModal(); renderWarehousesTable(); toast(existing ? 'Updated.' : 'Added.'); })
+          .catch(function (err) { toast(err.message || 'Could not save that warehouse.'); });
+      });
   }
 
   // ============================================================ MODAL
@@ -1191,7 +1413,7 @@
     $('#modalOk').textContent = ok || 'Save';
     $('#modalWrap').hidden = false;
     modalSubmit = onSubmit;
-    var f = $('#modalForm input, #modalForm select, #modalForm textarea');
+    var f = $('#modalForm input:not([disabled]), #modalForm select:not([disabled]), #modalForm textarea:not([disabled])');
     if (f) f.focus();
   }
   function closeModal() { $('#modalWrap').hidden = true; $('#modalForm').innerHTML = ''; modalSubmit = null; }
@@ -1222,13 +1444,20 @@
   $$('.navitem').forEach(function (b) {
     b.addEventListener('click', function () { if (b.dataset.view === 'invoices') draft = null; show(b.dataset.view); });
   });
-  $('#wh').addEventListener('change', function (e) { warehouseId = e.target.value; syncChrome(); render(); });
+  $('#wh').addEventListener('change', function (e) {
+    warehouseId = e.target.value; db.lastWarehouseId = warehouseId; S.save();
+    syncChrome(); refreshShiftChip(); render();
+  });
   $('#menuBtn').addEventListener('click', function () { $('#app').classList.toggle('menu-open'); });
   $('#signOut').addEventListener('click', signOut);
-  $('#newInvoice').addEventListener('click', function () { draft = newDraft(); show('editor'); });
-  $('#newCustomer').addEventListener('click', customerModal);
-  $('#newProduct').addEventListener('click', productModal);
-  $('#newStaff').addEventListener('click', staffModal);
+  $('#newInvoice').addEventListener('click', function () {
+    draft = newDraft();
+    (customersCache.length ? Promise.resolve(customersCache) : Api.listCustomers().then(function (l) { customersCache = l; return l; }).catch(function () { return []; }))
+      .then(function () { show('editor'); });
+  });
+  $('#newCustomer').addEventListener('click', function () { customerModal(); });
+  $('#newProduct').addEventListener('click', function () { productModal(); });
+  $('#newStaff').addEventListener('click', function () { staffModal(); });
   $('#edSave').addEventListener('click', saveInvoice);
   $('#edPrint').addEventListener('click', function () { window.print(); });
   $('#addPhoto').addEventListener('click', function () { $('#photoFile').click(); });
@@ -1255,13 +1484,17 @@
     if (!el) return;
     if (el.dataset.goto) { e.preventDefault(); show(el.dataset.goto); return; }
     if (el.dataset.invoice) {
-      draft = db.invoices.filter(function (i) { return i.id === el.dataset.invoice; })[0] || null;
-      if (draft) show('editor');
+      var inv = invoiceListCache.filter(function (i) { return i.id === el.dataset.invoice; })[0] || null;
+      if (inv) {
+        draft = invoiceToDraft(inv);
+        (customersCache.length ? Promise.resolve() : Api.listCustomers().then(function (l) { customersCache = l; }).catch(function () {}))
+          .then(function () { show('editor'); });
+      }
       return;
     }
     e.preventDefault();
     var a = el.dataset.action;
-    if (a === 'newInvoice') { draft = newDraft(); show('editor'); }
+    if (a === 'newInvoice') { $('#newInvoice').click(); }
     else if (a === 'newCustomer') customerModal();
     else if (a === 'newProduct') productModal();
     else if (a === 'newStaff') staffModal();
@@ -1270,6 +1503,16 @@
   });
 
   // ============================================================ BOOT
+  function showBootError(err) {
+    var msg = (err && err.status === 0) ? "Can't reach the GreenWave server. Check your connection and try again."
+      : (err && err.message) || 'Something went wrong starting the app.';
+    $('#scroll').innerHTML = '<div class="card" style="margin:24px"><div class="empty">' +
+      '<span class="eico"><svg><use href="#i-alert"></use></svg></span>' +
+      '<h3>Could not start Greenwave Ops</h3><p>' + esc(msg) + '</p>' +
+      '<button type="button" class="btn" id="bootRetry">Try again</button></div></div>';
+    var b = $('#bootRetry'); if (b) b.addEventListener('click', boot);
+  }
+
   function boot() {
     try {
       db = S.get();
@@ -1284,9 +1527,21 @@
       }
       $('#gate').hidden = true;
       $('#app').hidden = false;
-      warehouseId = (db.warehouses && db.warehouses[0] ? db.warehouses[0].id : 'w1');
-      syncChrome();
-      show(can('invoices') && isRecycling() ? 'invoices' : 'inventory');
+      usersCache = null;
+      loadUsersCache();
+
+      Api.listWarehouses().then(function (list) {
+        warehouses = list;
+        if (!warehouses.length) throw { message: 'No warehouses are set up on the server yet. Ask an administrator to add one.' };
+        warehouseId = (db.lastWarehouseId && warehouses.some(function (w) { return w.id === db.lastWarehouseId; }))
+          ? db.lastWarehouseId : warehouses[0].id;
+        syncChrome();
+        return refreshShiftChip();
+      }).then(function () {
+        show(can('invoices') && isRecycling() ? 'invoices' : 'inventory');
+      }).catch(function (err) {
+        showBootError(err);
+      });
     } catch (err) {
       console.error('GreenWave boot initialization error:', err);
       showGate();
