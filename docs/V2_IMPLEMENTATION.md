@@ -1,53 +1,97 @@
-# GreenWave V2 Implementation Status — Frontend
+# GreenWave V2 Implementation Status
 
-Full backend status lives in `docs/V2_IMPLEMENTATION.md` in the
-`FULL-INFRA-V.0001` repo (branch `greenwave-v2`). This is the frontend-only
-summary.
+Branch: `greenwave-v2`, this repo (`anshrohitgwgc/Greenwaveapp`). This is the
+unified status, frontend + backend, now that both live in one repository —
+see `docs/REPOSITORY_ARCHITECTURE.md`. Module-level backend detail (which
+migration added what, exact test file names) stays in
+`backend/docs/V2_IMPLEMENTATION.md`; this file tracks status against the
+brief's task list.
 
-## Done this pass
+Status key: **IMPLEMENTED** (code exists, builds/lints clean) ·
+**TESTED LOCALLY** (covered by the mocked/sqlite test suite) ·
+**NOT INTEGRATION TESTED** (never run against real Postgres/Redis/MinIO —
+this sandbox has neither Docker nor local instances of them, and per the
+task's own constraints must not connect to the real 192.168.1.x hosts) ·
+**NOT BROWSER TESTED** (no display/browser available in this sandbox).
 
-- `assets/api.js` — new API client (fetch-based, root routes, JWT in
-  `sessionStorage`, no password ever stored client-side).
-- Sign-in gate (`showGate()` in `assets/app.js`) rewritten to call the real
-  `POST /auth/login` and bootstrap-only `POST /auth/register`, replacing
-  the old "trusts the typed email" check. Generic error messages on 401 (no
-  email enumeration).
-- `boot()` now also checks `Api.isAuthenticated()` — fixes a real bug the
-  session-model change would otherwise have introduced: a closed tab clears
-  the JWT (sessionStorage) but previously left `db.session` (localStorage)
-  looking valid, which would have shown the full app UI with no working
-  session behind it.
-- `Store.log()` (history/audit) now denormalizes the actor's name at write
-  time — it used to key off `db.session`, which was a per-staff-record id
-  and is now the single literal string `'server'` for every signed-in user,
-  so the old lookup would have shown "Unknown" for every history entry.
-- Staff view and invoice-add-staff help text corrected — they previously
-  implied the local staff list controls sign-in; it no longer does.
-- Service worker cache bumped (`greenwave-v5`) and `assets/api.js` added to
-  its precache list.
+## Backend (`backend/app/api`)
 
-## Not done this pass (known limitation, not an oversight)
+54/54 tests passing (16 suites), 0 eslint errors, clean `nest build` —
+reverified in this pass after the subtree merge (ran from
+`backend/app/api` inside the unified repo, not the old standalone
+checkout).
 
-Every other view — Invoices, Inventory/Weigh-in, Photos, Time clock,
-Customers, Materials, the real Staff CRUD — still reads and writes
-`localStorage`/IndexedDB (`assets/store.js`, `assets/photos.js`)
-exactly as before. The backend already implements and tests all of this
-(see the backend repo's implementation doc); `assets/api.js` already has
-client methods ready (`createInvoice`, `createInventoryTransaction`,
-`listPhotos`, `clockIn`/`clockOut`, `listAudit`, etc.). Wiring each view is
-the next increment of work, sequenced after auth deliberately — auth was
-the brief's explicitly highest-priority item and the one place the old
-model had no real security at all.
+| Area | Status |
+|---|---|
+| Auth (login, bootstrap register, JWT, Redis rate limit) | TESTED LOCALLY |
+| RBAC (`RolesGuard`, `@Roles`) | TESTED LOCALLY |
+| Users, Warehouses, Customers, Materials | IMPLEMENTED; users/auth path TESTED LOCALLY via the integration spec, the rest NOT INTEGRATION TESTED |
+| Inventory (transactions, derived `inventory_balances` view, containers) | TESTED LOCALLY (adjustment/reason/role rules); the view itself NOT INTEGRATION TESTED against real Postgres |
+| Invoices (server-authoritative numbering, calculations, rebate lines, duplicate) | TESTED LOCALLY (verified against production invoice #1114's real numbers); counter-table concurrency under `FOR UPDATE` NOT INTEGRATION TESTED (sqlite can't prove that) |
+| Photos (MinIO upload, presigned URLs, IDOR guard) | TESTED LOCALLY (IDOR cases); actual MinIO `putObject`/`presignedGetObject` NOT INTEGRATION TESTED |
+| Timesheets (clock in/out, duplicate-shift guard, team view) | TESTED LOCALLY (application-level check); the DB partial-unique-index race guard NOT INTEGRATION TESTED |
+| Audit (append-only, sensitive-field scrub, search) | TESTED LOCALLY |
+| Security headers (helmet), global `ValidationPipe` | IMPLEMENTED |
 
-## Testing
+## Frontend (`assets/`, `index.html`)
 
-- `node --check` passed on all four script files (syntax only).
-- No browser QA was performed — no display/browser was available in the
-  environment this was implemented in, and a real run needs the backend
-  actually serving requests (Postgres/Redis/MinIO), which this sandbox also
-  doesn't have. See the backend repo's `V2_DEPLOYMENT_PLAN.md` §4 for the
-  checklist to run before any real rollout.
-- No JS unit-test framework exists in this repo (it's intentionally a
-  no-build-step, plain-script app). Automated coverage for this pass lives
-  entirely in the backend's 54 tests, which cover the auth logic this
-  frontend now calls.
+| Area | Status |
+|---|---|
+| Login (email+password against real API), bootstrap-only register | IMPLEMENTED, NOT BROWSER TESTED — `node --check` syntax-clean |
+| Session model (JWT in `sessionStorage`, never `localStorage`) | IMPLEMENTED |
+| Staff/Users CRUD → `Api.listUsers/createUser/updateUser` | IMPLEMENTED, NOT BROWSER TESTED |
+| Warehouses → `Api.listWarehouses/createWarehouse/updateWarehouse` | IMPLEMENTED, NOT BROWSER TESTED |
+| Customers → `Api.listCustomers/createCustomer/updateCustomer` | IMPLEMENTED, NOT BROWSER TESTED |
+| Materials → `Api.listMaterials/createMaterial/updateMaterial` | IMPLEMENTED, NOT BROWSER TESTED |
+| Inventory/weigh-in → `Api.listContainers/createContainer/listInventoryTransactions/createInventoryTransaction/getInventoryBalances` | IMPLEMENTED, NOT BROWSER TESTED |
+| Invoices → `Api.listInvoices/getInvoice/createInvoice/updateInvoice/duplicateInvoice` | IMPLEMENTED, NOT BROWSER TESTED |
+| Photos → `Api.listPhotos/getPhoto/uploadPhoto (multipart)/deletePhoto` | IMPLEMENTED, NOT BROWSER TESTED |
+| Time clock → `Api.clockIn/clockOut/currentShift/shiftHistory/teamShifts` | IMPLEMENTED, NOT BROWSER TESTED |
+| History → `Api.listAudit` | IMPLEMENTED, NOT BROWSER TESTED |
+| `assets/store.js` reduced to client-local state only (session pointer, UI prefs, letterhead defaults, material entity/capture tag not present in the backend schema) | IMPLEMENTED |
+| Service worker cache bump (`greenwave-v5`) with `assets/api.js` precached | IMPLEMENTED |
+
+All four script files (`api.js`, `app.js`, `photos.js`, `store.js`) pass
+`node --check`. Every `Api.*` call added to `assets/app.js` was cross-checked
+by hand against the corresponding backend controller's route decorators
+(`backend/app/api/src/**/*.controller.ts`) — see the table in
+`docs/V2_ARCHITECTURE.md`. This is route/method-name verification, not a
+runtime integration test: no request has actually round-tripped browser →
+API → Postgres/MinIO in this sandbox.
+
+## Repository unification (this pass)
+
+`backend/` was added via `git subtree add --prefix=backend`, not a squash
+or copy — see `docs/REPOSITORY_ARCHITECTURE.md`. Confirmed:
+`git merge-base --is-ancestor <backend-commit> HEAD` for the source repo's
+`963201c` (V2 backend foundation) and `f6056f3` (its most recent commit)
+both return true, i.e. the backend's full commit history is a real ancestor
+of this repo's `greenwave-v2` branch.
+
+## What's still open
+
+1. **No integration test against real Postgres/Redis/MinIO.** Required
+   before any staging rollout — see `docs/V2_PRODUCTION_MIGRATION_PLAN.md`.
+2. **No browser QA.** This sandbox has no display. The viewport/workflow
+   checklist (390×844, 430×932, plus desktop sizes) has not been run against
+   a live browser — only static syntax/route verification.
+3. **Worker not split out.** `PhotosProcessor` (BullMQ) runs in-process in
+   `backend/app/api` behind `WORKER_INLINE`, not as the standalone VM103
+   deployable the production topology expects.
+4. **No refresh-token rotation**, single shared DB role (no DB-grant-level
+   audit immutability yet) — both pre-existing, documented backend
+   limitations, unchanged by this pass.
+5. **No new automated frontend tests.** `assets/` has no JS test framework
+   (intentionally: no-build-step, plain-script app — see `README.md`). The
+   54 backend tests are the only automated coverage of the logic the
+   frontend now calls; they don't exercise the frontend code itself.
+
+## Security review
+
+Carried over unchanged from `backend/docs/V2_IMPLEMENTATION.md` (bootstrap
+register no longer accepts a caller role, bcrypt 12 rounds + Redis login
+rate limit, `JWT_SECRET` from env with a boot-time refusal if unset/`dev` in
+production, IDOR-tested photo access, `esc()`-escaped error interpolation in
+the gate). Nothing in this pass's frontend wiring changes that surface —
+`assets/api.js` never stores a password, only a bearer JWT in
+`sessionStorage`.

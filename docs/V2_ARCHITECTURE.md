@@ -1,62 +1,120 @@
-# GreenWave V2 Architecture — Frontend
+# GreenWave V2 Architecture
 
-This repo (`Greenwaveapp`, the production PWA) is the **client**. It is not
-where V2's backend lives — the backend, database schema, RBAC, invoices,
-inventory ledger, photo storage, timesheets and audit log are implemented in
-the `FULL-INFRA-V.0001` repo's `app/api` (NestJS), on branch `greenwave-v2`.
-That repo's `docs/V2_ARCHITECTURE.md` is the authoritative design doc; this
-file only covers how this frontend fits in.
+This is the unified design doc for the canonical repository
+(`anshrohitgwgc/Greenwaveapp`, branch `greenwave-v2`). Frontend and backend
+now live in one repo — see `docs/REPOSITORY_ARCHITECTURE.md` for the
+directory layout. This file gives the cross-cutting picture; the deep
+backend design (schema, RBAC internals, invoice numbering, rounding rules,
+etc.) stays in `backend/docs/V2_ARCHITECTURE.md`, which this file does not
+duplicate.
 
-## Why two repos
+## Component map
 
-When this V2 work started, a backend already existed as a separate,
-production-connected repository (`greenwave-api`), and a further,
-already-scaffolded, production-isolated monorepo (`FULL-INFRA-V.0001`,
-containing `app/api` + `app/web` + `app/mobile` + full docs/infra-as-code)
-turned out to be a closer match to what this task needed than building a
-third, independent backend inside this static-site repo. V2 backend work
-went there; this repo stays the frontend.
+```
+┌──────────────┐     ┌──────────────────┐     ┌────────────────────┐
+│ /assets,     │────▶│ backend/app/api  │────▶│ PostgreSQL 16       │
+│ /index.html  │     │ (NestJS)         │     │ VM202 192.168.1.22  │
+│ (PWA, mobile │◀────│ VM102/201/301,   │     │ (production)        │
+│  -first)     │     │ :3000            │     └────────────────────┘
+└──────────────┘     │                  │────▶┌────────────────────┐
+                      │                  │     │ Redis 7             │
+                      │                  │     │ VM104 192.168.1.14  │
+                      │                  │     └────────────────────┘
+                      │                  │────▶┌────────────────────┐
+                      │                  │     │ MinIO S3             │
+                      │                  │     │ VM203 192.168.1.23  │
+                      └──────────────────┘     └────────────────────┘
+                              │
+                              ▼
+                       VM103 worker: BullMQ (photo thumbnails, audit
+                       fan-out — code path exists as `PhotosProcessor`,
+                       currently runs in-process behind `WORKER_INLINE`,
+                       not yet split into a standalone deployable; see
+                       `docs/V2_PRODUCTION_MIGRATION_PLAN.md`)
+```
+
+Public routing (confirmed from `backend/infrastructure/nginx/*`, not from
+prose docs): `api.gwgc.cloud` and `api.gwgcservers.ca` are the **same**
+nginx server block proxying to the `greenwave_api_cluster` upstream
+(192.168.1.12/21/31:3000) at **root routes, no `/api/v1` prefix** —
+`POST /auth/login`, not `POST /api/v1/auth/login`. The frontend's
+`assets/api.js` defaults to same-origin (`''`) for exactly this reason.
+
+`api.gwgcservers.ca` is an alias hostname for this same API, not the
+Management Portal (`www.gwgcservers.ca`, `mgmt-api.gwgcservers.ca`,
+`n8n.gwgcservers.ca`), which is a fully separate system this work does not
+touch — see the "Absolute boundaries" section below.
 
 ## Client state vs. server-authoritative state
 
-This app has always kept its data in `localStorage`/IndexedDB (see
-`assets/store.js`, `assets/photos.js`) — that was true before this pass and
-is still true for most views today. What changed in this pass:
+| Data | Authority | Where |
+|---|---|---|
+| Session/JWT, current warehouse selection, UI prefs, invoice letterhead defaults, material entity/capture tags | Client | `sessionStorage` (JWT) / `localStorage` (`assets/store.js`) |
+| Users, roles, invoices, invoice numbering, inventory transactions & balances, customers, materials, warehouses, photos metadata, timesheets, audit log | **Server** | PostgreSQL, via `backend/app/api` only |
+| Photo bytes | Server | MinIO, never the browser |
 
-- **Authentication is now server-authoritative.** `assets/api.js` calls the
-  real API's `POST /auth/login` / `POST /auth/register` (bootstrap-only).
-  The JWT lives in `sessionStorage` (cleared when the tab closes), never in
-  `localStorage`, and no password is ever stored in the browser at all. See
-  the "Signing in" section of this repo's `README.md`.
-- **Everything else — invoices, inventory, customers, materials, photos,
-  the local staff list, history** — still reads/writes
-  `localStorage`/IndexedDB via `Store`/`Photos` in this pass. The backend
-  already has real, tested endpoints for all of it; `assets/api.js` already
-  has client methods ready for them (`createInvoice`, `createInventoryTransaction`,
-  `listPhotos`, `clockIn`/`clockOut`, etc.). Wiring each view to call them
-  instead of local storage is the next increment — see
-  `docs/V2_IMPLEMENTATION.md` for exactly what's done vs. pending.
+As of this repo's current `greenwave-v2` state, this is no longer aspirational
+for most views: `assets/app.js` calls `assets/api.js`'s `Api.*` methods for
+auth, users/staff, warehouses, customers, materials, containers, inventory
+transactions/balances, invoices, photos, timesheets, and audit — see
+`docs/V2_IMPLEMENTATION.md` for the exact status per area. `assets/store.js`
+was reduced accordingly: it no longer holds business records at all, only
+the client-local state in the table above (see its module comment for the
+full rationale — the backend schema has no column for some of these, e.g.
+which of the two companies a material belongs to).
 
-The browser must not be treated as authoritative for production business
-data once that wiring lands — `localStorage` becomes a read-through cache /
-offline queue in front of the API, the same pattern already used for auth.
+## Authentication and RBAC
 
-## Why auth first
+Login is email + password against `backend/app/api`'s `POST /auth/login`
+(bcrypt(12), Redis-backed rate limit, JWT bearer, 24h expiry). No
+self-registration except a bootstrap-only `POST /auth/register` that
+409s once any user exists and always forces `role = 'admin'` server-side —
+never a caller-supplied role. Three roles are exposed in the frontend
+(`ADMIN`, `MANAGER`, `STAFF`; `DRIVER` also exists server-side, mapped to
+STAFF-tier). **Every guard runs server-side** (`RolesGuard` + `@Roles(...)`
+on each controller method) — the sidebar hiding a button is a UX nicety, not
+the enforcement mechanism. Full detail: `backend/docs/V2_ARCHITECTURE.md`
+§3–4.
 
-The brief marked authentication as the highest-priority item, and for good
-reason: the pre-V2 gate trusted whatever email a user typed, with no
-password check at all (see git history — this was accurately documented in
-the old README as "a front door, not a lock"). That was the most serious gap
-and is now closed. Wiring the remaining views to the API is real, bounded,
-mechanical work on top of an API that's already implemented and tested —
-it's sequenced after auth deliberately, not skipped.
+## Feature areas — where the contract lives
 
-## Logo, PWA, mobile
+For each area, the frontend's `assets/api.js` method names and HTTP calls
+are verified by hand against the backend controller they call:
 
-Unchanged in this pass: `assets/logo.png` is still used at login, in the
-sidebar, and (unwired to the new invoice endpoints yet) on printed invoices;
-the service worker (`sw.js`) still network-first/cache-fallback; the app is
-still mobile-first. `sw.js`'s cache version was bumped (`greenwave-v5`) and
-`assets/api.js` added to its precache list so the new script ships
-correctly instead of risking a stale-cache mismatch — see the White-Screen
-Regression section of `docs/V2_IMPLEMENTATION.md`.
+| Area | Frontend | Backend controller |
+|---|---|---|
+| Auth | `assets/api.js`: `login`, `registerFirstAdmin`, `me` | `backend/app/api/src/auth/auth.controller.ts` |
+| Staff/Users | `listUsers`, `createUser`, `updateUser` | `backend/app/api/src/users/users.controller.ts` |
+| Warehouses | `listWarehouses`, `createWarehouse`, `updateWarehouse` | `backend/app/api/src/warehouses/warehouses.controller.ts` |
+| Customers | `listCustomers`, `createCustomer`, `updateCustomer` | `backend/app/api/src/customers/customers.controller.ts` |
+| Materials | `listMaterials`, `createMaterial`, `updateMaterial` | `backend/app/api/src/materials/materials.controller.ts` |
+| Inventory | `listContainers`, `createContainer`, `listInventoryTransactions`, `createInventoryTransaction`, `getInventoryBalances` | `backend/app/api/src/inventory/inventory.controller.ts` |
+| Invoices | `listInvoices`, `getInvoice`, `createInvoice`, `updateInvoice`, `duplicateInvoice` | `backend/app/api/src/invoices/invoices.controller.ts` |
+| Photos | `listPhotos`, `getPhoto`, `uploadPhoto` (multipart), `deletePhoto` | `backend/app/api/src/photos/photos.controller.ts` |
+| Timesheets | `clockIn`, `clockOut`, `currentShift`, `shiftHistory`, `teamShifts` | `backend/app/api/src/timesheets/timesheets.controller.ts` |
+| Audit/History | `listAudit` | `backend/app/api/src/audit/audit.controller.ts` |
+
+This table, not a generated OpenAPI client, is the current source of truth
+for the contract — see `docs/REPOSITORY_ARCHITECTURE.md`'s "Shared code"
+section for why, and what would replace it later.
+
+## Absolute boundaries (do not touch)
+
+- **VM105 (192.168.1.15, Management Portal)** and
+  `www.gwgcservers.ca` / `mgmt-api.gwgcservers.ca` / `n8n.gwgcservers.ca` —
+  a completely separate system (own frontend, API, SQLite, auth/MFA, n8n,
+  nginx). Nothing in this repository's code, migrations, or deploy plans
+  reads, writes, or proxies to it.
+- **Production PostgreSQL/Redis/MinIO/API nodes** (192.168.1.12/13/14/21/22/
+  23/31) — this repo's backend has never connected to them; see
+  `docs/V2_PRODUCTION_MIGRATION_PLAN.md` for the only sanctioned path to
+  changing that, which requires explicit human sign-off at each step.
+- **`Adiljaiswal/Greenwave-API`** — the current production backend lineage,
+  running on VM102/201/301 today. Treated as a compatibility/reference
+  source only; V2 work does not land there.
+
+## Known assumptions carried over from the backend design doc
+
+See `backend/docs/V2_ARCHITECTURE.md` §14 for the full list (DRIVER role
+mapping, single shared DB role in this pass, no refresh-token rotation,
+etc.) — unchanged by the repo merge.
