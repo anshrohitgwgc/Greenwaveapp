@@ -47,17 +47,49 @@
 
   function load() {
     if (state) return state;
+    var d = blank();
     try {
       var raw = global.localStorage.getItem(KEY);
-      state = raw ? JSON.parse(raw) : blank();
-      // Fill in anything a older save is missing, so an upgrade never
-      // lands the app on undefined.
-      var d = blank();
+      state = raw ? JSON.parse(raw) : d;
+      if (!state || typeof state !== 'object') state = d;
+
       Object.keys(d).forEach(function (k) {
-        if (state[k] === undefined) state[k] = d[k];
+        if (state[k] === undefined || state[k] === null) state[k] = d[k];
       });
+
+      if (!Array.isArray(state.warehouses) || state.warehouses.length === 0) {
+        state.warehouses = d.warehouses;
+      }
+
+      if (!Array.isArray(state.staff)) state.staff = [];
+      state.staff = state.staff.map(function (x) {
+        if (typeof x === 'string') {
+          return { id: uid('stf'), email: x.toLowerCase(), name: x, role: 'admin', active: true, createdAt: new Date().toISOString() };
+        }
+        if (x && typeof x === 'object') {
+          return {
+            id: x.id || uid('stf'),
+            email: String(x.email || '').toLowerCase(),
+            name: String(x.name || x.email || 'Staff Member'),
+            role: x.role || 'staff',
+            active: x.active !== false,
+            createdAt: x.createdAt || new Date().toISOString()
+          };
+        }
+        return null;
+      }).filter(Boolean);
+
+      ['customers', 'products', 'tickets', 'shifts', 'invoices', 'activity'].forEach(function (k) {
+        if (!Array.isArray(state[k])) state[k] = [];
+      });
+
+      if (!state.counters || typeof state.counters !== 'object') {
+        state.counters = { invoice: 1115 };
+      } else if (!state.counters.invoice) {
+        state.counters.invoice = 1115;
+      }
     } catch (e) {
-      state = blank();
+      state = d;
     }
     return state;
   }
@@ -79,6 +111,7 @@
      admin can answer "who changed this, and when". */
   function log(action, detail) {
     var s = load();
+    if (!Array.isArray(s.activity)) s.activity = [];
     s.activity.push({
       id: uid('act'),
       at: new Date().toISOString(),
@@ -99,14 +132,16 @@
     reset: function () { state = blank(); save(); return state; },
     replace: function (n) { state = n; save(); return state; },
     nextInvoiceNumber: function () {
-      var s = load(), n = s.counters.invoice;
+      var s = load(), n = (s.counters && s.counters.invoice) || 1115;
+      if (!s.counters) s.counters = {};
       s.counters.invoice = n + 1;
       save();
       return n;
     },
     me: function () {
       var s = load();
-      return s.staff.filter(function (x) { return x.id === s.session; })[0] || null;
+      if (!s || !Array.isArray(s.staff) || !s.session) return null;
+      return s.staff.filter(function (x) { return x && x.id === s.session; })[0] || null;
     }
   };
 })(window);

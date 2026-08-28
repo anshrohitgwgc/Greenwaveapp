@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0F7A4C">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Greenwave">
 <title>Greenwave Ops</title>
 <link rel="manifest" href="manifest.webmanifest">
@@ -40,10 +41,14 @@
 </svg>
 
 <!-- ============ SIGN IN ============ -->
-<div class="gate" id="gate" hidden>
+<div class="gate" id="gate">
   <div class="gatecard">
     <img src="assets/logo.png" alt="Greenwave Recycling Inc." class="gatelogo">
-    <div id="gateBody"></div>
+    <div id="gateBody">
+      <noscript>
+        <div class="gatefoot">JavaScript is required to run Greenwave Ops. Please enable JavaScript in your browser.</div>
+      </noscript>
+    </div>
   </div>
 </div>
 

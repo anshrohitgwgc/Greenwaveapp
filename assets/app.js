@@ -164,7 +164,7 @@
     $('#signForm').addEventListener('submit', function (e) {
       e.preventDefault();
       var email = $('[name="email"]', body).value.trim().toLowerCase();
-      var u = db.staff.filter(function (x) { return x.email.toLowerCase() === email; })[0];
+      var u = db.staff.filter(function (x) { return x && x.email && x.email.toLowerCase() === email; })[0];
       var msg = $('#gateMsg');
 
       if (!u) {
@@ -223,7 +223,8 @@
     sel.value = warehouseId;
 
     var w = warehouse();
-    $('#taxNote').textContent = w ? w.province + ' · ' + taxFor(w.province).label : '';
+    var prov = (w && w.province) || 'BC';
+    $('#taxNote').textContent = w ? prov + ' · ' + taxFor(prov).label : '';
 
     renderTabbar();
     renderShiftChip();
@@ -1216,14 +1217,19 @@
 
   // ============================================================ BOOT
   function boot() {
-    db = S.get();
-    me = S.me();
-    if (!me || !me.active) { db.session = null; S.save(); showGate(); return; }
-    $('#gate').hidden = true;
-    $('#app').hidden = false;
-    warehouseId = (db.warehouses[0] || {}).id;
-    syncChrome();
-    show(can('invoices') && isRecycling() ? 'invoices' : 'inventory');
+    try {
+      db = S.get();
+      me = S.me();
+      if (!me || !me.active) { db.session = null; S.save(); showGate(); return; }
+      $('#gate').hidden = true;
+      $('#app').hidden = false;
+      warehouseId = (db.warehouses && db.warehouses[0] ? db.warehouses[0].id : 'w1');
+      syncChrome();
+      show(can('invoices') && isRecycling() ? 'invoices' : 'inventory');
+    } catch (err) {
+      console.error('GreenWave boot initialization error:', err);
+      showGate();
+    }
   }
 
   boot();
