@@ -2,8 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0F7A4C">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Greenwave">
 <title>Greenwave Ops</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
+<link rel="icon" href="assets/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -12,13 +18,15 @@
 <body>
 
 <svg width="0" height="0" class="sprite" aria-hidden="true">
-  <symbol id="i-leaf" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2.6c2.9 2 4.4 4.6 4.4 7.2S14.9 15 12 17c-2.9-2-4.4-4.6-4.4-7.2S9.1 4.6 12 2.6Z"/><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" opacity=".6" d="M3.6 19.4c1.7 0 2.6-1.5 4.3-1.5s2.5 1.5 4.2 1.5 2.6-1.5 4.3-1.5 2.4 1.5 4 1.5"/></symbol>
   <symbol id="i-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.8 21 7.4v9.2L12 21.2 3 16.6V7.4z"/><path d="M3 7.4 12 12l9-4.6M12 12v9.2"/></symbol>
   <symbol id="i-scale" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.4v15M7 19.4h10M4.6 8.8h14.8"/><path d="m4.6 8.8-2.2 5.4h4.4zm14.8 0-2.2 5.4h4.4z"/></symbol>
   <symbol id="i-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6 2.8h8l4.2 4.2v14H6z"/><path d="M13.8 2.8v4.4h4.4M9.6 12.6h5M9.6 16.2h5"/></symbol>
   <symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9.2" cy="8.2" r="3.3"/><path d="M3 19.6c0-3.5 2.8-5.7 6.2-5.7s6.2 2.2 6.2 5.7"/><path d="M16.4 5.4a3.3 3.3 0 0 1 0 6.2M21 19c0-2.3-.9-4-2.4-5"/></symbol>
   <symbol id="i-tag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3.4 11.2V3.6h7.6L20.6 13l-7.6 7.6z"/><circle cx="7.6" cy="7.6" r="1.5"/></symbol>
   <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.6v2.6M12 18.8v2.6M21.4 12h-2.6M5.2 12H2.6M18.6 5.4l-1.8 1.8M7.2 16.8l-1.8 1.8M18.6 18.6l-1.8-1.8M7.2 7.2 5.4 5.4"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5.2l3.2 1.9"/></symbol>
+  <symbol id="i-cam" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3.4 8.6h3.2L8.2 6h7.6l1.6 2.6h3.2v10.2H3.4z"/><circle cx="12" cy="13.6" r="3.3"/></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3.6 12a8.4 8.4 0 1 0 2.6-6.1M3.4 4.6v4.6h4.6"/><path d="M12 7.6V12l3 1.8"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.6 4.6 4.6L19 6.6"/></symbol>
@@ -26,19 +34,25 @@
   <symbol id="i-print" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M7 9V3.4h10V9M7 18H4.6V9.6h14.8V18H17"/><path d="M7 14.4h10v6.2H7z"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 6.6h14.8M9.4 6.6V4.4h5.2v2.2M7 6.6l.9 13h8.2l.9-13M10.2 10.4v5.6M13.8 10.4v5.6"/></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7.4v5.4M12 16.3h.01"/></symbol>
-  <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5.2l3.2 1.9"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path fill="currentColor" d="M7.5 4.8v14.4L19.2 12z"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect fill="currentColor" x="6" y="6" width="12" height="12" rx="2.4"/></symbol>
+  <symbol id="i-out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.4 6.6V4.8a1.6 1.6 0 0 0-1.6-1.6H5.6A1.6 1.6 0 0 0 4 4.8v14.4a1.6 1.6 0 0 0 1.6 1.6h7.2a1.6 1.6 0 0 0 1.6-1.6v-1.8"/><path d="M9.6 12h10.8m0 0-3.2-3.2m3.2 3.2-3.2 3.2"/></symbol>
 </svg>
 
-<div class="app" id="app">
+<!-- ============ SIGN IN ============ -->
+<div class="gate" id="gate" hidden>
+  <div class="gatecard">
+    <img src="assets/logo.png" alt="Greenwave Recycling Inc." class="gatelogo">
+    <div id="gateBody"></div>
+  </div>
+</div>
 
-  <!-- ============ RAIL ============ -->
+<!-- ============ APP ============ -->
+<div class="app" id="app" hidden>
+
   <aside class="rail">
     <div class="brand">
-      <span class="mark"><svg><use href="#i-leaf"></use></svg></span>
-      <span class="brandtext">
-        <b id="brandName">Greenwave</b>
-        <i id="brandEntity">Recycling</i>
-      </span>
+      <img src="assets/logo.png" alt="Greenwave Recycling Inc." class="raillogo">
     </div>
 
     <div class="entsw" role="group" aria-label="Company">
@@ -46,71 +60,79 @@
       <button type="button" data-entity="healthcare" aria-pressed="false">Healthcare</button>
     </div>
 
-    <nav class="nav">
+    <nav class="nav" id="nav">
       <span class="navlabel">Operations</span>
       <button type="button" class="navitem" data-view="inventory"><svg><use href="#i-box"></use></svg>Inventory</button>
       <button type="button" class="navitem" data-view="intake"><svg><use href="#i-scale"></use></svg><span id="intakeNav">Weigh-in</span></button>
+      <button type="button" class="navitem" data-view="photos"><svg><use href="#i-cam"></use></svg>Photos</button>
+      <button type="button" class="navitem" data-view="timeclock"><svg><use href="#i-clock"></use></svg>Time clock</button>
 
-      <span class="navlabel" data-only="recycling">Money</span>
-      <button type="button" class="navitem" data-view="invoices" data-only="recycling"><svg><use href="#i-doc"></use></svg>Invoices</button>
+      <span class="navlabel" data-only="recycling" data-role="admin,manager">Money</span>
+      <button type="button" class="navitem" data-view="invoices" data-only="recycling" data-role="admin,manager"><svg><use href="#i-doc"></use></svg>Invoices</button>
 
-      <span class="navlabel">Setup</span>
-      <button type="button" class="navitem" data-view="customers"><svg><use href="#i-users"></use></svg>Customers</button>
-      <button type="button" class="navitem" data-view="products"><svg><use href="#i-tag"></use></svg><span id="productsNav">Materials</span></button>
-      <button type="button" class="navitem" data-view="settings"><svg><use href="#i-gear"></use></svg>Settings</button>
+      <span class="navlabel" data-role="admin,manager">Manage</span>
+      <button type="button" class="navitem" data-view="customers" data-role="admin,manager"><svg><use href="#i-users"></use></svg>Customers</button>
+      <button type="button" class="navitem" data-view="products" data-role="admin,manager"><svg><use href="#i-tag"></use></svg><span id="productsNav">Materials</span></button>
+      <button type="button" class="navitem" data-view="staff" data-role="admin"><svg><use href="#i-users"></use></svg>Staff</button>
+      <button type="button" class="navitem" data-view="history" data-role="admin,manager"><svg><use href="#i-history"></use></svg>History</button>
+      <button type="button" class="navitem" data-view="settings" data-role="admin"><svg><use href="#i-gear"></use></svg>Settings</button>
     </nav>
 
     <div class="railfoot">
-      <span class="ver">No account, no server — everything stays in this browser.</span>
+      <div class="who">
+        <span class="avatar" id="meInitials"></span>
+        <span class="whotext"><b id="meName"></b><i id="meRole"></i></span>
+        <button type="button" class="iconbtn" id="signOut" aria-label="Sign out"><svg><use href="#i-out"></use></svg></button>
+      </div>
     </div>
   </aside>
 
-  <!-- ============ MAIN ============ -->
   <main class="main">
     <header class="topbar">
+      <button type="button" class="menubtn" id="menuBtn" aria-label="Menu"><svg><use href="#i-box"></use></svg></button>
       <div class="wh">
         <label for="wh">Warehouse</label>
         <select id="wh"></select>
       </div>
       <span class="grow"></span>
+      <span class="shiftchip" id="shiftChip" hidden></span>
       <span class="taxnote" id="taxNote"></span>
     </header>
 
     <div class="scroll" id="scroll">
-
-      <!-- ---------- INVENTORY ---------- -->
       <section class="view" id="v-inventory">
-        <div class="vhead">
-          <div><h1>Inventory</h1><p id="invenSub">On hand, derived from posted tickets.</p></div>
-          <button type="button" class="btn" data-goto="intake"><svg><use href="#i-plus"></use></svg><span id="invenCta">Record a load</span></button>
-        </div>
+        <div class="vhead"><div><h1>Inventory</h1><p id="invenSub"></p></div>
+          <button type="button" class="btn" data-goto="intake"><svg><use href="#i-plus"></use></svg><span id="invenCta">Record a load</span></button></div>
         <div id="invenBody"></div>
       </section>
 
-      <!-- ---------- INTAKE ---------- -->
       <section class="view" id="v-intake">
-        <div class="vhead">
-          <div><h1 id="intakeTitle">Weigh-in</h1><p id="intakeSub"></p></div>
-        </div>
+        <div class="vhead"><div><h1 id="intakeTitle">Weigh-in</h1><p id="intakeSub"></p></div></div>
         <div id="intakeBody"></div>
       </section>
 
-      <!-- ---------- INVOICES ---------- -->
+      <section class="view" id="v-photos">
+        <div class="vhead"><div><h1>Photos</h1><p id="photoSub"></p></div>
+          <button type="button" class="btn" id="addPhoto"><svg><use href="#i-cam"></use></svg>Add photo</button></div>
+        <input type="file" id="photoFile" accept="image/*" capture="environment" multiple hidden>
+        <div id="photoBody"></div>
+      </section>
+
+      <section class="view" id="v-timeclock">
+        <div class="vhead"><div><h1>Time clock</h1><p id="clockSub"></p></div></div>
+        <div id="clockBody"></div>
+      </section>
+
       <section class="view" id="v-invoices">
-        <div class="vhead">
-          <div><h1>Invoices</h1><p id="invSub">Create, save and print. Rebate lines let you pay a customer on the same document.</p></div>
-          <button type="button" class="btn" id="newInvoice"><svg><use href="#i-plus"></use></svg>New invoice</button>
-        </div>
+        <div class="vhead"><div><h1>Invoices</h1><p>Every field is free text — type over anything. Rebate lines subtract, so one document covers money owed both ways.</p></div>
+          <button type="button" class="btn" id="newInvoice"><svg><use href="#i-plus"></use></svg>New invoice</button></div>
         <div id="invoiceList"></div>
       </section>
 
-      <!-- ---------- INVOICE EDITOR ---------- -->
       <section class="view" id="v-editor">
         <div class="vhead noprint">
-          <div>
-            <button type="button" class="linkback" data-goto="invoices"><svg><use href="#i-back"></use></svg>All invoices</button>
-            <h1 id="edTitle">New invoice</h1>
-          </div>
+          <div><button type="button" class="linkback" data-goto="invoices"><svg><use href="#i-back"></use></svg>All invoices</button>
+            <h1 id="edTitle">New invoice</h1></div>
           <div class="vactions">
             <button type="button" class="btn ghost" id="edPrint"><svg><use href="#i-print"></use></svg>Print / PDF</button>
             <button type="button" class="btn" id="edSave"><svg><use href="#i-check"></use></svg>Save invoice</button>
@@ -119,45 +141,46 @@
         <div id="editorBody"></div>
       </section>
 
-      <!-- ---------- CUSTOMERS ---------- -->
       <section class="view" id="v-customers">
-        <div class="vhead">
-          <div><h1>Customers</h1><p>Who you bill and who you buy material from.</p></div>
-          <button type="button" class="btn" id="newCustomer"><svg><use href="#i-plus"></use></svg>Add customer</button>
-        </div>
+        <div class="vhead"><div><h1>Customers</h1><p>Saved details to prefill an invoice. You can always type over them.</p></div>
+          <button type="button" class="btn" id="newCustomer"><svg><use href="#i-plus"></use></svg>Add customer</button></div>
         <div id="customerBody"></div>
       </section>
 
-      <!-- ---------- PRODUCTS ---------- -->
       <section class="view" id="v-products">
-        <div class="vhead">
-          <div><h1 id="prodTitle">Materials</h1><p id="prodSub"></p></div>
-          <button type="button" class="btn" id="newProduct"><svg><use href="#i-plus"></use></svg><span id="prodCta">Add material</span></button>
-        </div>
+        <div class="vhead"><div><h1 id="prodTitle">Materials</h1><p id="prodSub"></p></div>
+          <button type="button" class="btn" id="newProduct"><svg><use href="#i-plus"></use></svg><span id="prodCta">Add material</span></button></div>
         <div id="productBody"></div>
       </section>
 
-      <!-- ---------- SETTINGS ---------- -->
-      <section class="view" id="v-settings">
-        <div class="vhead">
-          <div><h1>Settings</h1><p>Your company details appear on every invoice.</p></div>
-        </div>
-        <div id="settingsBody"></div>
+      <section class="view" id="v-staff">
+        <div class="vhead"><div><h1>Staff</h1><p>Only these email addresses can sign in. Nobody else gets past the front door.</p></div>
+          <button type="button" class="btn" id="newStaff"><svg><use href="#i-plus"></use></svg>Add staff</button></div>
+        <div id="staffBody"></div>
       </section>
 
+      <section class="view" id="v-history">
+        <div class="vhead"><div><h1>History</h1><p>Everything anyone has done, newest first.</p></div></div>
+        <div id="historyBody"></div>
+      </section>
+
+      <section class="view" id="v-settings">
+        <div class="vhead"><div><h1>Settings</h1><p>Company details appear on every invoice.</p></div></div>
+        <div id="settingsBody"></div>
+      </section>
     </div>
+
+    <!-- mobile bottom bar -->
+    <nav class="tabbar" id="tabbar"></nav>
   </main>
 </div>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<!-- Modal host -->
 <div class="modalwrap" id="modalWrap" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-    <div class="modalhead">
-      <h2 id="modalTitle"></h2>
-      <button type="button" class="iconbtn" id="modalClose" aria-label="Close"><svg><use href="#i-x"></use></svg></button>
-    </div>
+    <div class="modalhead"><h2 id="modalTitle"></h2>
+      <button type="button" class="iconbtn" id="modalClose" aria-label="Close"><svg><use href="#i-x"></use></svg></button></div>
     <form id="modalForm" class="modalbody"></form>
     <div class="modalfoot">
       <button type="button" class="btn ghost" id="modalCancel">Cancel</button>
@@ -166,7 +189,14 @@
   </div>
 </div>
 
+<div class="lightbox" id="lightbox" hidden>
+  <button type="button" class="lbclose" id="lbClose" aria-label="Close"><svg><use href="#i-x"></use></svg></button>
+  <img id="lbImg" alt="">
+  <div class="lbmeta" id="lbMeta"></div>
+</div>
+
 <script src="assets/store.js"></script>
+<script src="assets/photos.js"></script>
 <script src="assets/app.js"></script>
 </body>
 </html>

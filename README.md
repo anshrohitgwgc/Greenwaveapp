@@ -1,104 +1,141 @@
 # Greenwave Ops
 
-An invoice maker and stock ledger for Greenwave Recycling and Greenwave
-Healthcare. It starts **completely empty** — no demo customers, no demo
-materials, no demo invoices.
+Invoicing, stock, photos and a time clock for Greenwave Recycling and
+Greenwave Healthcare. Starts **completely empty** — no demo data.
 
 ## Run it
 
-Double-click `index.html`. That's the whole install — no Node, no server, no
-account. It works offline.
+**On a computer:** unzip and double-click `index.html`.
 
-Chrome, Edge, Firefox and Safari are all fine.
+**On phones and tablets:** you need it served over http, so run
 
-## What's in it
+```bash
+./serve.sh
+```
 
-**Invoices** *(Recycling only — Healthcare doesn't raise these)*
+It prints two addresses. Open the `http://192.168.x.x:8080` one on any phone
+on the same wifi, then **Add to Home Screen** — it installs like an app, opens
+full screen with no browser bars, and works with no signal.
 
-- Build an invoice line by line: service date, product, unit, description,
-  quantity, rate. The amount and the totals compute as you type.
-- **Rebate lines.** Tick *Rebate* on a line when you're paying the customer for
-  their material instead of charging them — it subtracts. One document covers
-  money going both directions, so you don't need a separate payable.
-- **Tax follows the warehouse it ships from.** GST 5% out of BC or Alberta,
-  HST 13% out of Ontario. Change *Ships from* and the total changes.
-- Terms drive the due date. Net 15 on 27 Aug gives 11 Sep.
-- **Print / PDF** prints just the invoice — no sidebar, no form controls, no
-  buttons. Use your browser's "Save as PDF" to get a file.
-- Numbering continues from your last one: the next invoice is **1115**.
+## About "an iOS app and an Android app"
 
-**Inventory**
+This installs to the home screen on both, from one codebase, with no App Store
+review, no Apple developer account and no build step. For an internal staff
+tool that is the right answer right now.
 
-- On hand per warehouse, derived from tickets. Never typed in directly.
-- Products with sizes (XL / L / M / S) break out into columns with totals on
-  both axes, the way your spreadsheet does.
-- The footer total is summed from the rows in front of you, not stored.
+What it does **not** do that a store-built native app would: background GPS,
+push notifications when the app is closed, and reading a weighbridge over
+Bluetooth or serial. When you need those, the same screens get rebuilt in
+React Native — but that only makes sense once there is a server for them to
+sync with, because a native app with per-device storage has the same limits
+this one does.
 
-**Weigh-in / Receive**
+## Signing in
 
-- Weighed materials: enter gross and tare, net computes. A tare above gross is
-  refused rather than posting a negative load.
-- Counted products: enter a quantity, or one per size.
-- In or Out. Posting updates inventory immediately.
+The first person to open it creates the administrator account. After that,
+**only email addresses in Staff can sign in** — anything else is refused.
 
-**Setup** — customers, materials/products, warehouses, and your company
-details as they appear on the invoice.
+Three roles:
 
-## What's already filled in
+| | Stock, weigh-in, photos, clock | Invoices, customers, materials, history | Staff, settings |
+|---|---|---|---|
+| **Staff** | ✅ | | |
+| **Manager** | ✅ | ✅ | |
+| **Administrator** | ✅ | ✅ | ✅ |
 
-Only things you've actually told me:
+**Be clear-eyed about this: it is a front door, not a lock.** With no server
+there is no password to verify — the app trusts the email typed in. It keeps
+the wrong people out of the interface and records who did what, but anyone
+who can open this browser could sign in as anybody. Real authentication
+arrives with the server.
 
-- Your legal identity from invoice 1114 — name, address, BN, GST/HST number,
-  email, phone. Editable in Settings.
-- Three warehouses: Maple Ridge BC, Calgary AB, Ontario. **The Ontario one has
-  no address yet** — it needs a city.
-- The next invoice number, 1115.
+## Invoices *(Recycling only)*
 
-Everything else is empty and waiting for you.
+**Every field is a text box.** Company name, address, business number, bill
+to, ship to, ship via, invoice number, the tax label *and* the tax rate — type
+over any of it. Customers and warehouses only *prefill*; nothing is locked,
+because real invoices always need a one-off change somewhere.
 
-## Where your data lives — read this
+- Amounts and totals compute as you type.
+- **Rebate lines subtract.** Tick *Rebate* when you're paying the customer for
+  their material instead of charging them, and one document covers both
+  directions. Below zero it reads *Payable to customer*.
+- Warehouse prefills tax: GST 5% out of BC and Alberta, HST 13% out of
+  Ontario. Type over it whenever a job needs something else.
+- **Print / PDF** prints the invoice alone — no sidebar, no form controls.
+- Numbering continues from 1114, so your next one is 1115.
 
-**In this browser, on this computer. Nowhere else.**
+Checked against your invoice 1114: 3.658 t × $140.00 = **$512.12**, GST
+**$25.61**, total **$537.73**.
 
-That means it's private and works offline, but also:
+## Photos
 
-- Clearing site data erases it.
-- It doesn't follow you to another computer or phone.
-- Nobody else on your team can see it.
+Tap **Add photo** — on a phone this opens the camera. Staff see their own;
+**managers and administrators see every photo anyone has taken**, tagged with
+who took it and when. Administrators can delete.
 
-**Use Settings → Export backup regularly.** It downloads a `.json` file you can
-re-import here or on another machine. Do that before you rely on this for
-anything that matters.
+Photos are downscaled to 1600px before saving. A phone photo is 4-8 MB; this
+stores it at roughly 300 KB, still easily good enough to read a plate, a seal
+number or a contaminated load. It also strips EXIF, so a customer's GPS
+coordinates don't travel with a picture of their bin.
 
-This is the right trade for getting something usable today. Moving it onto your
-own servers — Postgres on 192.168.1.22, the API nodes, proper logins — is the
-next step, and `greenwave-ops-brief.md` is the plan for it.
+They live in IndexedDB, not localStorage — which caps out around 5 MB and would
+break the whole app after a handful of pictures.
 
-## Two things deliberately not done
+## Time clock
 
-**BC PST isn't applied.** Only GST and HST are. Whether PST applies to
-recyclable material sold for reprocessing is a question for your accountant,
-and this app would rather ask than quietly guess and leave you under-collected.
+One button. Live counter while you're on shift, your last 7 days, and your
+shift history. Managers and administrators also see the whole team's hours and
+who is on shift right now. A green chip in the top bar follows you around the
+app while the clock is running.
 
-**Nothing is locked after saving.** A real system makes a posted invoice
-immutable and handles corrections with a credit note. This one lets you edit a
-saved invoice, because with no server there's no audit trail to protect. Worth
-knowing if two people ever work from the same backup.
+## History
 
-## Not built yet
+Every sign-in, ticket, photo, invoice, clock-in and staff change, with who and
+when. Administrators and managers only.
 
-Dispatch and routing, the driver app, certificates of recycling and
-destruction, ESG reporting, the double-entry ledger, EDI. They depend on this
-data existing first — which is why this module came first.
+## Where your data lives
+
+**In this browser, on this device.** Private, works offline, and gone if you
+clear site data. Nobody else on the team sees it — two people using this on two
+phones have two separate sets of records.
+
+**Settings → Export backup** downloads a `.json`. Do it regularly.
+
+Note the JSON does **not** include photos — they are far too large. Photos stay
+on the device that took them.
+
+That per-device limit is the real reason to move this onto your own servers.
+`greenwave-ops-brief.md` is the plan: Postgres on 192.168.1.22, MinIO for
+photos, the API nodes you already have.
+
+## Not built — and why
+
+**Enterprise / Phase 2** — index-linked commodity pricing, EDI 810/850/856,
+consolidated parent-child invoicing, ESG and Scope 3 reporting, dual approval
+over $5,000, immutable audit trails.
+
+None of it can work on per-device browser storage. Every item needs a server:
+a shared database two people can both write to, a scheduled job to pull
+Fastmarkets or LME prices, an endpoint a customer's SAP can transmit to, and
+an audit log nobody can edit. Building them here would produce something that
+looks right on one laptop and falls apart the moment a second person uses it.
+
+Also outstanding: dispatch and routing, the driver route app, certificates of
+recycling and destruction, and the double-entry ledger.
 
 ## Files
 
 ```
-index.html          the app shell and all views
-assets/app.css      styling, including the print layout
-assets/app.js       all logic — invoices, tickets, inventory
-assets/store.js     localStorage persistence and the empty starting state
+index.html              app shell and all views
+assets/app.css          styling, print layout, mobile
+assets/app.js           all logic
+assets/store.js         localStorage state
+assets/photos.js        IndexedDB photo storage
+assets/logo.png         your logo
+manifest.webmanifest    home-screen install
+sw.js                   offline cache
+serve.sh                local server for phone testing
 ```
 
-Plain HTML, CSS and JavaScript. No build step, no dependencies. Open it in
-Claude Code and extend it directly.
+No build step, no dependencies. Open it in Claude Code and extend it directly.

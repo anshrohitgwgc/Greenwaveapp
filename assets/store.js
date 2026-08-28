@@ -1,26 +1,21 @@
 /* ==========================================================================
    Storage.
 
-   Everything lives in this browser's localStorage. No server, no account.
-   That means: it works offline and nobody else can see it, but it is also
-   tied to this browser on this machine. Use Settings → Export to take a
-   backup before you rely on it.
-
-   Money is stored in CENTS as integers. Quantities are stored as entered
-   (up to 3 decimals) and every product carries its own unit. Storing money
-   as a float is how invoices end up a cent off their own line items.
+   Everything lives in this browser. No server, no account service.
+   Money is stored in CENTS as integers. Photos live in IndexedDB (see
+   photos.js) because they are far too big for localStorage.
    ========================================================================== */
 (function (global) {
   'use strict';
 
-  var KEY = 'greenwave.ops.v1';
+  var KEY = 'greenwave.ops.v2';
 
-  /* Seeded with facts you have actually given me — the legal identity from
-     invoice 1114 and the three provinces you operate in. Nothing invented:
-     no customers, no materials, no tickets, no invoices. */
+  /* Seeded with facts you have given me — the legal identity from invoice
+     1114 and the three provinces you operate in. No demo customers,
+     materials, tickets or invoices. */
   function blank() {
     return {
-      version: 1,
+      version: 2,
       company: {
         name: 'Greenwave Recycling Inc.',
         line1: '23394 Fisherman Rd,',
@@ -28,19 +23,23 @@
         email: 'sales@greenwaverecycling.ca',
         phone: '6724720423',
         bn: 'BN 751161951BC0001',
-        gst: 'GST/HST Registration No. 751161951RT0001',
+        gst: 'GST/HST Registration No. 751161951RT0001'
       },
       warehouses: [
         { id: 'w1', name: 'Maple Ridge, BC', province: 'BC' },
         { id: 'w2', name: 'Calgary, AB',     province: 'AB' },
-        { id: 'w3', name: 'Ontario',         province: 'ON' },
+        { id: 'w3', name: 'Ontario',         province: 'ON' }
       ],
-      customers: [],   // { id, name, line1, line2, email, phone }
-      products: [],    // { id, entity, name, unit, capture, rateCents, category }
-      tickets: [],     // { id, entity, warehouseId, direction, productId, ... }
-      invoices: [],    // { id, number, ... , lines: [] }
-      counters: { invoice: 1115 },  // your last issued invoice was 1114
-      lastEntity: 'recycling',
+      staff: [],       // { id, email, name, role, active, createdAt }
+      session: null,   // staff id of whoever is signed in on this device
+      customers: [],
+      products: [],
+      tickets: [],
+      shifts: [],      // { id, staffId, startAt, endAt, note }
+      invoices: [],
+      activity: [],    // { id, at, staffId, action, detail }
+      counters: { invoice: 1115 },   // your last issued invoice was 1114
+      lastEntity: 'recycling'
     };
   }
 
@@ -51,9 +50,13 @@
     try {
       var raw = global.localStorage.getItem(KEY);
       state = raw ? JSON.parse(raw) : blank();
+      // Fill in anything a older save is missing, so an upgrade never
+      // lands the app on undefined.
+      var d = blank();
+      Object.keys(d).forEach(function (k) {
+        if (state[k] === undefined) state[k] = d[k];
+      });
     } catch (e) {
-      // Private mode, disabled storage, or corrupt JSON — keep working in
-      // memory rather than showing the user a broken app.
       state = blank();
     }
     return state;
@@ -68,8 +71,23 @@
     }
   }
 
-  function uid(prefix) {
-    return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  function uid(p) {
+    return p + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  }
+
+  /* Append-only history. Every write in the app goes through here so an
+     admin can answer "who changed this, and when". */
+  function log(action, detail) {
+    var s = load();
+    s.activity.push({
+      id: uid('act'),
+      at: new Date().toISOString(),
+      staffId: s.session,
+      action: action,
+      detail: detail || ''
+    });
+    if (s.activity.length > 5000) s.activity = s.activity.slice(-5000);
+    save();
   }
 
   global.Store = {
@@ -77,14 +95,18 @@
     get: load,
     save: save,
     uid: uid,
+    log: log,
     reset: function () { state = blank(); save(); return state; },
-    replace: function (next) { state = next; save(); return state; },
+    replace: function (n) { state = n; save(); return state; },
     nextInvoiceNumber: function () {
-      var s = load();
-      var n = s.counters.invoice;
+      var s = load(), n = s.counters.invoice;
       s.counters.invoice = n + 1;
       save();
       return n;
     },
+    me: function () {
+      var s = load();
+      return s.staff.filter(function (x) { return x.id === s.session; })[0] || null;
+    }
   };
 })(window);
