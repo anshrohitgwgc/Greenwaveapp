@@ -30,8 +30,9 @@
         { id: 'w2', name: 'Calgary, AB',     province: 'AB' },
         { id: 'w3', name: 'Ontario',         province: 'ON' }
       ],
-      staff: [],       // { id, email, name, role, active, createdAt }
-      session: null,   // staff id of whoever is signed in on this device
+      staff: [],       // legacy local roster — display only, see README V2 notes
+      session: null,   // 'server' once signed in against the real API, else null
+      serverUser: null, // { id, email, name, role } from the last successful /auth/login
       customers: [],
       products: [],
       tickets: [],
@@ -112,10 +113,15 @@
   function log(action, detail) {
     var s = load();
     if (!Array.isArray(s.activity)) s.activity = [];
+    var actor = s.serverUser;
     s.activity.push({
       id: uid('act'),
       at: new Date().toISOString(),
-      staffId: s.session,
+      // Denormalized at write time: db.session is just the literal string
+      // 'server' now (one real session model for every user, see
+      // setServerSession), so it can't be used as a per-user key any more.
+      staffId: actor ? actor.id : null,
+      staffName: actor ? actor.name : null,
       action: action,
       detail: detail || ''
     });
@@ -138,10 +144,33 @@
       save();
       return n;
     },
+    /* Real session: whoever the server authenticated via POST /auth/login.
+       Shaped like the old local staff record ({id, email, name, role,
+       active}) so the rest of the app — which reads me.role, me.name,
+       initials(me.name), etc. everywhere — doesn't need to change. */
+    setServerSession: function (user) {
+      var s = load();
+      s.session = 'server';
+      s.serverUser = {
+        id: user.id,
+        email: user.email,
+        name: user.fullName,
+        role: user.role,
+        active: true
+      };
+      save();
+      return s.serverUser;
+    },
+    clearSession: function () {
+      var s = load();
+      s.session = null;
+      s.serverUser = null;
+      save();
+    },
     me: function () {
       var s = load();
-      if (!s || !Array.isArray(s.staff) || !s.session) return null;
-      return s.staff.filter(function (x) { return x && x.id === s.session; })[0] || null;
+      if (!s || s.session !== 'server' || !s.serverUser) return null;
+      return s.serverUser;
     }
   };
 })(window);

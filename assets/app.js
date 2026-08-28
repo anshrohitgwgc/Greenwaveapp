@@ -5,6 +5,7 @@
   'use strict';
 
   var S = window.Store;
+  var Api = window.GreenwaveApi;
 
   /* Sales tax follows the province goods ship FROM, so it belongs to the
      warehouse. Every invoice keeps its own copy of the label and rate, so a
@@ -119,77 +120,129 @@
   }
 
   // ============================================================ SIGN IN
-  function showGate() {
-    $('#app').hidden = true;
-    $('#gate').hidden = false;
-    var body = $('#gateBody');
+  //
+  // Real server authentication (email + password against POST /auth/login).
+  // The browser is not the authority any more — it never decides who is
+  // allowed in; it just asks the server and shows what comes back. See
+  // docs/V2_ARCHITECTURE.md #3.
+  function gateError(msg, text) {
+    msg.innerHTML = '<div class="gateerr"><svg><use href="#i-alert"></use></svg><div>' + text + '</div></div>';
+  }
 
-    if (!db.staff.length) {
-      // First run: somebody has to be able to get in.
-      body.innerHTML =
-        '<h1>Set up the first administrator</h1>' +
-        '<p class="lead">Nobody can use this until one account exists. Add yourself, then add the rest of the team from Staff.</p>' +
-        '<form id="bootForm">' +
-          field('name', 'Your name', { required: true, placeholder: 'Ansh Bapu' }) +
-          field('email', 'Your work email', { type: 'email', required: true, placeholder: 'you@greenwaverecycling.ca', autocomplete: 'email' }) +
-          '<button type="submit" class="btn">Create administrator</button>' +
-        '</form>' +
-        '<div class="gatefoot">This is the only account created automatically. Every other person has to be added by an administrator before they can sign in.</div>';
-
-      $('#bootForm').addEventListener('submit', function (e) {
-        e.preventDefault();
-        var name = $('[name="name"]', body).value.trim();
-        var email = $('[name="email"]', body).value.trim().toLowerCase();
-        if (!name || !email) return;
-        var u = { id: S.uid('stf'), email: email, name: name, role: 'admin', active: true, createdAt: new Date().toISOString() };
-        db.staff.push(u);
-        db.session = u.id;
-        S.save();
-        S.log('signin', 'First administrator created');
-        boot();
-      });
-      return;
-    }
-
+  function renderSignInForm(body) {
     body.innerHTML =
       '<h1>Sign in</h1>' +
-      '<p class="lead">Enter the work email an administrator registered for you.</p>' +
+      '<p class="lead">Enter your work email and password.</p>' +
       '<form id="signForm">' +
         field('email', 'Work email', { type: 'email', required: true, placeholder: 'you@greenwaverecycling.ca', autocomplete: 'email' }) +
-        '<button type="submit" class="btn">Sign in</button>' +
+        field('password', 'Password', { type: 'password', required: true, autocomplete: 'current-password' }) +
+        '<button type="submit" class="btn" id="signSubmit">Sign in</button>' +
       '</form>' +
       '<div id="gateMsg"></div>' +
-      '<div class="gatefoot">Only addresses in the staff list can sign in. If yours is refused, ask an administrator to add it.</div>';
+      '<div class="gatefoot">Only accounts an administrator has created can sign in. ' +
+        '<a href="#" id="gotoBootstrap">First time setting this up?</a></div>';
 
     $('#signForm').addEventListener('submit', function (e) {
       e.preventDefault();
-      var email = $('[name="email"]', body).value.trim().toLowerCase();
-      var u = db.staff.filter(function (x) { return x && x.email && x.email.toLowerCase() === email; })[0];
+      var email = $('[name="email"]', body).value.trim();
+      var password = $('[name="password"]', body).value;
       var msg = $('#gateMsg');
+      var btn = $('#signSubmit');
+      msg.innerHTML = '';
+      btn.disabled = true;
+      btn.textContent = 'Signing in…';
 
-      if (!u) {
-        msg.innerHTML = '<div class="gateerr"><svg><use href="#i-alert"></use></svg><div>' +
-          '<b>That email isn\'t registered.</b><br>Ask an administrator to add it to the staff list.</div></div>';
-        return;
-      }
-      if (!u.active) {
-        msg.innerHTML = '<div class="gateerr"><svg><use href="#i-alert"></use></svg><div>' +
-          '<b>That account is deactivated.</b><br>An administrator can turn it back on.</div></div>';
-        return;
-      }
-      db.session = u.id;
-      S.save();
-      S.log('signin', u.name + ' signed in');
-      boot();
+      Api.login(email, password).then(function (user) {
+        S.setServerSession(user);
+        db = S.get();
+        S.log('signin', user.fullName + ' signed in');
+        boot();
+      }).catch(function (err) {
+        btn.disabled = false;
+        btn.textContent = 'Sign in';
+        if (err.status === 401) {
+          gateError(msg, '<b>Email or password is incorrect.</b><br>Check both and try again.');
+        } else if (err.status === 429) {
+          gateError(msg, '<b>Too many attempts.</b><br>Wait a minute and try again.');
+        } else if (err.status === 0) {
+          gateError(msg, '<b>Can’t reach the GreenWave server.</b><br>Check your connection and try again.');
+        } else {
+          gateError(msg, '<b>Sign-in failed.</b><br>' + esc(err.message || 'Please try again.'));
+        }
+      });
     });
+
+    $('#gotoBootstrap').addEventListener('click', function (e) {
+      e.preventDefault();
+      renderBootstrapForm(body);
+    });
+  }
+
+  function renderBootstrapForm(body) {
+    body.innerHTML =
+      '<h1>Set up the first administrator</h1>' +
+      '<p class="lead">This only works once — before any account exists on the server. ' +
+        'Every other person is then added by an administrator, from Staff.</p>' +
+      '<form id="bootForm">' +
+        field('name', 'Your name', { required: true, placeholder: 'Ansh Bapu' }) +
+        field('email', 'Your work email', { type: 'email', required: true, placeholder: 'you@greenwaverecycling.ca', autocomplete: 'email' }) +
+        field('password', 'Password', { type: 'password', required: true, autocomplete: 'new-password', help: 'At least 8 characters, with upper, lower and a number.' }) +
+        '<button type="submit" class="btn" id="bootSubmit">Create administrator</button>' +
+      '</form>' +
+      '<div id="gateMsg"></div>' +
+      '<div class="gatefoot"><a href="#" id="gotoSignIn">Already set up? Sign in instead</a></div>';
+
+    $('#bootForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var name = $('[name="name"]', body).value.trim();
+      var email = $('[name="email"]', body).value.trim();
+      var password = $('[name="password"]', body).value;
+      var msg = $('#gateMsg');
+      var btn = $('#bootSubmit');
+      if (!name || !email || !password) return;
+      msg.innerHTML = '';
+      btn.disabled = true;
+      btn.textContent = 'Creating…';
+
+      Api.registerFirstAdmin(name, email, password).then(function (user) {
+        S.setServerSession(user);
+        db = S.get();
+        S.log('signin', 'First administrator created');
+        boot();
+      }).catch(function (err) {
+        btn.disabled = false;
+        btn.textContent = 'Create administrator';
+        if (err.status === 409) {
+          gateError(msg, '<b>An administrator already exists.</b><br>Sign in instead.');
+          setTimeout(function () { renderSignInForm(body); }, 1400);
+        } else if (err.status === 400) {
+          gateError(msg, '<b>' + esc(err.message || 'Check the form and try again.') + '</b>');
+        } else if (err.status === 0) {
+          gateError(msg, '<b>Can’t reach the GreenWave server.</b><br>Check your connection and try again.');
+        } else {
+          gateError(msg, '<b>Could not create the account.</b><br>' + esc(err.message || 'Please try again.'));
+        }
+      });
+    });
+
+    $('#gotoSignIn').addEventListener('click', function (e) {
+      e.preventDefault();
+      renderSignInForm(body);
+    });
+  }
+
+  function showGate() {
+    $('#app').hidden = true;
+    $('#gate').hidden = false;
+    renderSignInForm($('#gateBody'));
   }
 
   function signOut() {
     var open = openShift();
     if (open && !confirm('You are still clocked in. Sign out anyway?\n\nYour shift stays open and keeps counting.')) return;
     S.log('signout', me ? me.name + ' signed out' : '');
-    db.session = null;
-    S.save();
+    S.clearSession();
+    Api.clearSession();
     me = null;
     releaseUrls();
     if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
@@ -976,7 +1029,7 @@
     $('#staffBody').innerHTML = '<div class="card"><div class="tablewrap"><table><thead><tr>' +
       '<th>Name</th><th>Email</th><th>Role</th><th>Status</th><th class="coldel"></th></tr></thead><tbody>' +
       db.staff.map(function (u) {
-        var isMe = u.id === me.id;
+        var isMe = !!(u.email && me.email && u.email.toLowerCase() === me.email.toLowerCase());
         return '<tr><td><strong>' + esc(u.name) + '</strong>' + (isMe ? ' <span class="pill flat">you</span>' : '') + '</td>' +
           '<td class="mono" style="font-size:13px">' + esc(u.email) + '</td>' +
           '<td>' + esc((ROLES[u.role] || {}).label || u.role) + '</td>' +
@@ -985,9 +1038,9 @@
             (u.active ? 'Deactivate' : 'Reactivate') + '</button>') + '</td></tr>';
       }).join('') + '</tbody></table></div>' +
       '<div class="pad" style="padding-top:0"><div class="note" style="margin-top:14px"><svg><use href="#i-alert"></use></svg><div>' +
-      '<b>This is a front door, not a lock.</b> With no server there is no password to check — the app trusts the email typed in. ' +
-      'It keeps the wrong people out of the interface and records who did what, but anyone who can open this browser could sign in as anybody. ' +
-      'Real authentication arrives with the server.</div></div></div></div>';
+      '<b>This list is local and does not control sign-in.</b> Real accounts, passwords and roles now live on the server — ' +
+      'an administrator creates them there (via the API, until a server-backed Staff screen replaces this one). ' +
+      'This table is kept for reference only and is not synced yet.</div></div></div></div>';
 
     $$('[data-togglestaff]').forEach(function (b) {
       b.addEventListener('click', function () {
@@ -1003,7 +1056,7 @@
   function staffModal() {
     openModal('Add staff',
       field('name', 'Full name', { required: true }) +
-      field('email', 'Work email', { type: 'email', required: true, help: 'This is the only address that will let them in.' }) +
+      field('email', 'Work email', { type: 'email', required: true, help: 'Reference only — does not grant sign-in. Create the real account on the server (POST /users).' }) +
       field('role', 'Role', { type: 'select', value: 'staff', options: [
         { value: 'staff', label: 'Staff — stock, photos, own hours' },
         { value: 'manager', label: 'Manager — everything except staff and settings' },
@@ -1025,8 +1078,9 @@
 
     $('#historyBody').innerHTML = '<div class="card">' + acts.slice(0, 400).map(function (a) {
       var u = byId[a.staffId];
+      var who = a.staffName || (u ? u.name : null) || 'Unknown';
       return '<div class="histrow"><span class="histwhen">' + esc(when(a.at)) + '</span>' +
-        '<span class="histwho">' + esc(u ? u.name : 'Unknown') + '</span>' +
+        '<span class="histwho">' + esc(who) + '</span>' +
         '<span class="histwhat">' + esc(a.detail || a.action) + '</span></div>';
     }).join('') + '</div>' +
     (acts.length > 400 ? '<p style="color:var(--muted);font-size:13px;margin-top:12px">Showing the 400 most recent of ' + acts.length + '.</p>' : '');
@@ -1220,7 +1274,14 @@
     try {
       db = S.get();
       me = S.me();
-      if (!me || !me.active) { db.session = null; S.save(); showGate(); return; }
+      // The JWT lives in sessionStorage and is gone once the tab closes,
+      // even though db.session (localStorage) would still say 'server' —
+      // don't show the app as signed in with no working session behind it.
+      if (!me || !me.active || !Api.isAuthenticated()) {
+        S.clearSession();
+        showGate();
+        return;
+      }
       $('#gate').hidden = true;
       $('#app').hidden = false;
       warehouseId = (db.warehouses && db.warehouses[0] ? db.warehouses[0].id : 'w1');

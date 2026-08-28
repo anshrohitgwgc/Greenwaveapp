@@ -30,12 +30,22 @@ React Native — but that only makes sense once there is a server for them to
 sync with, because a native app with per-device storage has the same limits
 this one does.
 
-## Signing in
+## Signing in (V2 — real server authentication)
 
-The first person to open it creates the administrator account. After that,
-**only email addresses in Staff can sign in** — anything else is refused.
+Sign-in is email **and password**, checked by the real GreenWave API
+(`app/api` in the `FULL-INFRA-V.0001` repo) against PostgreSQL — not by the
+browser. The first time the server has zero accounts, this app's gate offers
+"First time setting this up?", which creates exactly one administrator and
+then permanently disables itself; every other account is created by an
+administrator (`POST /users`), never by anyone signing themselves up.
 
-Three roles:
+The browser is never the authority: a password gets bcrypt-checked on the
+server, a JWT comes back, and that token — not anything typed into this
+page — is what every subsequent request is checked against. See
+`docs/V2_ARCHITECTURE.md` in the API repo for the full model.
+
+Three roles, enforced **server-side** on every request (the sidebar just
+hides buttons a role can't use — it isn't what stops them):
 
 | | Stock, weigh-in, photos, clock | Invoices, customers, materials, history | Staff, settings |
 |---|---|---|---|
@@ -43,11 +53,12 @@ Three roles:
 | **Manager** | ✅ | ✅ | |
 | **Administrator** | ✅ | ✅ | ✅ |
 
-**Be clear-eyed about this: it is a front door, not a lock.** With no server
-there is no password to verify — the app trusts the email typed in. It keeps
-the wrong people out of the interface and records who did what, but anyone
-who can open this browser could sign in as anybody. Real authentication
-arrives with the server.
+**Status note:** this pass wires sign-in/sign-out fully to the server. The
+rest of this app's data (invoices, inventory, customers, photos, staff list)
+still reads/writes the local browser storage described below — the backend
+already has real endpoints for all of it (`assets/api.js`), that wiring is
+the next step. The in-app **Staff** screen is local-only display for now and
+does not create real accounts.
 
 ## Invoices *(Recycling only)*
 
@@ -130,7 +141,8 @@ recycling and destruction, and the double-entry ledger.
 index.html              app shell and all views
 assets/app.css          styling, print layout, mobile
 assets/app.js           all logic
-assets/store.js         localStorage state
+assets/api.js           GreenWave API client (V2 — auth is wired; see Signing in above)
+assets/store.js         localStorage state (client cache, not server-authoritative — see V2 notes)
 assets/photos.js        IndexedDB photo storage
 assets/logo.png         your logo
 manifest.webmanifest    home-screen install

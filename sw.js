@@ -1,10 +1,11 @@
 /* Offline cache for Greenwave Ops */
-var CACHE = 'greenwave-v4';
+var CACHE = 'greenwave-v5';
 var FILES = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
   '/assets/app.css',
+  '/assets/api.js',
   '/assets/app.js',
   '/assets/store.js',
   '/assets/photos.js',
