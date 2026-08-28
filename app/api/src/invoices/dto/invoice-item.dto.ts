@@ -1,4 +1,11 @@
-import { IsBoolean, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+  MinLength,
+} from 'class-validator';
 
 export class InvoiceItemDto {
   @IsString()

@@ -1,4 +1,12 @@
-import { IsIn, IsNumber, IsOptional, IsString, IsUUID, Min, ValidateIf } from 'class-validator';
+import {
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 
 export class CreateInventoryTransactionDto {
   @IsUUID()
@@ -36,7 +44,7 @@ export class CreateInventoryTransactionDto {
 
   // Required whenever type === 'adjustment' — enforced again in the
   // service/DB layer, not just here, since a client could omit this check.
-  @ValidateIf((dto) => dto.type === 'adjustment')
+  @ValidateIf((dto: CreateInventoryTransactionDto) => dto.type === 'adjustment')
   @IsString()
   reason?: string;
 

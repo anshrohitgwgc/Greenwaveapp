@@ -31,7 +31,8 @@ export class CustomersService {
   }
 
   findAll(warehouseId?: string) {
-    if (warehouseId) return this.customerRepository.find({ where: { warehouseId } });
+    if (warehouseId)
+      return this.customerRepository.find({ where: { warehouseId } });
     return this.customerRepository.find();
   }
 
@@ -43,8 +44,12 @@ export class CustomersService {
 
   async update(id: string, dto: UpdateCustomerDto, actorId: number) {
     await this.findOne(id);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await this.customerRepository.update(id, { ...dto, updatedBy: actorId } as any);
+
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- simple-json column, TypeORM's DeepPartial can't express it precisely
+    await this.customerRepository.update(id, {
+      ...dto,
+      updatedBy: actorId,
+    } as any);
     return this.findOne(id);
   }
 }

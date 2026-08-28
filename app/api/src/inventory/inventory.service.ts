@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
@@ -39,7 +44,8 @@ export class InventoryService {
   }
 
   listContainers(warehouseId?: string) {
-    if (warehouseId) return this.containerRepository.find({ where: { warehouseId } });
+    if (warehouseId)
+      return this.containerRepository.find({ where: { warehouseId } });
     return this.containerRepository.find();
   }
 
@@ -49,7 +55,9 @@ export class InventoryService {
         throw new BadRequestException('reason is required for adjustments');
       }
       if (!['admin', 'manager'].includes(actor.role)) {
-        throw new ForbiddenException('Adjustments require a manager or administrator');
+        throw new ForbiddenException(
+          'Adjustments require a manager or administrator',
+        );
       }
     }
 
@@ -88,7 +96,10 @@ export class InventoryService {
         dto.type === 'adjustment'
           ? `${actor.email} adjusted stock by ${total} (reason: ${dto.reason})`
           : `${actor.email} recorded ${dto.type} of ${total}`,
-      metadata: { materialId: dto.materialId, containerId: dto.containerId ?? null },
+      metadata: {
+        materialId: dto.materialId,
+        containerId: dto.containerId ?? null,
+      },
     });
 
     return saved;
@@ -112,7 +123,8 @@ export class InventoryService {
   }
 
   getBalances(warehouseId?: string) {
-    if (warehouseId) return this.balanceRepository.find({ where: { warehouseId } });
+    if (warehouseId)
+      return this.balanceRepository.find({ where: { warehouseId } });
     return this.balanceRepository.find();
   }
 

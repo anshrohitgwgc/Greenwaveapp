@@ -1,4 +1,11 @@
-import { IsEmail, IsObject, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import {
+  IsEmail,
+  IsObject,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+} from 'class-validator';
 
 export class CreateCustomerDto {
   @IsString()

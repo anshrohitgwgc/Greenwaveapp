@@ -39,7 +39,8 @@ export class MaterialsService {
     await this.findOne(id);
     await this.materialRepository.update(id, {
       ...dto,
-      defaultPrice: dto.defaultPrice != null ? String(dto.defaultPrice) : undefined,
+      defaultPrice:
+        dto.defaultPrice != null ? String(dto.defaultPrice) : undefined,
     });
     return this.findOne(id);
   }

@@ -29,7 +29,9 @@ export class PhotosController {
   constructor(private readonly photosService: PhotosService) {}
 
   @Post()
-  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: MAX_UPLOAD_BYTES } }))
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: MAX_UPLOAD_BYTES } }),
+  )
   upload(
     @UploadedFile() file: Express.Multer.File,
     @Body() meta: UploadPhotoMetadataDto,

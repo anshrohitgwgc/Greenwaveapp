@@ -16,7 +16,10 @@ export class InventoryController {
 
   @Post('containers')
   @Roles('admin', 'manager', 'staff', 'driver')
-  createContainer(@Body() dto: CreateContainerDto, @CurrentUser() actor: AuthenticatedUser) {
+  createContainer(
+    @Body() dto: CreateContainerDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
     return this.inventoryService.createContainer(dto, actor.id);
   }
 

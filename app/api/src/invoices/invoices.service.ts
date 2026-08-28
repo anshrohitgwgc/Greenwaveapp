@@ -25,7 +25,11 @@ interface ComputedTotals {
   total: number;
 }
 
-export function computeTotals(invoiceId: string, items: InvoiceItemDto[], taxRate: number): ComputedTotals {
+export function computeTotals(
+  invoiceId: string,
+  items: InvoiceItemDto[],
+  taxRate: number,
+): ComputedTotals {
   let subtotal = 0;
   let discountTotal = 0;
 
@@ -76,11 +80,13 @@ export class InvoicesService {
    * number; on other drivers (e.g. sqlite in tests) the surrounding
    * transaction's own write-serialization provides the same guarantee.
    */
-  private async allocateInvoiceNumber(queryRunner: QueryRunner): Promise<string> {
+  private async allocateInvoiceNumber(
+    queryRunner: QueryRunner,
+  ): Promise<string> {
     const isPostgres = this.dataSource.options.type === 'postgres';
-    const rows: Array<{ next_value: number }> = await queryRunner.query(
+    const rows = (await queryRunner.query(
       `SELECT next_value FROM invoice_number_counter WHERE id = 1${isPostgres ? ' FOR UPDATE' : ''}`,
-    );
+    )) as Array<{ next_value: number }>;
     const nextValue = rows[0]?.next_value ?? 1115;
     await queryRunner.query(
       `UPDATE invoice_number_counter SET next_value = next_value + 1 WHERE id = 1`,
@@ -189,17 +195,23 @@ export class InvoicesService {
     return created;
   }
 
-  async update(id: string, dto: UpdateInvoiceDto, actor: Actor): Promise<Invoice> {
+  async update(
+    id: string,
+    dto: UpdateInvoiceDto,
+    actor: Actor,
+  ): Promise<Invoice> {
     const existing = await this.findOne(id);
 
-    const items = dto.items ?? existing.items.map((item) => ({
-      description: item.description,
-      quantity: Number(item.quantity),
-      unit: item.unit ?? undefined,
-      unitPrice: Number(item.unitPrice),
-      discount: Number(item.discount),
-      isRebate: item.isRebate,
-    }));
+    const items =
+      dto.items ??
+      existing.items.map((item) => ({
+        description: item.description,
+        quantity: Number(item.quantity),
+        unit: item.unit ?? undefined,
+        unitPrice: Number(item.unitPrice),
+        discount: Number(item.discount),
+        isRebate: item.isRebate,
+      }));
     const taxRate = dto.taxRate ?? Number(existing.taxRate);
     const totals = computeTotals(id, items, taxRate);
 
@@ -210,7 +222,8 @@ export class InvoicesService {
       invoiceDate: dto.invoiceDate ?? existing.invoiceDate,
       dueDate: dto.dueDate ?? existing.dueDate,
       customerId: dto.customerId ?? existing.customerId,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- simple-json column, TypeORM's DeepPartial can't express it precisely
       companyInfo: (dto.companyInfo ?? existing.companyInfo) as any,
       billTo: dto.billTo ?? existing.billTo,
       shipTo: dto.shipTo ?? existing.shipTo,
@@ -225,7 +238,8 @@ export class InvoicesService {
       notes: dto.notes ?? existing.notes,
       terms: dto.terms ?? existing.terms,
       footer: dto.footer ?? existing.footer,
-      paymentInstructions: dto.paymentInstructions ?? existing.paymentInstructions,
+      paymentInstructions:
+        dto.paymentInstructions ?? existing.paymentInstructions,
       status: dto.status ?? existing.status,
       warehouseId: dto.warehouseId ?? existing.warehouseId,
       updatedBy: actor.id,
@@ -244,7 +258,11 @@ export class InvoicesService {
     return this.findOne(id);
   }
 
-  findAll(filters: { customerId?: string; warehouseId?: string; status?: string }) {
+  findAll(filters: {
+    customerId?: string;
+    warehouseId?: string;
+    status?: string;
+  }) {
     const where: Record<string, string> = {};
     if (filters.customerId) where.customerId = filters.customerId;
     if (filters.warehouseId) where.warehouseId = filters.warehouseId;

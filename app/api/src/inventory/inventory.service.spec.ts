@@ -18,8 +18,10 @@ describe('InventoryService', () => {
 
   beforeEach(async () => {
     transactionRepo = {
-      create: jest.fn((data) => data),
-      save: jest.fn((data) => Promise.resolve({ ...data })),
+      create: jest.fn((data: Record<string, unknown>) => data),
+      save: jest.fn((data: Record<string, unknown>) =>
+        Promise.resolve({ ...data }),
+      ),
     };
     auditService = { record: jest.fn() };
 
@@ -27,7 +29,10 @@ describe('InventoryService', () => {
       providers: [
         InventoryService,
         { provide: getRepositoryToken(Container), useValue: {} },
-        { provide: getRepositoryToken(InventoryTransaction), useValue: transactionRepo },
+        {
+          provide: getRepositoryToken(InventoryTransaction),
+          useValue: transactionRepo,
+        },
         { provide: getRepositoryToken(InventoryBalance), useValue: {} },
         { provide: AuditService, useValue: auditService },
       ],
@@ -85,7 +90,15 @@ describe('InventoryService', () => {
 
   it('computes total as the sum of XL/L/M/S for inbound transactions', async () => {
     const result = await service.createTransaction(
-      { warehouseId: 'w1', materialId: 'm1', type: 'inbound', xl: 1.5, l: 2, m: 0.5, s: 1 },
+      {
+        warehouseId: 'w1',
+        materialId: 'm1',
+        type: 'inbound',
+        xl: 1.5,
+        l: 2,
+        m: 0.5,
+        s: 1,
+      },
       staffActor,
     );
 

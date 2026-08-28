@@ -1,4 +1,11 @@
-import { Column, CreateDateColumn, Entity, OneToMany, PrimaryColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  OneToMany,
+  PrimaryColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 
 import { InvoiceItem } from './invoice-item.entity';
 
@@ -28,25 +35,53 @@ export class Invoice {
   @Column({ name: 'ship_to', type: 'text', nullable: true })
   shipTo: string | null;
 
-  @Column({ name: 'po_reference', type: 'varchar', length: 100, nullable: true })
+  @Column({
+    name: 'po_reference',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
   poReference: string | null;
 
-  @Column({ name: 'payment_terms', type: 'varchar', length: 100, nullable: true })
+  @Column({
+    name: 'payment_terms',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
   paymentTerms: string | null;
 
   @Column({ type: 'numeric', precision: 12, scale: 2, default: 0 })
   subtotal: string;
 
-  @Column({ name: 'discount_total', type: 'numeric', precision: 12, scale: 2, default: 0 })
+  @Column({
+    name: 'discount_total',
+    type: 'numeric',
+    precision: 12,
+    scale: 2,
+    default: 0,
+  })
   discountTotal: string;
 
   @Column({ name: 'tax_label', type: 'varchar', length: 32, nullable: true })
   taxLabel: string | null;
 
-  @Column({ name: 'tax_rate', type: 'numeric', precision: 6, scale: 3, default: 0 })
+  @Column({
+    name: 'tax_rate',
+    type: 'numeric',
+    precision: 6,
+    scale: 3,
+    default: 0,
+  })
   taxRate: string;
 
-  @Column({ name: 'tax_total', type: 'numeric', precision: 12, scale: 2, default: 0 })
+  @Column({
+    name: 'tax_total',
+    type: 'numeric',
+    precision: 12,
+    scale: 2,
+    default: 0,
+  })
   taxTotal: string;
 
   @Column({ type: 'numeric', precision: 12, scale: 2, default: 0 })

@@ -15,8 +15,10 @@ describe('TimesheetsService', () => {
   beforeEach(async () => {
     repo = {
       findOne: jest.fn(),
-      create: jest.fn((data) => data),
-      save: jest.fn((data) => Promise.resolve({ ...data })),
+      create: jest.fn((data: Record<string, unknown>) => data),
+      save: jest.fn((data: Record<string, unknown>) =>
+        Promise.resolve({ ...data }),
+      ),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -40,13 +42,22 @@ describe('TimesheetsService', () => {
   });
 
   it('refuses a second clock-in while a shift is already open', async () => {
-    repo.findOne.mockResolvedValue({ id: 'shift-1', userId: 1, clockOut: null });
+    repo.findOne.mockResolvedValue({
+      id: 'shift-1',
+      userId: 1,
+      clockOut: null,
+    });
 
     await expect(service.clockIn({}, actor)).rejects.toThrow(ConflictException);
   });
 
   it('clocks out an active shift', async () => {
-    const active = { id: 'shift-1', userId: 1, clockIn: new Date(), clockOut: null };
+    const active = {
+      id: 'shift-1',
+      userId: 1,
+      clockIn: new Date(),
+      clockOut: null,
+    };
     repo.findOne.mockResolvedValue(active);
 
     const result = await service.clockOut(actor);

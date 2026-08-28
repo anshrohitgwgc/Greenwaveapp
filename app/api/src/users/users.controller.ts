@@ -21,7 +21,13 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
 
-function sanitize(user: { id: number; fullName: string; email: string; role: string; createdAt: Date }) {
+function sanitize(user: {
+  id: number;
+  fullName: string;
+  email: string;
+  role: string;
+  createdAt: Date;
+}) {
   return {
     id: user.id,
     fullName: user.fullName,
@@ -41,7 +47,10 @@ export class UsersController {
 
   @Post()
   @Roles('admin')
-  async create(@Body() dto: CreateUserDto, @CurrentUser() actor: AuthenticatedUser) {
+  async create(
+    @Body() dto: CreateUserDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
     const user = await this.usersService.create(dto);
     await this.auditService.record({
       actorUserId: actor.id,

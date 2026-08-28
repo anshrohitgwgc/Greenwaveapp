@@ -7,7 +7,10 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const isProduction = process.env.NODE_ENV === 'production';
 
-  if (isProduction && (!process.env.JWT_SECRET || process.env.JWT_SECRET.includes('dev'))) {
+  if (
+    isProduction &&
+    (!process.env.JWT_SECRET || process.env.JWT_SECRET.includes('dev'))
+  ) {
     throw new Error(
       'JWT_SECRET must be set to a real secret in production (refusing to boot with a dev/default value)',
     );
@@ -35,4 +38,4 @@ async function bootstrap() {
   Logger.log(`GreenWave API listening on port ${port}`, 'Bootstrap');
 }
 
-bootstrap();
+void bootstrap();

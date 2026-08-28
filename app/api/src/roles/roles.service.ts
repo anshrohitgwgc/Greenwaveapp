@@ -10,7 +10,8 @@ import { RolePermission } from './entities/role-permission.entity';
 export class RolesService {
   constructor(
     @InjectRepository(Role) private readonly roleRepository: Repository<Role>,
-    @InjectRepository(Permission) private readonly permissionRepository: Repository<Permission>,
+    @InjectRepository(Permission)
+    private readonly permissionRepository: Repository<Permission>,
     @InjectRepository(RolePermission)
     private readonly rolePermissionRepository: Repository<RolePermission>,
   ) {}

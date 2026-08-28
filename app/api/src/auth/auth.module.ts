@@ -22,7 +22,8 @@ import { LoginRateLimitGuard } from './login-rate-limit.guard';
       useFactory: (config: ConfigService) => ({
         secret: config.get<string>('JWT_SECRET') ?? 'insecure-dev-only-secret',
         signOptions: {
-          expiresIn: (config.get<string>('JWT_EXPIRATION') ?? '24h') as unknown as number,
+          expiresIn: (config.get<string>('JWT_EXPIRATION') ??
+            '24h') as unknown as number,
         },
       }),
     }),

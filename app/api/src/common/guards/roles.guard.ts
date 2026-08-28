@@ -5,6 +5,7 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import type { Request } from 'express';
 
 import { AppRole, ROLES_KEY } from '../decorators/roles.decorator';
 
@@ -32,15 +33,16 @@ export class RolesGuard implements CanActivate {
       return true;
     }
 
-    const request = context.switchToHttp().getRequest();
+    const request = context.switchToHttp().getRequest<Request>();
     const user = request.user;
 
     if (!user || !user.role) {
       throw new ForbiddenException('Not authorized for this action');
     }
 
-    const effectiveRoles = ROLE_ALIASES[user.role] ?? [user.role];
-    const allowed = effectiveRoles.some((role) => required.includes(role));
+    const role = user.role as AppRole;
+    const effectiveRoles = ROLE_ALIASES[role] ?? [role];
+    const allowed = effectiveRoles.some((r) => required.includes(r));
 
     if (!allowed) {
       throw new ForbiddenException('Not authorized for this action');

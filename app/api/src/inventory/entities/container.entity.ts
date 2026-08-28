@@ -1,4 +1,11 @@
-import { Column, CreateDateColumn, Entity, Index, PrimaryColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  PrimaryColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 
 @Entity({ name: 'containers' })
 export class Container {
@@ -9,16 +16,31 @@ export class Container {
   @Column({ name: 'warehouse_id', type: 'uuid' })
   warehouseId: string;
 
-  @Column({ name: 'order_number', type: 'varchar', length: 100, nullable: true })
+  @Column({
+    name: 'order_number',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
   orderNumber: string | null;
 
   @Column({ name: 'bl_number', type: 'varchar', length: 100, nullable: true })
   blNumber: string | null;
 
-  @Column({ name: 'shipping_line', type: 'varchar', length: 150, nullable: true })
+  @Column({
+    name: 'shipping_line',
+    type: 'varchar',
+    length: 150,
+    nullable: true,
+  })
   shippingLine: string | null;
 
-  @Column({ name: 'container_number', type: 'varchar', length: 100, nullable: true })
+  @Column({
+    name: 'container_number',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
   containerNumber: string | null;
 
   @Column({ name: 'seal_number', type: 'varchar', length: 100, nullable: true })

@@ -1,4 +1,8 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
@@ -26,7 +30,12 @@ export class PhotosService {
   ) {}
 
   async upload(
-    file: { originalname: string; mimetype: string; size: number; buffer: Buffer },
+    file: {
+      originalname: string;
+      mimetype: string;
+      size: number;
+      buffer: Buffer;
+    },
     meta: UploadPhotoMetadataDto,
     actor: Actor,
   ) {
@@ -78,7 +87,9 @@ export class PhotosService {
       photoType?: string;
     },
   ) {
-    const qb = this.photoRepository.createQueryBuilder('photo').orderBy('photo.takenAt', 'DESC');
+    const qb = this.photoRepository
+      .createQueryBuilder('photo')
+      .orderBy('photo.takenAt', 'DESC');
 
     // IDOR guard: staff/driver can only ever see their own photos, no
     // matter what userId a caller puts in the query string.
@@ -88,12 +99,25 @@ export class PhotosService {
       qb.andWhere('photo.takenBy = :ownerId', { ownerId: filters.userId });
     }
 
-    if (filters.from) qb.andWhere('photo.takenAt >= :from', { from: filters.from });
+    if (filters.from)
+      qb.andWhere('photo.takenAt >= :from', { from: filters.from });
     if (filters.to) qb.andWhere('photo.takenAt <= :to', { to: filters.to });
-    if (filters.warehouseId) qb.andWhere('photo.warehouseId = :warehouseId', { warehouseId: filters.warehouseId });
-    if (filters.customerId) qb.andWhere('photo.customerId = :customerId', { customerId: filters.customerId });
-    if (filters.jobReference) qb.andWhere('photo.jobReference = :jobReference', { jobReference: filters.jobReference });
-    if (filters.photoType) qb.andWhere('photo.photoType = :photoType', { photoType: filters.photoType });
+    if (filters.warehouseId)
+      qb.andWhere('photo.warehouseId = :warehouseId', {
+        warehouseId: filters.warehouseId,
+      });
+    if (filters.customerId)
+      qb.andWhere('photo.customerId = :customerId', {
+        customerId: filters.customerId,
+      });
+    if (filters.jobReference)
+      qb.andWhere('photo.jobReference = :jobReference', {
+        jobReference: filters.jobReference,
+      });
+    if (filters.photoType)
+      qb.andWhere('photo.photoType = :photoType', {
+        photoType: filters.photoType,
+      });
 
     const photos = await qb.getMany();
     return Promise.all(photos.map((photo) => this.toDto(photo)));

@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 
 import { AuditService } from '../audit/audit.service';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -20,7 +29,10 @@ export class CustomersController {
 
   @Post()
   @Roles('admin', 'manager')
-  async create(@Body() dto: CreateCustomerDto, @CurrentUser() actor: AuthenticatedUser) {
+  async create(
+    @Body() dto: CreateCustomerDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
     const customer = await this.customersService.create(dto, actor.id);
     await this.auditService.record({
       actorUserId: actor.id,

@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
@@ -16,7 +25,10 @@ export class InvoicesController {
   constructor(private readonly invoicesService: InvoicesService) {}
 
   @Post()
-  create(@Body() dto: CreateInvoiceDto, @CurrentUser() actor: AuthenticatedUser) {
+  create(
+    @Body() dto: CreateInvoiceDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
     return this.invoicesService.create(dto, actor);
   }
 

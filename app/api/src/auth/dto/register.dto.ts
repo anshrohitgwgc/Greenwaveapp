@@ -1,4 +1,10 @@
-import { IsEmail, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 /**
  * Bootstrap-only. No `role` field exists here on purpose — a caller cannot

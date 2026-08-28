@@ -18,6 +18,7 @@ import { AuthModule } from './auth.module';
  * touch Postgres/Redis/MinIO, which this sandbox doesn't have running. See
  * docs/V2_IMPLEMENTATION.md for what still needs a real docker-compose run.
  */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument -- supertest's res.body is untyped by design */
 describe('Auth + RBAC (sqlite, no external infra)', () => {
   let app: INestApplication;
   let adminToken: string;
@@ -42,15 +43,19 @@ describe('Auth + RBAC (sqlite, no external infra)', () => {
       .overrideProvider(RedisService)
       .useValue({
         getClient: () => ({
-          incr: async () => 1,
-          expire: async () => undefined,
+          incr: () => Promise.resolve(1),
+          expire: () => Promise.resolve(undefined),
         }),
       })
       .compile();
 
     app = moduleRef.createNestApplication();
     app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+      }),
     );
     await app.init();
   });
@@ -62,7 +67,11 @@ describe('Auth + RBAC (sqlite, no external infra)', () => {
   it('bootstraps the first account as admin via POST /auth/register', async () => {
     const res = await request(app.getHttpServer())
       .post('/auth/register')
-      .send({ fullName: 'Admin', email: 'Admin@Test.local', password: 'Password1' })
+      .send({
+        fullName: 'Admin',
+        email: 'Admin@Test.local',
+        password: 'Password1',
+      })
       .expect(201);
 
     expect(res.body.user.role).toBe('admin');
@@ -74,7 +83,11 @@ describe('Auth + RBAC (sqlite, no external infra)', () => {
   it('refuses a second bootstrap once a user exists', async () => {
     await request(app.getHttpServer())
       .post('/auth/register')
-      .send({ fullName: 'Second', email: 'second@test.local', password: 'Password1' })
+      .send({
+        fullName: 'Second',
+        email: 'second@test.local',
+        password: 'Password1',
+      })
       .expect(409);
   });
 
@@ -110,7 +123,12 @@ describe('Auth + RBAC (sqlite, no external infra)', () => {
     const res = await request(app.getHttpServer())
       .post('/users')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ fullName: 'Staff Person', email: 'staff@test.local', password: 'Password1', role: 'staff' })
+      .send({
+        fullName: 'Staff Person',
+        email: 'staff@test.local',
+        password: 'Password1',
+        role: 'staff',
+      })
       .expect(201);
 
     expect(res.body.role).toBe('staff');
@@ -134,7 +152,12 @@ describe('Auth + RBAC (sqlite, no external infra)', () => {
     await request(app.getHttpServer())
       .post('/users')
       .set('Authorization', `Bearer ${staffToken}`)
-      .send({ fullName: 'Sneaky Admin', email: 'sneaky@test.local', password: 'Password1', role: 'admin' })
+      .send({
+        fullName: 'Sneaky Admin',
+        email: 'sneaky@test.local',
+        password: 'Password1',
+        role: 'admin',
+      })
       .expect(403);
   });
 

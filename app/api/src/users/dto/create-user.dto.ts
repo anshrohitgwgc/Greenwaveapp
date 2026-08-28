@@ -1,6 +1,19 @@
-import { IsEmail, IsIn, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsIn,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
-export const ASSIGNABLE_ROLES = ['admin', 'manager', 'staff', 'driver'] as const;
+export const ASSIGNABLE_ROLES = [
+  'admin',
+  'manager',
+  'staff',
+  'driver',
+] as const;
 
 export class CreateUserDto {
   @IsString()

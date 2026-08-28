@@ -3,7 +3,10 @@ import { Reflector } from '@nestjs/core';
 
 import { RolesGuard } from './roles.guard';
 
-function makeContext(user: { role?: string } | undefined, required: string[] | undefined) {
+function makeContext(
+  user: { role?: string } | undefined,
+  required: string[] | undefined,
+) {
   const reflector = {
     getAllAndOverride: jest.fn().mockReturnValue(required),
   } as unknown as Reflector;
@@ -26,12 +29,18 @@ describe('RolesGuard', () => {
   });
 
   it('allows a matching role', () => {
-    const { guard, context } = makeContext({ role: 'admin' }, ['admin', 'manager']);
+    const { guard, context } = makeContext({ role: 'admin' }, [
+      'admin',
+      'manager',
+    ]);
     expect(guard.canActivate(context)).toBe(true);
   });
 
   it('denies a non-matching role', () => {
-    const { guard, context } = makeContext({ role: 'staff' }, ['admin', 'manager']);
+    const { guard, context } = makeContext({ role: 'staff' }, [
+      'admin',
+      'manager',
+    ]);
     expect(() => guard.canActivate(context)).toThrow(ForbiddenException);
   });
 

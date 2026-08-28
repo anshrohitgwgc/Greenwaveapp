@@ -1,4 +1,12 @@
-import { CanActivate, ExecutionContext, HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
+import type { Request } from 'express';
 
 import { RedisService } from '../redis/redis.service';
 
@@ -18,8 +26,12 @@ export class LoginRateLimitGuard implements CanActivate {
   constructor(private readonly redisService: RedisService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest();
-    const email = String(request.body?.email ?? 'unknown').toLowerCase().trim();
+    const request = context.switchToHttp().getRequest<Request>();
+    const email = String(
+      (request.body as { email?: string } | undefined)?.email ?? 'unknown',
+    )
+      .toLowerCase()
+      .trim();
     const ip = request.ip ?? 'unknown';
     const key = `login-rl:${ip}:${email}`;
 

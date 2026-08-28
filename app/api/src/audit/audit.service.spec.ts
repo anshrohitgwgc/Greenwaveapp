@@ -10,12 +10,15 @@ describe('AuditService', () => {
 
   beforeEach(async () => {
     repo = {
-      create: jest.fn((data) => data),
-      save: jest.fn((data) => Promise.resolve(data)),
+      create: jest.fn((data: Record<string, unknown>) => data),
+      save: jest.fn((data: Record<string, unknown>) => Promise.resolve(data)),
     };
 
     const module: TestingModule = await Test.createTestingModule({
-      providers: [AuditService, { provide: getRepositoryToken(AuditEvent), useValue: repo }],
+      providers: [
+        AuditService,
+        { provide: getRepositoryToken(AuditEvent), useValue: repo },
+      ],
     }).compile();
 
     service = module.get(AuditService);
@@ -54,8 +57,14 @@ describe('AuditService', () => {
   });
 
   it('exposes no update or delete method — append-only by construction', () => {
-    expect((service as unknown as Record<string, unknown>).update).toBeUndefined();
-    expect((service as unknown as Record<string, unknown>).delete).toBeUndefined();
-    expect((service as unknown as Record<string, unknown>).remove).toBeUndefined();
+    expect(
+      (service as unknown as Record<string, unknown>).update,
+    ).toBeUndefined();
+    expect(
+      (service as unknown as Record<string, unknown>).delete,
+    ).toBeUndefined();
+    expect(
+      (service as unknown as Record<string, unknown>).remove,
+    ).toBeUndefined();
   });
 });

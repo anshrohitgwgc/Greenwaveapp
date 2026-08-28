@@ -9,7 +9,11 @@ import { AuthService } from './auth.service';
 
 describe('AuthService', () => {
   let service: AuthService;
-  let usersService: { findByEmail: jest.Mock; create: jest.Mock; count: jest.Mock };
+  let usersService: {
+    findByEmail: jest.Mock;
+    create: jest.Mock;
+    count: jest.Mock;
+  };
   let auditService: { record: jest.Mock };
 
   beforeEach(async () => {
@@ -27,7 +31,9 @@ describe('AuthService', () => {
         { provide: AuditService, useValue: auditService },
         {
           provide: JwtService,
-          useValue: { signAsync: jest.fn().mockResolvedValue('mock_jwt_token') },
+          useValue: {
+            signAsync: jest.fn().mockResolvedValue('mock_jwt_token'),
+          },
         },
       ],
     }).compile();
@@ -43,12 +49,12 @@ describe('AuthService', () => {
     it('rejects an unknown email with a generic message', async () => {
       usersService.findByEmail.mockResolvedValue(null);
 
-      await expect(service.login('nobody@example.com', 'whatever')).rejects.toThrow(
-        UnauthorizedException,
-      );
-      await expect(service.login('nobody@example.com', 'whatever')).rejects.toThrow(
-        'Invalid credentials',
-      );
+      await expect(
+        service.login('nobody@example.com', 'whatever'),
+      ).rejects.toThrow(UnauthorizedException);
+      await expect(
+        service.login('nobody@example.com', 'whatever'),
+      ).rejects.toThrow('Invalid credentials');
     });
 
     it('rejects a wrong password with the same generic message', async () => {
@@ -61,9 +67,9 @@ describe('AuthService', () => {
         fullName: 'Staff Person',
       });
 
-      await expect(service.login('staff@example.com', 'wrong-password')).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(
+        service.login('staff@example.com', 'wrong-password'),
+      ).rejects.toThrow(UnauthorizedException);
     });
 
     it('logs in with the correct password and returns a token without the password hash', async () => {
@@ -76,7 +82,10 @@ describe('AuthService', () => {
         fullName: 'Staff Person',
       });
 
-      const result = await service.login('STAFF@Example.com ', 'correct-password');
+      const result = await service.login(
+        'STAFF@Example.com ',
+        'correct-password',
+      );
 
       expect(result.access_token).toBe('mock_jwt_token');
       expect(result.user).toEqual({

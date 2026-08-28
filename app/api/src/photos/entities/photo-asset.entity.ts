@@ -1,4 +1,10 @@
-import { Column, CreateDateColumn, Entity, Index, PrimaryColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  PrimaryColumn,
+} from 'typeorm';
 
 @Entity({ name: 'photos' })
 export class PhotoAsset {
@@ -27,7 +33,12 @@ export class PhotoAsset {
   @Column({ name: 'customer_id', type: 'uuid', nullable: true })
   customerId: string | null;
 
-  @Column({ name: 'job_reference', type: 'varchar', length: 100, nullable: true })
+  @Column({
+    name: 'job_reference',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
   jobReference: string | null;
 
   @Index()

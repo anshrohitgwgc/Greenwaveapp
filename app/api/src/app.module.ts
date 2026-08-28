@@ -30,13 +30,22 @@ import { AppService } from './app.service';
       useFactory: (config: ConfigService) => ({
         type: 'postgres',
 
-        host: config.get<string>('DATABASE_HOST') ?? config.get<string>('DB_HOST'),
-        port: Number(config.get<string>('DATABASE_PORT') ?? config.get<string>('DB_PORT')),
+        host:
+          config.get<string>('DATABASE_HOST') ?? config.get<string>('DB_HOST'),
+        port: Number(
+          config.get<string>('DATABASE_PORT') ?? config.get<string>('DB_PORT'),
+        ),
 
-        username: config.get<string>('DATABASE_USER') ?? config.get<string>('DB_USERNAME'),
-        password: config.get<string>('DATABASE_PASSWORD') ?? config.get<string>('DB_PASSWORD'),
+        username:
+          config.get<string>('DATABASE_USER') ??
+          config.get<string>('DB_USERNAME'),
+        password:
+          config.get<string>('DATABASE_PASSWORD') ??
+          config.get<string>('DB_PASSWORD'),
 
-        database: config.get<string>('DATABASE_NAME') ?? config.get<string>('DB_DATABASE'),
+        database:
+          config.get<string>('DATABASE_NAME') ??
+          config.get<string>('DB_DATABASE'),
 
         autoLoadEntities: true,
         // Schema is migration-driven (see database/migrations, run
