@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
+
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { LoginRateLimitGuard } from './login-rate-limit.guard';
 
 describe('AuthController', () => {
   let controller: AuthController;
@@ -12,12 +14,15 @@ describe('AuthController', () => {
         {
           provide: AuthService,
           useValue: {
-            validateUser: jest.fn(),
+            register: jest.fn(),
             login: jest.fn(),
           },
         },
       ],
-    }).compile();
+    })
+      .overrideGuard(LoginRateLimitGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<AuthController>(AuthController);
   });

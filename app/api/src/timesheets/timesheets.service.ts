@@ -1,0 +1,101 @@
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { randomUUID } from 'crypto';
+import { IsNull, Repository } from 'typeorm';
+
+import { AuditService } from '../audit/audit.service';
+import { ClockInDto } from './dto/clock-in.dto';
+import { Timesheet } from './entities/timesheet.entity';
+
+interface Actor {
+  id: number;
+  role: string;
+  email: string;
+}
+
+@Injectable()
+export class TimesheetsService {
+  constructor(
+    @InjectRepository(Timesheet)
+    private readonly timesheetRepository: Repository<Timesheet>,
+    private readonly auditService: AuditService,
+  ) {}
+
+  async clockIn(dto: ClockInDto, actor: Actor) {
+    const active = await this.timesheetRepository.findOne({
+      where: { userId: actor.id, clockOut: IsNull() },
+    });
+    if (active) {
+      throw new ConflictException('Already clocked in — clock out first');
+    }
+
+    const shift = this.timesheetRepository.create({
+      id: randomUUID(),
+      userId: actor.id,
+      warehouseId: dto.warehouseId ?? null,
+      clockIn: new Date(),
+      clockOut: null,
+    });
+    const saved = await this.timesheetRepository.save(shift);
+
+    await this.auditService.record({
+      actorUserId: actor.id,
+      actorRole: actor.role,
+      action: 'timesheet.clock_in',
+      entityType: 'timesheet',
+      entityId: saved.id,
+      warehouseId: saved.warehouseId,
+      summary: `${actor.email} clocked in`,
+    });
+
+    return saved;
+  }
+
+  async clockOut(actor: Actor) {
+    const active = await this.timesheetRepository.findOne({
+      where: { userId: actor.id, clockOut: IsNull() },
+    });
+    if (!active) {
+      throw new NotFoundException('No active shift to clock out of');
+    }
+
+    active.clockOut = new Date();
+    const saved = await this.timesheetRepository.save(active);
+
+    await this.auditService.record({
+      actorUserId: actor.id,
+      actorRole: actor.role,
+      action: 'timesheet.clock_out',
+      entityType: 'timesheet',
+      entityId: saved.id,
+      warehouseId: saved.warehouseId,
+      summary: `${actor.email} clocked out`,
+    });
+
+    return saved;
+  }
+
+  currentShift(actorId: number) {
+    return this.timesheetRepository.findOne({
+      where: { userId: actorId, clockOut: IsNull() },
+    });
+  }
+
+  history(actorId: number, from?: Date, to?: Date) {
+    const qb = this.timesheetRepository
+      .createQueryBuilder('shift')
+      .where('shift.userId = :userId', { userId: actorId })
+      .orderBy('shift.clockIn', 'DESC');
+    if (from) qb.andWhere('shift.clockIn >= :from', { from });
+    if (to) qb.andWhere('shift.clockIn <= :to', { to });
+    return qb.getMany();
+  }
+
+  /** MANAGER/ADMIN only — enforced at the controller. */
+  teamStatus() {
+    return this.timesheetRepository.find({
+      where: { clockOut: IsNull() },
+      order: { clockIn: 'ASC' },
+    });
+  }
+}

@@ -8,6 +8,7 @@ echo "🌱 Seeding database with test fixtures..."
 if docker ps | grep -q greenwave-local-postgres; then
     docker exec -i greenwave-local-postgres psql -U greenwave_dev -d greenwave_dev < "${REPO_ROOT}/database/seeds/001_dev_users.sql"
     docker exec -i greenwave-local-postgres psql -U greenwave_dev -d greenwave_dev < "${REPO_ROOT}/database/seeds/002_dev_pickups.sql"
+    docker exec -i greenwave-local-postgres psql -U greenwave_dev -d greenwave_dev < "${REPO_ROOT}/database/seeds/003_dev_v2_fixtures.sql"
     echo "✅ Development seeds loaded into local PostgreSQL container."
 else
     echo "⚠️  Postgres container greenwave-local-postgres is not running. Start it with docker compose."

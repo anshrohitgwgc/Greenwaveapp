@@ -1,4 +1,6 @@
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
+
 import { StorageService } from './storage.service';
 
 describe('StorageService', () => {
@@ -6,7 +8,13 @@ describe('StorageService', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [StorageService],
+      providers: [
+        StorageService,
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue(undefined) },
+        },
+      ],
     }).compile();
 
     service = module.get<StorageService>(StorageService);

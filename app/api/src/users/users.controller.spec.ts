@@ -1,4 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
+
+import { AuditService } from '../audit/audit.service';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 
@@ -15,7 +17,12 @@ describe('UsersController', () => {
             findAll: jest.fn(),
             findOne: jest.fn(),
             create: jest.fn(),
+            update: jest.fn(),
           },
+        },
+        {
+          provide: AuditService,
+          useValue: { record: jest.fn() },
         },
       ],
     }).compile();
