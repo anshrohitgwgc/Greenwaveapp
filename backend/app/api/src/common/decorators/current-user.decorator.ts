@@ -6,6 +6,9 @@ export interface AuthenticatedUser {
   email: string;
   role: string;
   fullName: string;
+  permissions?: string[];
+  warehouseIds?: string[];
+  hasGlobalAccess?: boolean;
 }
 
 export const CurrentUser = createParamDecorator(

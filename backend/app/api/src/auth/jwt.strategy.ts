@@ -3,7 +3,9 @@ import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 
+import { RolesService } from '../roles/roles.service';
 import { UsersService } from '../users/users.service';
+import { WarehousesService } from '../warehouses/warehouses.service';
 
 export interface JwtPayload {
   sub: number;
@@ -16,6 +18,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     private readonly configService: ConfigService,
     private readonly usersService: UsersService,
+    private readonly rolesService: RolesService,
+    private readonly warehousesService: WarehousesService,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -35,11 +39,23 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Account no longer exists');
     }
 
+    const permissions = await this.rolesService.getPermissionsForRole(user.role);
+    const hasGlobalAccess = permissions.includes('warehouses:global_access');
+    const warehouseIds =
+      await this.warehousesService.getUserAuthorizedWarehouseIds(
+        user.id,
+        user.role,
+        permissions,
+      );
+
     return {
       id: user.id,
       email: user.email,
       role: user.role,
       fullName: user.fullName,
+      permissions,
+      warehouseIds,
+      hasGlobalAccess,
     };
   }
 }

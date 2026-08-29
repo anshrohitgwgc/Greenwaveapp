@@ -1,8 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { EntityManager, Repository } from 'typeorm';
 
+import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { WarehousesService } from '../warehouses/warehouses.service';
 import { AuditEvent } from './entities/audit-event.entity';
 
 export interface RecordAuditEventInput {
@@ -26,18 +28,13 @@ const FORBIDDEN_METADATA_KEYS = new Set([
   'secret',
 ]);
 
-/**
- * Append-only at the application layer: this service exposes no update or
- * delete method, and no controller in this codebase issues PATCH/DELETE
- * against /audit. True DB-level immutability (revoking UPDATE/DELETE from
- * the app's Postgres role) is a deployment-time hardening step — see
- * docs/V2_ARCHITECTURE.md Known Limitations.
- */
 @Injectable()
 export class AuditService {
   constructor(
     @InjectRepository(AuditEvent)
     private readonly auditRepository: Repository<AuditEvent>,
+    @Inject(forwardRef(() => WarehousesService))
+    private readonly warehousesService: WarehousesService,
   ) {}
 
   private sanitizeMetadata(
@@ -75,7 +72,77 @@ export class AuditService {
     return repo.save(event);
   }
 
-  async search(filters: {
+  async searchAuthorized(
+    actor: AuthenticatedUser,
+    filters: {
+      entityType?: string;
+      actorUserId?: number;
+      action?: string;
+      warehouseId?: string;
+      from?: Date;
+      to?: Date;
+      limit?: number;
+      offset?: number;
+    },
+  ): Promise<{ items: AuditEvent[]; total: number }> {
+    if (filters.warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(actor, filters.warehouseId);
+    }
+
+    const qb = this.auditRepository
+      .createQueryBuilder('event')
+      .orderBy('event.occurredAt', 'DESC')
+      .take(Math.min(filters.limit ?? 50, 200))
+      .skip(filters.offset ?? 0);
+
+    if (filters.warehouseId) {
+      qb.andWhere('event.warehouseId = :warehouseId', {
+        warehouseId: filters.warehouseId,
+      });
+    } else if (
+      !actor.hasGlobalAccess &&
+      (!actor.permissions || !actor.permissions.includes('warehouses:global_access'))
+    ) {
+      const authorizedIds = await this.warehousesService.getUserAuthorizedWarehouseIds(
+        actor.id,
+        actor.role,
+        actor.permissions,
+      );
+      if (authorizedIds.length === 0) {
+        qb.andWhere('event.warehouseId IS NULL');
+      } else {
+        qb.andWhere(
+          '(event.warehouseId IN (:...authorizedIds) OR event.warehouseId IS NULL)',
+          { authorizedIds },
+        );
+      }
+    }
+
+    if (filters.entityType) {
+      qb.andWhere('event.entityType = :entityType', {
+        entityType: filters.entityType,
+      });
+    }
+    if (filters.actorUserId) {
+      qb.andWhere('event.actorUserId = :actorUserId', {
+        actorUserId: filters.actorUserId,
+      });
+    }
+    if (filters.action) {
+      qb.andWhere('event.action = :action', { action: filters.action });
+    }
+    if (filters.from) {
+      qb.andWhere('event.occurredAt >= :from', { from: filters.from });
+    }
+    if (filters.to) {
+      qb.andWhere('event.occurredAt <= :to', { to: filters.to });
+    }
+
+    const [items, total] = await qb.getManyAndCount();
+    return { items, total };
+  }
+
+  search(filters: {
     entityType?: string;
     actorUserId?: number;
     action?: string;
@@ -84,7 +151,7 @@ export class AuditService {
     to?: Date;
     limit?: number;
     offset?: number;
-  }): Promise<{ items: AuditEvent[]; total: number }> {
+  }) {
     const qb = this.auditRepository
       .createQueryBuilder('event')
       .orderBy('event.occurredAt', 'DESC')
@@ -116,7 +183,6 @@ export class AuditService {
       qb.andWhere('event.occurredAt <= :to', { to: filters.to });
     }
 
-    const [items, total] = await qb.getManyAndCount();
-    return { items, total };
+    return qb.getManyAndCount().then(([items, total]) => ({ items, total }));
   }
 }

@@ -1,7 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { UsersService } from './users.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
+
+import { RolesService } from '../roles/roles.service';
+import { WarehousesService } from '../warehouses/warehouses.service';
 import { User } from './entities/user.entity';
+import { UsersService } from './users.service';
 
 describe('UsersService', () => {
   let service: UsersService;
@@ -17,6 +20,21 @@ describe('UsersService', () => {
             findOne: jest.fn(),
             create: jest.fn(),
             save: jest.fn(),
+            count: jest.fn().mockResolvedValue(1),
+          },
+        },
+        {
+          provide: RolesService,
+          useValue: {
+            getPermissionsForRole: jest.fn().mockResolvedValue(['inventory:write']),
+          },
+        },
+        {
+          provide: WarehousesService,
+          useValue: {
+            getUserAuthorizedWarehouses: jest.fn().mockResolvedValue([]),
+            getUserWarehouseAccess: jest.fn().mockResolvedValue([]),
+            assignUserWarehouses: jest.fn().mockResolvedValue([]),
           },
         },
       ],

@@ -1,8 +1,10 @@
 import {
+  IsArray,
   IsEmail,
   IsIn,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   MaxLength,
   MinLength,
@@ -35,4 +37,9 @@ export class CreateUserDto {
   @IsOptional()
   @IsIn(ASSIGNABLE_ROLES)
   role?: (typeof ASSIGNABLE_ROLES)[number];
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  warehouseIds?: string[];
 }

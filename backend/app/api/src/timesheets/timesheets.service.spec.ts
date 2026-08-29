@@ -3,14 +3,25 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 
 import { AuditService } from '../audit/audit.service';
+import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { WarehousesService } from '../warehouses/warehouses.service';
 import { Timesheet } from './entities/timesheet.entity';
 import { TimesheetsService } from './timesheets.service';
 
 describe('TimesheetsService', () => {
   let service: TimesheetsService;
   let repo: { findOne: jest.Mock; create: jest.Mock; save: jest.Mock };
+  let warehousesService: {
+    assertWarehouseAccess: jest.Mock;
+    getUserAuthorizedWarehouseIds: jest.Mock;
+  };
 
-  const actor = { id: 1, role: 'staff', email: 'staff@example.com' };
+  const actor: AuthenticatedUser = {
+    id: 1,
+    role: 'staff',
+    email: 'staff@example.com',
+    fullName: 'Staff',
+  };
 
   beforeEach(async () => {
     repo = {
@@ -20,12 +31,17 @@ describe('TimesheetsService', () => {
         Promise.resolve({ ...data }),
       ),
     };
+    warehousesService = {
+      assertWarehouseAccess: jest.fn().mockResolvedValue(undefined),
+      getUserAuthorizedWarehouseIds: jest.fn().mockResolvedValue([]),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TimesheetsService,
         { provide: getRepositoryToken(Timesheet), useValue: repo },
         { provide: AuditService, useValue: { record: jest.fn() } },
+        { provide: WarehousesService, useValue: warehousesService },
       ],
     }).compile();
 

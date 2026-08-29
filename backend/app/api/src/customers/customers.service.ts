@@ -1,8 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 
+import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { WarehousesService } from '../warehouses/warehouses.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { Customer } from './entities/customer.entity';
@@ -12,9 +14,14 @@ export class CustomersService {
   constructor(
     @InjectRepository(Customer)
     private readonly customerRepository: Repository<Customer>,
+    private readonly warehousesService: WarehousesService,
   ) {}
 
-  create(dto: CreateCustomerDto, actorId: number) {
+  async create(dto: CreateCustomerDto, actor: AuthenticatedUser) {
+    if (dto.warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(actor, dto.warehouseId);
+    }
+
     const customer = this.customerRepository.create({
       id: randomUUID(),
       ...dto,
@@ -24,32 +31,62 @@ export class CustomersService {
       email: dto.email ?? null,
       phone: dto.phone ?? null,
       warehouseId: dto.warehouseId ?? null,
-      createdBy: actorId,
-      updatedBy: actorId,
+      createdBy: actor.id,
+      updatedBy: actor.id,
     });
     return this.customerRepository.save(customer);
   }
 
-  findAll(warehouseId?: string) {
-    if (warehouseId)
+  async findAll(actor: AuthenticatedUser, warehouseId?: string) {
+    if (warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(actor, warehouseId);
       return this.customerRepository.find({ where: { warehouseId } });
+    }
+
+    if (!actor.hasGlobalAccess && (!actor.permissions || !actor.permissions.includes('warehouses:global_access'))) {
+      const authorizedIds = await this.warehousesService.getUserAuthorizedWarehouseIds(
+        actor.id,
+        actor.role,
+        actor.permissions,
+      );
+      if (authorizedIds.length === 0) {
+        return this.customerRepository.find({ where: { warehouseId: null as any } });
+      }
+      return this.customerRepository.find({
+        where: [
+          { warehouseId: In(authorizedIds) },
+          { warehouseId: null as any },
+        ],
+      });
+    }
+
     return this.customerRepository.find();
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, actor: AuthenticatedUser) {
     const customer = await this.customerRepository.findOne({ where: { id } });
     if (!customer) throw new NotFoundException('Customer not found');
+
+    if (customer.warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(actor, customer.warehouseId);
+    }
+
     return customer;
   }
 
-  async update(id: string, dto: UpdateCustomerDto, actorId: number) {
-    await this.findOne(id);
+  async update(id: string, dto: UpdateCustomerDto, actor: AuthenticatedUser) {
+    const customer = await this.findOne(id, actor);
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- simple-json column, TypeORM's DeepPartial can't express it precisely
+    if (dto.warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(actor, dto.warehouseId);
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     await this.customerRepository.update(id, {
       ...dto,
-      updatedBy: actorId,
+      updatedBy: actor.id,
     } as any);
-    return this.findOne(id);
+
+    return this.findOne(id, actor);
   }
 }

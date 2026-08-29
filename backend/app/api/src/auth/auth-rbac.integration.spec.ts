@@ -8,9 +8,17 @@ import request from 'supertest';
 import { AuditModule } from '../audit/audit.module';
 import { AuditEvent } from '../audit/entities/audit-event.entity';
 import { RedisService } from '../redis/redis.service';
+import { Permission } from '../roles/entities/permission.entity';
+import { Role } from '../roles/entities/role.entity';
+import { RolePermission } from '../roles/entities/role-permission.entity';
+import { UserRole } from '../roles/entities/user-role.entity';
+import { RolesModule } from '../roles/roles.module';
 import { User } from '../users/entities/user.entity';
 import { UsersModule } from '../users/users.module';
 import { UsersService } from '../users/users.service';
+import { UserWarehouse } from '../warehouses/entities/user-warehouse.entity';
+import { Warehouse } from '../warehouses/entities/warehouse.entity';
+import { WarehousesModule } from '../warehouses/warehouses.module';
 import { AuthModule } from './auth.module';
 
 /**
@@ -32,10 +40,21 @@ describe('Auth + RBAC (sqlite, no external infra)', () => {
           type: 'better-sqlite3',
           database: ':memory:',
           dropSchema: true,
-          entities: [User, AuditEvent],
+          entities: [
+            User,
+            AuditEvent,
+            Role,
+            Permission,
+            RolePermission,
+            UserRole,
+            Warehouse,
+            UserWarehouse,
+          ],
           synchronize: true,
         }),
         AuditModule,
+        RolesModule,
+        WarehousesModule,
         UsersModule,
         AuthModule,
       ],
@@ -177,5 +196,16 @@ describe('Auth + RBAC (sqlite, no external infra)', () => {
       .expect(200);
 
     expect(res.body.email).toBe('staff@greenwave.test');
+  });
+
+  it('any authenticated user can read their own profile via /auth/me', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/auth/me')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .expect(200);
+
+    expect(res.body.email).toBe('staff@greenwave.test');
+    expect(res.body.permissions).toBeDefined();
+    expect(res.body.warehouses).toBeDefined();
   });
 });

@@ -8,15 +8,11 @@ import { randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
 
 import { AuditService } from '../audit/audit.service';
+import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { StorageService } from '../storage/storage.service';
+import { WarehousesService } from '../warehouses/warehouses.service';
 import { UploadPhotoMetadataDto } from './dto/upload-photo-metadata.dto';
 import { PhotoAsset } from './entities/photo-asset.entity';
-
-interface Actor {
-  id: number;
-  role: string;
-  email: string;
-}
 
 const PRIVILEGED_ROLES = ['admin', 'manager'];
 
@@ -27,6 +23,7 @@ export class PhotosService {
     private readonly photoRepository: Repository<PhotoAsset>,
     private readonly storageService: StorageService,
     private readonly auditService: AuditService,
+    private readonly warehousesService: WarehousesService,
   ) {}
 
   async upload(
@@ -37,8 +34,12 @@ export class PhotosService {
       buffer: Buffer;
     },
     meta: UploadPhotoMetadataDto,
-    actor: Actor,
+    actor: AuthenticatedUser,
   ) {
+    if (meta.warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(actor, meta.warehouseId);
+    }
+
     const id = randomUUID();
     const scope = meta.warehouseId ?? 'general';
     const objectKey = `photos/${scope}/${id}-${file.originalname}`;
@@ -76,7 +77,7 @@ export class PhotosService {
   }
 
   async list(
-    actor: Actor,
+    actor: AuthenticatedUser,
     filters: {
       from?: Date;
       to?: Date;
@@ -87,25 +88,48 @@ export class PhotosService {
       photoType?: string;
     },
   ) {
+    if (filters.warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(actor, filters.warehouseId);
+    }
+
     const qb = this.photoRepository
       .createQueryBuilder('photo')
       .orderBy('photo.takenAt', 'DESC');
 
-    // IDOR guard: staff/driver can only ever see their own photos, no
-    // matter what userId a caller puts in the query string.
+    // IDOR guard: staff/driver can only ever see their own photos
     if (!PRIVILEGED_ROLES.includes(actor.role)) {
       qb.andWhere('photo.takenBy = :ownerId', { ownerId: actor.id });
     } else if (filters.userId) {
       qb.andWhere('photo.takenBy = :ownerId', { ownerId: filters.userId });
     }
 
-    if (filters.from)
-      qb.andWhere('photo.takenAt >= :from', { from: filters.from });
-    if (filters.to) qb.andWhere('photo.takenAt <= :to', { to: filters.to });
-    if (filters.warehouseId)
+    if (filters.warehouseId) {
       qb.andWhere('photo.warehouseId = :warehouseId', {
         warehouseId: filters.warehouseId,
       });
+    } else if (
+      PRIVILEGED_ROLES.includes(actor.role) &&
+      !actor.hasGlobalAccess &&
+      (!actor.permissions || !actor.permissions.includes('warehouses:global_access'))
+    ) {
+      const authorizedIds = await this.warehousesService.getUserAuthorizedWarehouseIds(
+        actor.id,
+        actor.role,
+        actor.permissions,
+      );
+      if (authorizedIds.length === 0) {
+        qb.andWhere('photo.warehouseId IS NULL');
+      } else {
+        qb.andWhere(
+          '(photo.warehouseId IN (:...authorizedIds) OR photo.warehouseId IS NULL)',
+          { authorizedIds },
+        );
+      }
+    }
+
+    if (filters.from)
+      qb.andWhere('photo.takenAt >= :from', { from: filters.from });
+    if (filters.to) qb.andWhere('photo.takenAt <= :to', { to: filters.to });
     if (filters.customerId)
       qb.andWhere('photo.customerId = :customerId', {
         customerId: filters.customerId,
@@ -123,22 +147,28 @@ export class PhotosService {
     return Promise.all(photos.map((photo) => this.toDto(photo)));
   }
 
-  async findOneAuthorized(id: string, actor: Actor) {
+  async findOneAuthorized(id: string, actor: AuthenticatedUser) {
     const photo = await this.photoRepository.findOne({ where: { id } });
     if (!photo) throw new NotFoundException('Photo not found');
 
-    // Re-checked here too, not just in list(): a direct GET /photos/:id by
-    // guessed/sequential id must not leak another staff member's photo.
     if (!PRIVILEGED_ROLES.includes(actor.role) && photo.takenBy !== actor.id) {
       throw new ForbiddenException('Not authorized to view this photo');
+    }
+
+    if (photo.warehouseId && PRIVILEGED_ROLES.includes(actor.role)) {
+      await this.warehousesService.assertWarehouseAccess(actor, photo.warehouseId);
     }
 
     return this.toDto(photo);
   }
 
-  async remove(id: string, actor: Actor) {
+  async remove(id: string, actor: AuthenticatedUser) {
     const photo = await this.photoRepository.findOne({ where: { id } });
     if (!photo) throw new NotFoundException('Photo not found');
+
+    if (photo.warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(actor, photo.warehouseId);
+    }
 
     await this.storageService.delete(photo.objectKey);
     await this.photoRepository.delete(id);

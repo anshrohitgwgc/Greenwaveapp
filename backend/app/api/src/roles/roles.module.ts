@@ -14,6 +14,6 @@ import { RolesService } from './roles.service';
   ],
   controllers: [RolesController],
   providers: [RolesService],
-  exports: [TypeOrmModule],
+  exports: [RolesService, TypeOrmModule],
 })
 export class RolesModule {}

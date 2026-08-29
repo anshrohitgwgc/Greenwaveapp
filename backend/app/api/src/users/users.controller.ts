@@ -8,6 +8,7 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  Put,
   UseGuards,
 } from '@nestjs/common';
 
@@ -17,6 +18,7 @@ import type { AuthenticatedUser } from '../common/decorators/current-user.decora
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { AssignWarehousesDto } from './dto/assign-warehouses.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UsersService } from './users.service';
@@ -51,7 +53,7 @@ export class UsersController {
     @Body() dto: CreateUserDto,
     @CurrentUser() actor: AuthenticatedUser,
   ) {
-    const user = await this.usersService.create(dto);
+    const user = await this.usersService.create(dto, actor.id);
     await this.auditService.record({
       actorUserId: actor.id,
       actorRole: actor.role,
@@ -67,22 +69,30 @@ export class UsersController {
   @Roles('admin', 'manager')
   async findAll() {
     const users = await this.usersService.findAll();
-    return users.map(sanitize);
+    return Promise.all(
+      users.map(async (u) => {
+        const warehouses = await this.usersService.getUserWarehouses(u.id);
+        return {
+          ...sanitize(u),
+          warehouses,
+        };
+      }),
+    );
   }
 
   @Get('me')
   async me(@CurrentUser() actor: AuthenticatedUser) {
-    const user = await this.usersService.findOne(actor.id);
-    if (!user) throw new NotFoundException('User not found');
-    return sanitize(user);
+    const profile = await this.usersService.getUserProfile(actor.id);
+    if (!profile) throw new NotFoundException('User not found');
+    return profile;
   }
 
   @Get(':id')
   @Roles('admin', 'manager')
   async findOne(@Param('id', ParseIntPipe) id: number) {
-    const user = await this.usersService.findOne(id);
-    if (!user) throw new NotFoundException('User not found');
-    return sanitize(user);
+    const profile = await this.usersService.getUserProfile(id);
+    if (!profile) throw new NotFoundException('User not found');
+    return profile;
   }
 
   @Patch(':id')
@@ -95,16 +105,50 @@ export class UsersController {
     if (id === actor.id && dto.role && dto.role !== actor.role) {
       throw new ForbiddenException('Cannot change your own role');
     }
-    const user = await this.usersService.update(id, dto);
+    const user = await this.usersService.update(id, dto, actor.id);
     if (!user) throw new NotFoundException('User not found');
     await this.auditService.record({
       actorUserId: actor.id,
       actorRole: actor.role,
       action: 'user.updated',
       entityType: 'user',
-      entityId: String(id),
+      entityId: String(user.id),
       summary: `${actor.email} updated user ${user.email}`,
     });
     return sanitize(user);
+  }
+
+  @Get(':id/warehouses')
+  @Roles('admin', 'manager')
+  async getUserWarehouses(@Param('id', ParseIntPipe) id: number) {
+    return this.usersService.getUserWarehouses(id);
+  }
+
+  @Put(':id/warehouses')
+  @Roles('admin')
+  async assignUserWarehouses(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AssignWarehousesDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    const user = await this.usersService.findOne(id);
+    if (!user) throw new NotFoundException('User not found');
+
+    const updatedWarehouses = await this.usersService.assignUserWarehouses(
+      id,
+      dto.warehouseIds,
+      actor.id,
+    );
+
+    await this.auditService.record({
+      actorUserId: actor.id,
+      actorRole: actor.role,
+      action: 'user.warehouse_access_updated',
+      entityType: 'user',
+      entityId: String(user.id),
+      summary: `${actor.email} updated warehouse access for ${user.email}`,
+    });
+
+    return updatedWarehouses;
   }
 }

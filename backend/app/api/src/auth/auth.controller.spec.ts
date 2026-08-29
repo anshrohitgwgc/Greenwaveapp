@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 
+import { UsersService } from '../users/users.service';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { LoginRateLimitGuard } from './login-rate-limit.guard';
@@ -16,6 +17,12 @@ describe('AuthController', () => {
           useValue: {
             register: jest.fn(),
             login: jest.fn(),
+          },
+        },
+        {
+          provide: UsersService,
+          useValue: {
+            getUserProfile: jest.fn(),
           },
         },
       ],

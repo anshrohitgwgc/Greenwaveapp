@@ -91,12 +91,15 @@
       });
     },
 
-    me: function () { return request('GET', '/users/me'); },
+    me: function () { return request('GET', '/auth/me'); },
 
     // Staff / Users
     listUsers: function () { return request('GET', '/users'); },
+    getUser: function (id) { return request('GET', '/users/' + id); },
     createUser: function (data) { return request('POST', '/users', data); },
     updateUser: function (id, data) { return request('PATCH', '/users/' + id, data); },
+    getUserWarehouses: function (userId) { return request('GET', '/users/' + userId + '/warehouses'); },
+    assignUserWarehouses: function (userId, warehouseIds) { return request('PUT', '/users/' + userId + '/warehouses', { warehouseIds: warehouseIds }); },
 
     // Warehouses
     listWarehouses: function (includeInactive) {

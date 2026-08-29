@@ -1,8 +1,15 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Inject,
+  Injectable,
+  forwardRef,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
 
+import { RolesService } from '../roles/roles.service';
+import { WarehousesService } from '../warehouses/warehouses.service';
 import { User } from './entities/user.entity';
 
 const BCRYPT_ROUNDS = 12;
@@ -16,23 +23,28 @@ export class UsersService {
   constructor(
     @InjectRepository(User)
     private usersRepository: Repository<User>,
+    @Inject(forwardRef(() => RolesService))
+    private rolesService: RolesService,
+    @Inject(forwardRef(() => WarehousesService))
+    private warehousesService: WarehousesService,
   ) {}
 
-  async create(userData: {
-    fullName: string;
-    email: string;
-    password: string;
-    role?: string;
-  }): Promise<User> {
+  async create(
+    userData: {
+      fullName: string;
+      email: string;
+      password: string;
+      role?: string;
+      warehouseIds?: string[];
+    },
+    creatorId?: number,
+  ): Promise<User> {
     const email = normalizeEmail(userData.email);
     const existing = await this.usersRepository.findOne({ where: { email } });
     if (existing) {
       throw new ConflictException('A user with this email already exists');
     }
 
-    // Callers that already hash (AuthService.register) pass a bcrypt hash
-    // through; this guards direct callers (e.g. admin-created users) that
-    // pass a plaintext password.
     const isAlreadyHashed = userData.password.startsWith('$2');
     const password = isAlreadyHashed
       ? userData.password
@@ -45,7 +57,17 @@ export class UsersService {
       role: userData.role ?? 'staff',
     });
 
-    return this.usersRepository.save(user);
+    const saved = await this.usersRepository.save(user);
+
+    if (userData.warehouseIds && userData.warehouseIds.length > 0) {
+      await this.warehousesService.assignUserWarehouses(
+        saved.id,
+        userData.warehouseIds,
+        creatorId,
+      );
+    }
+
+    return saved;
   }
 
   async count(): Promise<number> {
@@ -53,7 +75,7 @@ export class UsersService {
   }
 
   async findAll(): Promise<User[]> {
-    return this.usersRepository.find();
+    return this.usersRepository.find({ order: { id: 'ASC' } });
   }
 
   async findOne(id: number): Promise<User | null> {
@@ -62,10 +84,6 @@ export class UsersService {
     });
   }
 
-  /**
-   * Returns the password hash too — used only by AuthService for the
-   * bcrypt.compare step. Never expose this result over the API directly.
-   */
   async findByEmail(email: string): Promise<User | null> {
     return this.usersRepository
       .createQueryBuilder('user')
@@ -76,13 +94,68 @@ export class UsersService {
 
   async update(
     id: number,
-    updates: Partial<Pick<User, 'fullName' | 'email' | 'role'>>,
+    updates: Partial<Pick<User, 'fullName' | 'email' | 'role'>> & {
+      warehouseIds?: string[];
+    },
+    actorId?: number,
   ): Promise<User | null> {
-    const patch = { ...updates };
-    if (patch.email) {
-      patch.email = normalizeEmail(patch.email);
+    const patch: Partial<User> = {};
+    if (updates.fullName !== undefined) patch.fullName = updates.fullName;
+    if (updates.email !== undefined) patch.email = normalizeEmail(updates.email);
+    if (updates.role !== undefined) patch.role = updates.role;
+
+    if (Object.keys(patch).length > 0) {
+      await this.usersRepository.update(id, patch);
     }
-    await this.usersRepository.update(id, patch);
+
+    if (updates.warehouseIds !== undefined) {
+      await this.warehousesService.assignUserWarehouses(
+        id,
+        updates.warehouseIds,
+        actorId,
+      );
+    }
+
     return this.findOne(id);
+  }
+
+  async getUserProfile(id: number) {
+    const user = await this.findOne(id);
+    if (!user) return null;
+
+    const permissions = await this.rolesService.getPermissionsForRole(user.role);
+    const hasGlobalAccess = permissions.includes('warehouses:global_access');
+    const warehouses = await this.warehousesService.getUserAuthorizedWarehouses(
+      user.id,
+      user.role,
+      permissions,
+    );
+
+    return {
+      id: user.id,
+      fullName: user.fullName,
+      email: user.email,
+      role: user.role,
+      permissions,
+      warehouses,
+      hasGlobalAccess,
+      createdAt: user.createdAt,
+    };
+  }
+
+  async getUserWarehouses(userId: number) {
+    return this.warehousesService.getUserWarehouseAccess(userId);
+  }
+
+  async assignUserWarehouses(
+    userId: number,
+    warehouseIds: string[],
+    actorId?: number,
+  ) {
+    return this.warehousesService.assignUserWarehouses(
+      userId,
+      warehouseIds,
+      actorId,
+    );
   }
 }

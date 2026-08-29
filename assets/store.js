@@ -89,7 +89,7 @@
       s.serverUser = {
         id: user.id,
         email: user.email,
-        name: user.fullName,
+        name: user.fullName || user.name || user.email,
         role: user.role,
         active: true
       };
@@ -108,13 +108,16 @@
       return s.serverUser;
     },
 
-    /* Client-only tag on a server material: which company's view it shows
-       under, and which quick-entry widget Intake uses for it. Not sent to
-       the API — the material record itself (name/unit/category/price) is
-       server-authoritative; this is purely local presentation state, so a
-       material tagged on one device shows untagged (visible under both
-       companies, captured as a plain count) on another until tagged there
-       too. That's a known limitation of the backend having no such column. */
+    getWarehouse: function () {
+      var s = load();
+      return s ? s.lastWarehouseId : null;
+    },
+    setWarehouse: function (id) {
+      var s = load();
+      s.lastWarehouseId = id;
+      save();
+    },
+
     materialMeta: function (id) { return load().materialMeta[id] || null; },
     setMaterialMeta: function (id, meta) {
       var s = load();

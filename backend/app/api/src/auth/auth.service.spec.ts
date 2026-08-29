@@ -4,7 +4,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
 
 import { AuditService } from '../audit/audit.service';
+import { RolesService } from '../roles/roles.service';
 import { UsersService } from '../users/users.service';
+import { WarehousesService } from '../warehouses/warehouses.service';
 import { AuthService } from './auth.service';
 
 describe('AuthService', () => {
@@ -15,6 +17,8 @@ describe('AuthService', () => {
     count: jest.Mock;
   };
   let auditService: { record: jest.Mock };
+  let rolesService: { getPermissionsForRole: jest.Mock };
+  let warehousesService: { getUserAuthorizedWarehouses: jest.Mock };
 
   beforeEach(async () => {
     usersService = {
@@ -23,12 +27,20 @@ describe('AuthService', () => {
       count: jest.fn(),
     };
     auditService = { record: jest.fn() };
+    rolesService = {
+      getPermissionsForRole: jest.fn().mockResolvedValue(['inventory:write']),
+    };
+    warehousesService = {
+      getUserAuthorizedWarehouses: jest.fn().mockResolvedValue([]),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
         { provide: UsersService, useValue: usersService },
         { provide: AuditService, useValue: auditService },
+        { provide: RolesService, useValue: rolesService },
+        { provide: WarehousesService, useValue: warehousesService },
         {
           provide: JwtService,
           useValue: {
@@ -88,12 +100,14 @@ describe('AuthService', () => {
       );
 
       expect(result.access_token).toBe('mock_jwt_token');
-      expect(result.user).toEqual({
-        id: 1,
-        fullName: 'Staff Person',
-        email: 'staff@example.com',
-        role: 'staff',
-      });
+      expect(result.user).toEqual(
+        expect.objectContaining({
+          id: 1,
+          fullName: 'Staff Person',
+          email: 'staff@example.com',
+          role: 'staff',
+        }),
+      );
       expect((result.user as Record<string, unknown>).password).toBeUndefined();
       expect(auditService.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'auth.login' }),

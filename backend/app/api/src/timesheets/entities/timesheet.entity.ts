@@ -1,6 +1,7 @@
 import {
   Column,
   CreateDateColumn,
+  DeleteDateColumn,
   Entity,
   Index,
   PrimaryColumn,
@@ -19,15 +20,15 @@ export class Timesheet {
   @Column({ name: 'warehouse_id', type: 'uuid', nullable: true })
   warehouseId: string | null;
 
-  @Column({ name: 'clock_in', type: 'timestamptz' })
+  @CreateDateColumn({ name: 'clock_in' })
   clockIn: Date;
 
-  @Column({ name: 'clock_out', type: 'timestamptz', nullable: true })
+  @DeleteDateColumn({ name: 'clock_out', nullable: true })
   clockOut: Date | null;
 
-  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
-  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
+  @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
 }
