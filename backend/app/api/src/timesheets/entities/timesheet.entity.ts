@@ -23,7 +23,7 @@ export class Timesheet {
   @CreateDateColumn({ name: 'clock_in' })
   clockIn: Date;
 
-  @DeleteDateColumn({ name: 'clock_out', nullable: true })
+  @Column({ name: 'clock_out', type: 'timestamp with time zone', nullable: true })
   clockOut: Date | null;
 
   @CreateDateColumn({ name: 'created_at' })

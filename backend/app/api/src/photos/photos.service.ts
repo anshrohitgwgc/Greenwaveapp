@@ -185,7 +185,8 @@ export class PhotosService {
   }
 
   private async toDto(photo: PhotoAsset) {
-    const url = await this.storageService.presignedGetUrl(photo.objectKey);
+    const rawUrl = await this.storageService.presignedGetUrl(photo.objectKey);
+    const url = rawUrl.replace(/^https?:\/\/[^\/]+/, '');
     return {
       id: photo.id,
       url,

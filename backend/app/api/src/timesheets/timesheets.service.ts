@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
-import { In, IsNull, Repository } from 'typeorm';
+import { Between, In, IsNull, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
@@ -87,13 +87,18 @@ export class TimesheetsService {
   }
 
   history(actorId: number, from?: Date, to?: Date) {
-    const qb = this.timesheetRepository
-      .createQueryBuilder('shift')
-      .where('shift.userId = :userId', { userId: actorId })
-      .orderBy('shift.clockIn', 'DESC');
-    if (from) qb.andWhere('shift.clockIn >= :from', { from });
-    if (to) qb.andWhere('shift.clockIn <= :to', { to });
-    return qb.getMany();
+    const where: any = { userId: actorId };
+    if (from && to) {
+      where.clockIn = Between(from, to);
+    } else if (from) {
+      where.clockIn = MoreThanOrEqual(from);
+    } else if (to) {
+      where.clockIn = LessThanOrEqual(to);
+    }
+    return this.timesheetRepository.find({
+      where,
+      order: { clockIn: 'DESC' },
+    });
   }
 
   /** MANAGER/ADMIN only */

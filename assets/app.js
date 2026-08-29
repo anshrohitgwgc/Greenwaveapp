@@ -92,6 +92,22 @@
     return n + ' B';
   }
 
+  function deduplicateWarehouses(list) {
+    if (!Array.isArray(list)) return [];
+    var seen = {};
+    var result = [];
+    list.forEach(function (w) {
+      if (!w || !w.id) return;
+      var normName = (w.name || '').trim().toLowerCase();
+      var key = normName || w.id;
+      if (!seen[key]) {
+        seen[key] = true;
+        result.push(w);
+      }
+    });
+    return result;
+  }
+
   function toast(msg) {
     var t = $('#toast');
     if (!t) return;
@@ -322,16 +338,16 @@
     });
 
     var prodEl = $('#productsNav');
-    if (prodEl) prodEl.textContent = isRecycling() ? 'Materials' : 'Products';
+    if (prodEl) prodEl.textContent = isRecycling() ? 'Materials Catalog' : 'Healthcare Products';
 
     var inBtn = $('#btnReceiveStock');
-    if (inBtn) inBtn.innerHTML = '<svg><use href="#i-plus"></use></svg>' + (isRecycling() ? 'Receive Pallets' : 'Receive Boxes');
+    if (inBtn) inBtn.innerHTML = '<svg><use href="#i-plus"></use></svg>Inbound';
     var outBtn = $('#btnShipStock');
-    if (outBtn) outBtn.innerHTML = '<svg><use href="#i-truck"></use></svg>' + (isRecycling() ? 'Ship Pallets' : 'Ship Boxes');
+    if (outBtn) outBtn.innerHTML = '<svg><use href="#i-truck"></use></svg>Outbound';
     var invSub = $('#invenSub');
     if (invSub) invSub.textContent = isRecycling() ? 'Recycling Division — Pallet inventory balances, container tracking, and transaction ledger.' : 'Healthcare Division — Box inventory balances, container tracking, and transaction ledger.';
     var prodTitle = $('#prodTitle');
-    if (prodTitle) prodTitle.textContent = isRecycling() ? 'Materials Catalog' : 'Healthcare Products Catalog';
+    if (prodTitle) prodTitle.textContent = isRecycling() ? 'Materials Catalog' : 'Healthcare Products';
 
     var meInitialsEl = $('#meInitials');
     if (meInitialsEl) meInitialsEl.textContent = me ? initials(me.name) : '';
@@ -342,15 +358,20 @@
 
     var whWrap = $('.wh');
     if (whWrap) {
-      if (!warehouses || warehouses.length === 0) {
+      var displayWarehouses = deduplicateWarehouses(warehouses);
+      if (!displayWarehouses || displayWarehouses.length === 0) {
         whWrap.innerHTML = '<label>FACILITY</label><div class="wh-readonly-chip wh-unassigned" title="No assigned warehouse"><span class="wh-pin">⚠️</span> No warehouse assigned. Contact administrator.</div>';
-      } else if (warehouses.length === 1) {
-        warehouseId = warehouses[0].id;
+      } else if (displayWarehouses.length === 1) {
+        warehouseId = displayWarehouses[0].id;
         S.setWarehouse(warehouseId);
-        whWrap.innerHTML = '<label>FACILITY (ASSIGNED)</label><div class="wh-readonly-chip" title="Assigned Facility"><span class="wh-pin">📍</span> ' + esc(warehouses[0].name) + '</div>';
+        whWrap.innerHTML = '<label>FACILITY (ASSIGNED)</label><div class="wh-readonly-chip" title="Assigned Facility"><span class="wh-pin">📍</span> ' + esc(displayWarehouses[0].name) + '</div>';
       } else {
+        if (!displayWarehouses.some(function (w) { return w.id === warehouseId; })) {
+          warehouseId = displayWarehouses[0].id;
+          S.setWarehouse(warehouseId);
+        }
         whWrap.innerHTML = '<label for="wh">FACILITY</label><div class="wh-select-wrap"><select id="wh" aria-label="Selected Warehouse">' +
-          warehouses.map(function (w) {
+          displayWarehouses.map(function (w) {
             return '<option value="' + esc(w.id) + '"' + (w.id === warehouseId ? ' selected' : '') + '>' + esc(w.name) + '</option>';
           }).join('') +
           '</select></div>';
@@ -471,7 +492,7 @@
         var prevVal = prodFilterEl.value;
         prodFilterEl.innerHTML = '<option value="">All Products / Materials</option>' +
           visibleMats.map(function (m) {
-            return '<option value="' + esc(m.id) + '">' + esc(m.name) + ' (' + esc(m.unit) + ')</option>';
+            return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>';
           }).join('');
         if (prevVal) prodFilterEl.value = prevVal;
       }
@@ -493,10 +514,15 @@
         });
       }
 
+      var isRec = isRecycling();
+      var unitSuffix = isRec ? ' PALLETS' : ' BOXES';
       var elCur = $('#kpiCurrentStock'); if (elCur) elCur.textContent = num(grandCurrent);
       var elIn = $('#kpiInboundTotal'); if (elIn) elIn.textContent = num(grandInbound);
       var elOut = $('#kpiOutboundTotal'); if (elOut) elOut.textContent = num(grandOutbound);
       var elAdj = $('#kpiAdjustmentTotal'); if (elAdj) elAdj.textContent = (grandAdj >= 0 ? '+' : '') + num(grandAdj);
+
+      var kpiSub = $('#kpiStockSub');
+      if (kpiSub) kpiSub.textContent = isRec ? 'Total pallets across all materials' : 'Total boxes across all products';
 
       if (invenTab === 'balances') {
         renderBalancesTab(visibleMats, balances, transactions);
@@ -520,6 +546,7 @@
       return;
     }
 
+    var isRec = isRecycling();
     var matMap = {};
     materials.forEach(function (m) {
       matMap[m.id] = { material: m, xl: 0, l: 0, m: 0, s: 0, total: 0, inbound: 0, outbound: 0, adj: 0 };
@@ -544,7 +571,9 @@
         if (!row) return;
         var sign = t.type === 'outbound' ? -1 : 1;
         var tot = Number(t.total) || 0;
-        SIZE_KEYS.forEach(function (k) { row[k] += sign * (Number(t[k]) || 0); });
+        if (!isRec) {
+          SIZE_KEYS.forEach(function (k) { row[k] += sign * (Number(t[k]) || 0); });
+        }
         row.total += sign * tot;
         if (t.type === 'inbound') row.inbound += tot;
         else if (t.type === 'outbound') row.outbound += tot;
@@ -565,34 +594,58 @@
       });
     }
 
-    var head = '<tr>' +
-      '<th>Product / Material</th>' +
-      '<th>Category</th>' +
-      '<th class="num">XL</th>' +
-      '<th class="num">L</th>' +
-      '<th class="num">M</th>' +
-      '<th class="num">S</th>' +
-      '<th class="num" style="background:var(--acc-soft);color:var(--acc)">Current Stock</th>' +
-      '<th class="num">Inbound</th>' +
-      '<th class="num">Outbound</th>' +
-      '<th class="num">Net Adj</th>' +
-      '<th>Unit</th>' +
-      '</tr>';
+    var unitLabel = isRec ? 'PALLET' : 'BOX';
+
+    var head = isRec
+      ? '<tr>' +
+          '<th>Product / Material</th>' +
+          '<th>Category</th>' +
+          '<th class="num" style="background:var(--acc-soft);color:var(--acc)">Current Stock (Pallets)</th>' +
+          '<th class="num">Inbound</th>' +
+          '<th class="num">Outbound</th>' +
+          '<th class="num">Net Adj</th>' +
+          '<th>Unit</th>' +
+        '</tr>'
+      : '<tr>' +
+          '<th>Product</th>' +
+          '<th>Category</th>' +
+          '<th class="num">XL</th>' +
+          '<th class="num">L</th>' +
+          '<th class="num">M</th>' +
+          '<th class="num">S</th>' +
+          '<th class="num" style="background:var(--acc-soft);color:var(--acc)">Current Stock (Boxes)</th>' +
+          '<th class="num">Inbound</th>' +
+          '<th class="num">Outbound</th>' +
+          '<th class="num">Net Adj</th>' +
+          '<th>Unit</th>' +
+        '</tr>';
 
     var body = rows.map(function (r) {
-      return '<tr>' +
-        '<td><strong>' + esc(r.material.name) + '</strong></td>' +
-        '<td style="color:var(--muted)">' + esc(r.material.category || '—') + '</td>' +
-        '<td class="num">' + num(r.xl) + '</td>' +
-        '<td class="num">' + num(r.l) + '</td>' +
-        '<td class="num">' + num(r.m) + '</td>' +
-        '<td class="num">' + num(r.s) + '</td>' +
-        '<td class="num" style="background:var(--acc-soft);font-weight:700;color:var(--acc)">' + num(r.total) + '</td>' +
-        '<td class="num text-success">' + num(r.inbound) + '</td>' +
-        '<td class="num text-warning">' + num(r.outbound) + '</td>' +
-        '<td class="num text-accent">' + (r.adj >= 0 ? '+' : '') + num(r.adj) + '</td>' +
-        '<td style="color:var(--muted)">' + esc(r.material.unit) + '</td>' +
-        '</tr>';
+      if (isRec) {
+        return '<tr>' +
+          '<td><strong>' + esc(r.material.name) + '</strong></td>' +
+          '<td style="color:var(--muted)">' + esc(r.material.category || '—') + '</td>' +
+          '<td class="num" style="background:var(--acc-soft);font-weight:700;color:var(--acc)">' + num(r.total) + '</td>' +
+          '<td class="num text-success">' + num(r.inbound) + '</td>' +
+          '<td class="num text-warning">' + num(r.outbound) + '</td>' +
+          '<td class="num text-accent">' + (r.adj >= 0 ? '+' : '') + num(r.adj) + '</td>' +
+          '<td style="color:var(--muted)">' + unitLabel + '</td>' +
+          '</tr>';
+      } else {
+        return '<tr>' +
+          '<td><strong>' + esc(r.material.name) + '</strong></td>' +
+          '<td style="color:var(--muted)">' + esc(r.material.category || '—') + '</td>' +
+          '<td class="num">' + num(r.xl) + '</td>' +
+          '<td class="num">' + num(r.l) + '</td>' +
+          '<td class="num">' + num(r.m) + '</td>' +
+          '<td class="num">' + num(r.s) + '</td>' +
+          '<td class="num" style="background:var(--acc-soft);font-weight:700;color:var(--acc)">' + num(r.total) + '</td>' +
+          '<td class="num text-success">' + num(r.inbound) + '</td>' +
+          '<td class="num text-warning">' + num(r.outbound) + '</td>' +
+          '<td class="num text-accent">' + (r.adj >= 0 ? '+' : '') + num(r.adj) + '</td>' +
+          '<td style="color:var(--muted)">' + unitLabel + '</td>' +
+          '</tr>';
+      }
     }).join('');
 
     var totXL = rows.reduce(function (a, r) { return a + r.xl; }, 0);
@@ -604,28 +657,35 @@
     var totOut = rows.reduce(function (a, r) { return a + r.outbound; }, 0);
     var totAdj = rows.reduce(function (a, r) { return a + r.adj; }, 0);
 
-    var foot = '<tfoot><tr style="font-weight:700">' +
-      '<td>TOTALS</td><td></td>' +
-      '<td class="num">' + num(totXL) + '</td>' +
-      '<td class="num">' + num(totL) + '</td>' +
-      '<td class="num">' + num(totM) + '</td>' +
-      '<td class="num">' + num(totS) + '</td>' +
-      '<td class="num" style="background:var(--acc-soft);color:var(--acc)">' + num(totStock) + '</td>' +
-      '<td class="num text-success">' + num(totIn) + '</td>' +
-      '<td class="num text-warning">' + num(totOut) + '</td>' +
-      '<td class="num text-accent">' + (totAdj >= 0 ? '+' : '') + num(totAdj) + '</td>' +
-      '<td></td>' +
-      '</tr></tfoot>';
+    var foot = isRec
+      ? '<tfoot><tr style="font-weight:700">' +
+          '<td>TOTALS</td><td></td>' +
+          '<td class="num" style="background:var(--acc-soft);color:var(--acc)">' + num(totStock) + '</td>' +
+          '<td class="num text-success">' + num(totIn) + '</td>' +
+          '<td class="num text-warning">' + num(totOut) + '</td>' +
+          '<td class="num text-accent">' + (totAdj >= 0 ? '+' : '') + num(totAdj) + '</td>' +
+          '<td></td>' +
+        '</tr></tfoot>'
+      : '<tfoot><tr style="font-weight:700">' +
+          '<td>TOTALS</td><td></td>' +
+          '<td class="num">' + num(totXL) + '</td>' +
+          '<td class="num">' + num(totL) + '</td>' +
+          '<td class="num">' + num(totM) + '</td>' +
+          '<td class="num">' + num(totS) + '</td>' +
+          '<td class="num" style="background:var(--acc-soft);color:var(--acc)">' + num(totStock) + '</td>' +
+          '<td class="num text-success">' + num(totIn) + '</td>' +
+          '<td class="num text-warning">' + num(totOut) + '</td>' +
+          '<td class="num text-accent">' + (totAdj >= 0 ? '+' : '') + num(totAdj) + '</td>' +
+          '<td></td>' +
+        '</tr></tfoot>';
 
-    var invBody = $('#invenBody');
-    if (invBody) {
-      invBody.innerHTML = '<div class="card">' +
-        '<div class="tablewrap"><table class="table">' +
-        '<thead>' + head + '</thead>' +
-        '<tbody>' + (body || '<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:30px">No matching stock balances found.</td></tr>') + '</tbody>' +
-        foot +
-        '</table></div></div>';
-    }
+    var colSpan = isRec ? 7 : 11;
+    invBody.innerHTML = '<div class="card">' +
+      '<div class="tablewrap"><table class="table">' +
+      '<thead>' + head + '</thead>' +
+      '<tbody>' + (body || '<tr><td colspan="' + colSpan + '" style="text-align:center;color:var(--muted);padding:30px">No matching stock balances found.</td></tr>') + '</tbody>' +
+      foot +
+      '</table></div></div>';
   }
 
   function renderTransactionsTab(materials, transactions) {
@@ -633,6 +693,7 @@
     materials.forEach(function (m) { matById[m.id] = m; });
 
     var rows = transactions.slice();
+    var isRec = isRecycling();
 
     if (invenProductFilter) {
       rows = rows.filter(function (t) { return t.materialId === invenProductFilter; });
@@ -654,57 +715,86 @@
       });
     }
 
-    var head = '<tr>' +
-      '<th>Date</th>' +
-      '<th>Order / Ref #</th>' +
-      '<th>Type</th>' +
-      '<th>Product</th>' +
-      '<th>Unit</th>' +
-      '<th>Weight</th>' +
-      '<th>Container No.</th>' +
-      '<th>Seal No.</th>' +
-      '<th class="num">XL</th>' +
-      '<th class="num">L</th>' +
-      '<th class="num">M</th>' +
-      '<th class="num">S</th>' +
-      '<th class="num">Total</th>' +
-      '<th>Recorded By</th>' +
-      '<th>Notes / Reason</th>' +
-      '</tr>';
+    var head = isRec
+      ? '<tr>' +
+          '<th>Date</th>' +
+          '<th>Order / Ref #</th>' +
+          '<th>Type</th>' +
+          '<th>Material</th>' +
+          '<th>Unit</th>' +
+          '<th>Weight</th>' +
+          '<th>Container No.</th>' +
+          '<th>Seal No.</th>' +
+          '<th class="num">Total Pallets</th>' +
+          '<th>Recorded By</th>' +
+          '<th>Notes / Reason</th>' +
+        '</tr>'
+      : '<tr>' +
+          '<th>Date</th>' +
+          '<th>Order / Ref #</th>' +
+          '<th>Type</th>' +
+          '<th>Product</th>' +
+          '<th>Unit</th>' +
+          '<th>Container No.</th>' +
+          '<th>Seal No.</th>' +
+          '<th class="num">XL</th>' +
+          '<th class="num">L</th>' +
+          '<th class="num">M</th>' +
+          '<th class="num">S</th>' +
+          '<th class="num">Total Boxes</th>' +
+          '<th>Recorded By</th>' +
+          '<th>Notes / Reason</th>' +
+        '</tr>';
 
     var body = rows.map(function (t) {
-      var m = matById[t.materialId] || { name: 'Item', unit: 'cases' };
+      var m = matById[t.materialId] || { name: 'Item', unit: isRec ? 'PALLET' : 'BOX' };
       var badgeClass = t.type === 'inbound' ? 'badge-in' : t.type === 'outbound' ? 'badge-out' : 'badge-adj';
       var typeLabel = t.type === 'inbound' ? 'IN' : t.type === 'outbound' ? 'OUT' : 'ADJ';
       var by = (me && t.createdBy === me.id) ? me.name : (usersCache ? userName(t.createdBy) : ('Staff #' + t.createdBy));
-      var unitStr = (t.unitType || (isRecycling() ? 'pallet' : 'box')).toUpperCase();
+      var unitStr = (t.unitType || (isRec ? 'pallet' : 'box')).toUpperCase();
       var weightStr = (t.weightValue != null && Number(t.weightValue) > 0) ? (num(t.weightValue) + ' ' + (t.weightUnit || 'kg').toUpperCase()) : '—';
 
-      return '<tr class="clickable-row" data-tx="' + esc(t.id) + '" title="Click to view full transaction details and photos">' +
-        '<td class="mono" style="font-size:12.5px">' + esc(when(t.createdAt).split(' ')[0]) + '</td>' +
-        '<td class="mono"><strong>' + esc(t.orderNumber || t.reference || '—') + '</strong></td>' +
-        '<td><span class="badge ' + badgeClass + '">' + typeLabel + '</span></td>' +
-        '<td>' + esc(m.name) + '</td>' +
-        '<td><span class="mono" style="font-size:11.5px;font-weight:700">' + esc(unitStr) + '</span></td>' +
-        '<td class="mono" style="font-size:12px">' + esc(weightStr) + '</td>' +
-        '<td class="mono">' + esc(t.containerNumber || '—') + '</td>' +
-        '<td class="mono">' + esc(t.sealNumber || '—') + '</td>' +
-        '<td class="num">' + num(t.xl) + '</td>' +
-        '<td class="num">' + num(t.l) + '</td>' +
-        '<td class="num">' + num(t.m) + '</td>' +
-        '<td class="num">' + num(t.s) + '</td>' +
-        '<td class="num"><strong>' + num(t.total) + '</strong></td>' +
-        '<td style="color:var(--ink-2)">' + esc(by) + '</td>' +
-        '<td style="color:var(--muted);font-size:12.5px">' + esc(t.reason || t.notes || '—') + '</td>' +
-        '</tr>';
+      if (isRec) {
+        return '<tr class="clickable-row" data-tx="' + esc(t.id) + '" title="Click to view full transaction details and photos">' +
+          '<td class="mono" style="font-size:12.5px">' + esc(when(t.createdAt).split(' ')[0]) + '</td>' +
+          '<td class="mono"><strong>' + esc(t.orderNumber || t.reference || '—') + '</strong></td>' +
+          '<td><span class="badge ' + badgeClass + '">' + typeLabel + '</span></td>' +
+          '<td>' + esc(m.name) + '</td>' +
+          '<td><span class="mono" style="font-size:11.5px;font-weight:700">' + esc(unitStr) + '</span></td>' +
+          '<td class="mono" style="font-size:12px">' + esc(weightStr) + '</td>' +
+          '<td class="mono">' + esc(t.containerNumber || '—') + '</td>' +
+          '<td class="mono">' + esc(t.sealNumber || '—') + '</td>' +
+          '<td class="num"><strong>' + num(t.total) + '</strong></td>' +
+          '<td style="color:var(--ink-2)">' + esc(by) + '</td>' +
+          '<td style="color:var(--muted);font-size:12.5px">' + esc(t.reason || t.notes || '—') + '</td>' +
+          '</tr>';
+      } else {
+        return '<tr class="clickable-row" data-tx="' + esc(t.id) + '" title="Click to view full transaction details and photos">' +
+          '<td class="mono" style="font-size:12.5px">' + esc(when(t.createdAt).split(' ')[0]) + '</td>' +
+          '<td class="mono"><strong>' + esc(t.orderNumber || t.reference || '—') + '</strong></td>' +
+          '<td><span class="badge ' + badgeClass + '">' + typeLabel + '</span></td>' +
+          '<td>' + esc(m.name) + '</td>' +
+          '<td><span class="mono" style="font-size:11.5px;font-weight:700">' + esc(unitStr) + '</span></td>' +
+          '<td class="mono">' + esc(t.containerNumber || '—') + '</td>' +
+          '<td class="mono">' + esc(t.sealNumber || '—') + '</td>' +
+          '<td class="num">' + num(t.xl) + '</td>' +
+          '<td class="num">' + num(t.l) + '</td>' +
+          '<td class="num">' + num(t.m) + '</td>' +
+          '<td class="num">' + num(t.s) + '</td>' +
+          '<td class="num"><strong>' + num(t.total) + '</strong></td>' +
+          '<td style="color:var(--ink-2)">' + esc(by) + '</td>' +
+          '<td style="color:var(--muted);font-size:12.5px">' + esc(t.reason || t.notes || '—') + '</td>' +
+          '</tr>';
+      }
     }).join('');
 
+    var colSpan = isRec ? 11 : 14;
     var invBody = $('#invenBody');
     if (invBody) {
       invBody.innerHTML = '<div class="card">' +
         '<div class="tablewrap"><table class="table">' +
         '<thead>' + head + '</thead>' +
-        '<tbody>' + (body || '<tr><td colspan="15" style="text-align:center;color:var(--muted);padding:30px">No matching transactions found.</td></tr>') + '</tbody>' +
+        '<tbody>' + (body || '<tr><td colspan="' + colSpan + '" style="text-align:center;color:var(--muted);padding:30px">No matching transactions found.</td></tr>') + '</tbody>' +
         '</table></div></div>';
     }
 
@@ -723,9 +813,10 @@
           '<span class="tx-detail-label">Associated Photos (' + tx.photos.length + ') — Click thumbnail to open lightbox</span>' +
           '<div class="tx-photos-grid">' +
           tx.photos.map(function (p) {
-            return '<div class="tx-photo-card" data-url="' + esc(p.url) + '" data-meta="' + esc(p.filename || 'Photo') + '">' +
+            var fileName = p.originalFilename || p.filename || 'Photo';
+            return '<div class="tx-photo-card" data-url="' + esc(p.url) + '" data-meta="' + esc(fileName) + '">' +
               '<img src="' + esc(p.url) + '" alt="Photo" class="tx-photo-img">' +
-              '<div class="tx-photo-meta">' + esc(p.filename || 'Photo') + '</div>' +
+              '<div class="tx-photo-meta">' + esc(fileName) + '</div>' +
               '</div>';
           }).join('') +
           '</div></div>';
@@ -733,10 +824,22 @@
         photoHtml = '<div class="tx-detail-item" style="grid-column: 1 / -1;margin-top:8px"><span class="tx-detail-label">Associated Photos</span><span class="tx-detail-val" style="color:var(--muted)">— None attached</span></div>';
       }
 
-      var weightStr = (tx.weightValue != null && Number(tx.weightValue) > 0) ? (num(tx.weightValue) + ' ' + (tx.weightUnit || 'KG').toUpperCase()) : '—';
+      var txIsRec = (tx.division === 'recycling' || (!tx.division && tx.unitType === 'pallet') || isRecycling());
+      var divLabel = txIsRec ? 'Recycling (Pallets)' : 'Healthcare (Boxes)';
+      var unitLabel = txIsRec ? 'PALLET' : 'BOX';
       var typeLabel = tx.type === 'inbound' ? 'Inbound (IN)' : tx.type === 'outbound' ? 'Outbound (OUT)' : 'Adjustment (ADJ)';
-      var divLabel = tx.division === 'recycling' ? 'Recycling (Pallets)' : (tx.division === 'healthcare' ? 'Healthcare (Boxes)' : (tx.division || '—'));
-      var unitLabel = tx.unitType ? tx.unitType.toUpperCase() : '—';
+
+      var divisionSpecificFields = '';
+      if (txIsRec) {
+        var weightStr = (tx.weightValue != null && Number(tx.weightValue) > 0) ? (num(tx.weightValue) + ' ' + (tx.weightUnit || 'KG').toUpperCase()) : '—';
+        divisionSpecificFields =
+          '<div class="tx-detail-item"><span class="tx-detail-label">Weight</span><span class="tx-detail-val mono">⚖️ ' + esc(weightStr) + '</span></div>' +
+          '<div class="tx-detail-item"><span class="tx-detail-label">Total Unit Quantity</span><span class="tx-detail-val mono text-success" style="font-size:16px"><strong>' + num(tx.total) + ' PALLETS</strong></span></div>';
+      } else {
+        divisionSpecificFields =
+          '<div class="tx-detail-item"><span class="tx-detail-label">Total Unit Quantity</span><span class="tx-detail-val mono text-success" style="font-size:16px"><strong>' + num(tx.total) + ' BOXES</strong></span></div>' +
+          '<div class="tx-detail-item" style="grid-column: 1 / -1"><span class="tx-detail-label">Size Breakdown (Whole BOX counts only)</span><span class="tx-detail-val mono">XL: ' + num(tx.xl) + '  |  L: ' + num(tx.l) + '  |  M: ' + num(tx.m) + '  |  S: ' + num(tx.s) + '</span></div>';
+      }
 
       var bodyHtml =
         '<div class="tx-detail-card">' +
@@ -747,11 +850,9 @@
             '<div class="tx-detail-item"><span class="tx-detail-label">Division</span><span class="tx-detail-val">🏢 ' + esc(divLabel) + '</span></div>' +
             '<div class="tx-detail-item"><span class="tx-detail-label">Transaction Type</span><span class="tx-detail-val"><strong>' + esc(typeLabel) + '</strong></span></div>' +
             '<div class="tx-detail-item"><span class="tx-detail-label">Order / Reference #</span><span class="tx-detail-val mono"><strong>' + esc(tx.orderNumber || tx.reference || '—') + '</strong></span></div>' +
-            '<div class="tx-detail-item"><span class="tx-detail-label">Product / Material</span><span class="tx-detail-val"><strong>' + esc(tx.materialName || '—') + '</strong></span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">' + (txIsRec ? 'Material' : 'Product') + '</span><span class="tx-detail-val"><strong>' + esc(tx.materialName || '—') + '</strong></span></div>' +
             '<div class="tx-detail-item"><span class="tx-detail-label">Unit Type</span><span class="tx-detail-val">' + esc(unitLabel) + '</span></div>' +
-            '<div class="tx-detail-item"><span class="tx-detail-label">Recorded Weight</span><span class="tx-detail-val mono">⚖️ ' + esc(weightStr) + '</span></div>' +
-            '<div class="tx-detail-item"><span class="tx-detail-label">Total Unit Quantity</span><span class="tx-detail-val mono text-success" style="font-size:16px"><strong>' + num(tx.total) + '</strong></span></div>' +
-            '<div class="tx-detail-item" style="grid-column: 1 / -1"><span class="tx-detail-label">Size Breakdown (XL / L / M / S)</span><span class="tx-detail-val mono">XL: ' + num(tx.xl) + '  |  L: ' + num(tx.l) + '  |  M: ' + num(tx.m) + '  |  S: ' + num(tx.s) + '</span></div>' +
+            divisionSpecificFields +
             '<div class="tx-detail-item"><span class="tx-detail-label">Container Number</span><span class="tx-detail-val mono">' + esc(tx.containerNumber || '—') + '</span></div>' +
             '<div class="tx-detail-item"><span class="tx-detail-label">Seal Number</span><span class="tx-detail-val mono">' + esc(tx.sealNumber || '—') + '</span></div>' +
             '<div class="tx-detail-item"><span class="tx-detail-label">BL / Tracking Number</span><span class="tx-detail-val mono">' + esc(tx.blNumber || '—') + '</span></div>' +
@@ -857,57 +958,104 @@
       var unitLabel = isRec ? 'PALLET' : 'BOX';
       var divName = isRec ? 'recycling' : 'healthcare';
 
-      var formHtml =
-        '<div class="grid g2">' +
-          '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
-          '<div class="field"><label>Division &amp; Packaging</label><div class="division-chip ' + (isRec ? '' : 'healthcare') + '">' + (isRec ? '♻️ Recycling — PALLETS' : '🏥 Healthcare — BOXES') + '</div></div>' +
-        '</div>' +
-        '<div class="grid g2">' +
-          '<div class="field"><label>Date</label><input type="date" name="date" value="' + today() + '" required></div>' +
-          '<div class="field"><label>Order Number (e.g. Jul20-DIVESTPC-AB38A)</label><input type="text" name="orderNumber" placeholder="Order / PO #" required></div>' +
-        '</div>' +
-        '<div class="field"><label>' + (isRec ? 'Material' : 'Product') + '</label><select name="materialId" required>' +
-          mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + ' (' + esc(m.unit) + ')</option>'; }).join('') +
-        '</select></div>' +
-        '<div class="grid g2">' +
-          '<div class="field"><label>Dedicated Weight</label>' +
-            '<div class="weight-input-group">' +
-              '<input type="number" name="weightValue" step="any" min="0" placeholder="e.g. 3658">' +
-              '<select name="weightUnit" class="weight-unit-select"><option value="kg" selected>KG</option><option value="lb">LB</option></select>' +
-            '</div>' +
+      var formHtml = '';
+      if (isRec) {
+        // RECYCLING: PALLET-BASED INVENTORY (WEIGHT REQUIRED / NO XL/L/M/S)
+        formHtml =
+          '<div class="grid g2">' +
+            '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
+            '<div class="field"><label>Division &amp; Packaging</label><div class="division-chip">♻️ Recycling — PALLETS</div></div>' +
           '</div>' +
-          '<div class="field"><label>Container Number (e.g. MSMU 6896930)</label><input type="text" name="containerNumber" placeholder="MSMU 6896930"></div>' +
-        '</div>' +
-        '<div class="field"><label>Seal Number (e.g. 0336695)</label><input type="text" name="sealNumber" placeholder="0336695"></div>' +
-        '<label style="font-size:13px;font-weight:600;margin-top:10px;display:block">Quantities by Size (Whole ' + unitLabel + ' counts only)</label>' +
-        '<div class="sizes-grid">' +
-          '<div class="field"><label>XL</label><input type="number" name="xl" min="0" step="1" placeholder="0" class="size-input"></div>' +
-          '<div class="field"><label>L</label><input type="number" name="l" min="0" step="1" placeholder="0" class="size-input"></div>' +
-          '<div class="field"><label>M</label><input type="number" name="m" min="0" step="1" placeholder="0" class="size-input"></div>' +
-          '<div class="field"><label>S</label><input type="number" name="s" min="0" step="1" placeholder="0" class="size-input"></div>' +
-        '</div>' +
-        '<div class="total-preview-box">' +
-          '<span class="total-preview-label">Calculated Total (' + unitLabel + 'S = XL + L + M + S):</span>' +
-          '<span class="total-preview-val" id="modalAutoTotal">0</span>' +
-        '</div>' +
-        '<div class="field">' +
-          '<label>Inbound Photo Capture (Optional)</label>' +
-          '<div class="inbound-photo-zone">' +
-            '<div class="inbound-photo-btns">' +
-              '<input type="file" id="inboundPhotoInput" accept="image/*" capture="environment" style="display:none">' +
-              '<button type="button" class="btn ghost btn-sm" id="btnInboundTakePhoto"><svg><use href="#i-cam"></use></svg> Take Photo</button>' +
-              '<button type="button" class="btn ghost btn-sm" id="btnInboundUploadPhoto"><svg><use href="#i-download"></use></svg> Upload Photo</button>' +
+          '<div class="grid g2">' +
+            '<div class="field"><label>Date</label><input type="date" name="date" value="' + today() + '" required></div>' +
+            '<div class="field"><label>Order Number (e.g. Jul20-DIVESTPC-AB38A)</label><input type="text" name="orderNumber" placeholder="Order / PO #" required></div>' +
+          '</div>' +
+          '<div class="field"><label>Material</label><select name="materialId" required>' +
+            mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>'; }).join('') +
+          '</select></div>' +
+          '<div class="grid g2">' +
+            '<div class="field"><label>Dedicated Weight</label>' +
+              '<div class="weight-input-group">' +
+                '<input type="number" name="weightValue" step="any" min="0" placeholder="e.g. 3658" required>' +
+                '<select name="weightUnit" class="weight-unit-select"><option value="kg" selected>KG</option><option value="lb">LB</option></select>' +
+              '</div>' +
             '</div>' +
-            '<div id="inboundPhotoPreviewWrap" hidden>' +
-              '<div class="inbound-photo-preview">' +
-                '<img id="inboundPhotoThumb" src="" alt="Thumbnail">' +
-                '<span id="inboundPhotoName" style="font-size:12px;color:var(--ink-2);flex:1"></span>' +
-                '<button type="button" class="btn ghost btn-sm text-crit" id="btnInboundRemovePhoto" style="padding:2px 8px">Remove</button>' +
+            '<div class="field"><label>Pallet Quantity</label><input type="number" name="palletQty" min="1" step="1" placeholder="e.g. 3" required class="pallet-input"></div>' +
+          '</div>' +
+          '<div class="grid g2">' +
+            '<div class="field"><label>Container Number (e.g. MSMU 6896930)</label><input type="text" name="containerNumber" placeholder="MSMU 6896930"></div>' +
+            '<div class="field"><label>Seal Number (e.g. 0336695)</label><input type="text" name="sealNumber" placeholder="0336695"></div>' +
+          '</div>' +
+          '<div class="total-preview-box">' +
+            '<span class="total-preview-label">Total Pallets:</span>' +
+            '<span class="total-preview-val" id="modalAutoTotal">0 PALLETS</span>' +
+          '</div>' +
+          '<div class="field">' +
+            '<label>Inbound Photo Capture (Optional)</label>' +
+            '<div class="inbound-photo-zone">' +
+              '<div class="inbound-photo-btns">' +
+                '<input type="file" id="inboundPhotoInput" accept="image/*" capture="environment" style="display:none">' +
+                '<button type="button" class="btn ghost btn-sm" id="btnInboundTakePhoto"><svg><use href="#i-cam"></use></svg> Take Photo</button>' +
+                '<button type="button" class="btn ghost btn-sm" id="btnInboundUploadPhoto"><svg><use href="#i-download"></use></svg> Upload Photo</button>' +
+              '</div>' +
+              '<div id="inboundPhotoPreviewWrap" hidden>' +
+                '<div class="inbound-photo-preview">' +
+                  '<img id="inboundPhotoThumb" src="" alt="Thumbnail">' +
+                  '<span id="inboundPhotoName" style="font-size:12px;color:var(--ink-2);flex:1"></span>' +
+                  '<button type="button" class="btn ghost btn-sm text-crit" id="btnInboundRemovePhoto" style="padding:2px 8px">Remove</button>' +
+                '</div>' +
               '</div>' +
             '</div>' +
           '</div>' +
-        '</div>' +
-        '<div class="field"><label>Notes / Comments (optional)</label><input type="text" name="notes" placeholder="e.g. SI SENT, cross dock"></div>';
+          '<div class="field"><label>Notes / Comments (optional)</label><input type="text" name="notes" placeholder="e.g. SI SENT, cross dock"></div>';
+      } else {
+        // HEALTHCARE: BOX-BASED INVENTORY ONLY (NO WEIGHT)
+        formHtml =
+          '<div class="grid g2">' +
+            '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
+            '<div class="field"><label>Division &amp; Packaging</label><div class="division-chip healthcare">🏥 Healthcare — BOXES</div></div>' +
+          '</div>' +
+          '<div class="grid g2">' +
+            '<div class="field"><label>Date</label><input type="date" name="date" value="' + today() + '" required></div>' +
+            '<div class="field"><label>Order Number (e.g. Jul20-DIVESTPC-AB38A)</label><input type="text" name="orderNumber" placeholder="Order / PO #" required></div>' +
+          '</div>' +
+          '<div class="field"><label>Product</label><select name="materialId" required>' +
+            mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>'; }).join('') +
+          '</select></div>' +
+          '<div class="grid g2">' +
+            '<div class="field"><label>Container Number (e.g. MSMU 6896930)</label><input type="text" name="containerNumber" placeholder="MSMU 6896930"></div>' +
+            '<div class="field"><label>Seal Number (e.g. 0336695)</label><input type="text" name="sealNumber" placeholder="0336695"></div>' +
+          '</div>' +
+          '<label style="font-size:13px;font-weight:600;margin-top:10px;display:block">Quantities by Size (Whole BOX counts only)</label>' +
+          '<div class="sizes-grid">' +
+            '<div class="field"><label>XL</label><input type="number" name="xl" min="0" step="1" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>L</label><input type="number" name="l" min="0" step="1" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>M</label><input type="number" name="m" min="0" step="1" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>S</label><input type="number" name="s" min="0" step="1" placeholder="0" class="size-input"></div>' +
+          '</div>' +
+          '<div class="total-preview-box">' +
+            '<span class="total-preview-label">Total Boxes (XL + L + M + S):</span>' +
+            '<span class="total-preview-val" id="modalAutoTotal">0 BOXES</span>' +
+          '</div>' +
+          '<div class="field">' +
+            '<label>Inbound Photo Capture (Optional)</label>' +
+            '<div class="inbound-photo-zone">' +
+              '<div class="inbound-photo-btns">' +
+                '<input type="file" id="inboundPhotoInput" accept="image/*" capture="environment" style="display:none">' +
+                '<button type="button" class="btn ghost btn-sm" id="btnInboundTakePhoto"><svg><use href="#i-cam"></use></svg> Take Photo</button>' +
+                '<button type="button" class="btn ghost btn-sm" id="btnInboundUploadPhoto"><svg><use href="#i-download"></use></svg> Upload Photo</button>' +
+              '</div>' +
+              '<div id="inboundPhotoPreviewWrap" hidden>' +
+                '<div class="inbound-photo-preview">' +
+                  '<img id="inboundPhotoThumb" src="" alt="Thumbnail">' +
+                  '<span id="inboundPhotoName" style="font-size:12px;color:var(--ink-2);flex:1"></span>' +
+                  '<button type="button" class="btn ghost btn-sm text-crit" id="btnInboundRemovePhoto" style="padding:2px 8px">Remove</button>' +
+                '</div>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="field"><label>Notes / Comments (optional)</label><input type="text" name="notes" placeholder="e.g. SI SENT, cross dock"></div>';
+      }
 
       var selectedPhotoFile = null;
 
@@ -921,24 +1069,35 @@
           return n;
         };
 
-        var xl, l, m, s;
-        try {
-          xl = parseWhole(fd.xl);
-          l = parseWhole(fd.l);
-          m = parseWhole(fd.m);
-          s = parseWhole(fd.s);
-        } catch (e) {
-          toast(e.message);
-          return Promise.reject(e);
-        }
+        var xl = 0, l = 0, m = 0, s = 0, total = 0, weightVal, weightUnit;
 
-        var total = xl + l + m + s;
-        if (total <= 0) { toast('Please enter a quantity for at least one size.'); return Promise.reject(new Error('Zero quantity')); }
+        if (isRec) {
+          var pQty = parseWhole(fd.palletQty);
+          if (pQty <= 0) { toast('Please enter a valid Pallet Quantity.'); return Promise.reject(new Error('Zero pallet quantity')); }
+          total = pQty;
+          xl = pQty;
+          l = 0; m = 0; s = 0;
 
-        var weightVal = fd.weightValue ? Number(fd.weightValue) : undefined;
-        if (weightVal !== undefined && (isNaN(weightVal) || weightVal < 0)) {
-          toast('Weight value must be a positive number.');
-          return Promise.reject(new Error('Invalid weight'));
+          weightVal = fd.weightValue ? Number(fd.weightValue) : undefined;
+          if (weightVal !== undefined && (isNaN(weightVal) || weightVal < 0)) {
+            toast('Weight value must be a positive number.');
+            return Promise.reject(new Error('Invalid weight'));
+          }
+          weightUnit = fd.weightUnit || 'kg';
+        } else {
+          try {
+            xl = parseWhole(fd.xl);
+            l = parseWhole(fd.l);
+            m = parseWhole(fd.m);
+            s = parseWhole(fd.s);
+          } catch (e) {
+            toast(e.message);
+            return Promise.reject(e);
+          }
+          total = xl + l + m + s;
+          if (total <= 0) { toast('Please enter a box quantity for at least one size.'); return Promise.reject(new Error('Zero quantity')); }
+          weightVal = undefined;
+          weightUnit = undefined;
         }
 
         var doSubmit = function (photoId) {
@@ -949,7 +1108,7 @@
             division: divName,
             unitType: unitType,
             weightValue: weightVal,
-            weightUnit: fd.weightUnit || 'kg',
+            weightUnit: weightUnit,
             photoId: photoId || undefined,
             orderNumber: fd.orderNumber,
             reference: fd.orderNumber,
@@ -966,12 +1125,14 @@
         };
 
         if (selectedPhotoFile) {
-          return Api.uploadPhoto(selectedPhotoFile, {
-            warehouseId: w.id,
-            photoType: 'inventory_inbound',
-            jobReference: fd.orderNumber
+          return Photos.prepare(selectedPhotoFile).then(function (prepared) {
+            return Api.uploadPhoto(prepared.file, {
+              warehouseId: w.id,
+              photoType: 'inventory_inbound',
+              jobReference: fd.orderNumber
+            });
           }).then(function (res) {
-            return doSubmit(res.id);
+            return doSubmit(res && res.id);
           }).catch(function (err) {
             toast('Photo upload failed: ' + (err.message || err));
             return doSubmit(undefined);
@@ -1022,14 +1183,25 @@
         });
       }
 
-      $$('.size-input').forEach(function (inp) {
-        inp.addEventListener('input', function () {
-          var t = 0;
-          $$('.size-input').forEach(function (x) { t += Math.floor(Number(x.value) || 0); });
-          var totEl = $('#modalAutoTotal');
-          if (totEl) totEl.textContent = num(t);
+      if (isRec) {
+        var palInp = $('.pallet-input');
+        if (palInp) {
+          palInp.addEventListener('input', function () {
+            var val = Math.floor(Number(palInp.value) || 0);
+            var totEl = $('#modalAutoTotal');
+            if (totEl) totEl.textContent = num(val) + ' PALLETS';
+          });
+        }
+      } else {
+        $$('.size-input').forEach(function (inp) {
+          inp.addEventListener('input', function () {
+            var t = 0;
+            $$('.size-input').forEach(function (x) { t += Math.floor(Number(x.value) || 0); });
+            var totEl = $('#modalAutoTotal');
+            if (totEl) totEl.textContent = num(t) + ' BOXES';
+          });
         });
-      });
+      }
     });
   }
 
@@ -1046,34 +1218,60 @@
       var unitLabel = isRec ? 'PALLET' : 'BOX';
       var divName = isRec ? 'recycling' : 'healthcare';
 
-      var formHtml =
-        '<div class="grid g2">' +
-          '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
-          '<div class="field"><label>Division &amp; Packaging</label><div class="division-chip ' + (isRec ? '' : 'healthcare') + '">' + (isRec ? '♻️ Recycling — PALLETS' : '🏥 Healthcare — BOXES') + '</div></div>' +
-        '</div>' +
-        '<div class="grid g2">' +
-          '<div class="field"><label>Date</label><input type="date" name="date" value="' + today() + '" required></div>' +
-          '<div class="field"><label>Order / Reference #</label><input type="text" name="orderNumber" placeholder="Order / BOL #" required></div>' +
-        '</div>' +
-        '<div class="field"><label>' + (isRec ? 'Material' : 'Product') + '</label><select name="materialId" required>' +
-          mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + ' (' + esc(m.unit) + ')</option>'; }).join('') +
-        '</select></div>' +
-        '<div class="grid g2">' +
-          '<div class="field"><label>Container Number (optional)</label><input type="text" name="containerNumber" placeholder="MSMU 6896930 / Trailer"></div>' +
+      var formHtml = '';
+      if (isRec) {
+        formHtml =
+          '<div class="grid g2">' +
+            '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
+            '<div class="field"><label>Division &amp; Packaging</label><div class="division-chip">♻️ Recycling — PALLETS</div></div>' +
+          '</div>' +
+          '<div class="grid g2">' +
+            '<div class="field"><label>Date</label><input type="date" name="date" value="' + today() + '" required></div>' +
+            '<div class="field"><label>Order / Reference #</label><input type="text" name="orderNumber" placeholder="Order / BOL #" required></div>' +
+          '</div>' +
+          '<div class="field"><label>Material</label><select name="materialId" required>' +
+            mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>'; }).join('') +
+          '</select></div>' +
+          '<div class="grid g2">' +
+            '<div class="field"><label>Pallet Quantity to Dispatch</label><input type="number" name="palletQty" min="1" step="1" placeholder="e.g. 3" required class="pallet-input"></div>' +
+            '<div class="field"><label>Container / Trailer # (optional)</label><input type="text" name="containerNumber" placeholder="MSMU 6896930 / Trailer"></div>' +
+          '</div>' +
           '<div class="field"><label>Seal Number (optional)</label><input type="text" name="sealNumber" placeholder="0336695"></div>' +
-        '</div>' +
-        '<label style="font-size:13px;font-weight:600;margin-top:10px;display:block">Quantities to Dispatch (Whole ' + unitLabel + ' counts only)</label>' +
-        '<div class="sizes-grid">' +
-          '<div class="field"><label>XL</label><input type="number" name="xl" min="0" step="1" placeholder="0" class="size-input"></div>' +
-          '<div class="field"><label>L</label><input type="number" name="l" min="0" step="1" placeholder="0" class="size-input"></div>' +
-          '<div class="field"><label>M</label><input type="number" name="m" min="0" step="1" placeholder="0" class="size-input"></div>' +
-          '<div class="field"><label>S</label><input type="number" name="s" min="0" step="1" placeholder="0" class="size-input"></div>' +
-        '</div>' +
-        '<div class="total-preview-box">' +
-          '<span class="total-preview-label">Calculated Outbound Total:</span>' +
-          '<span class="total-preview-val text-warning" id="modalAutoTotal">0</span>' +
-        '</div>' +
-        '<div class="field"><label>Notes / Outbound Details</label><input type="text" name="notes" placeholder="e.g. shipped via Trailer 12345"></div>';
+          '<div class="total-preview-box">' +
+            '<span class="total-preview-label">Calculated Outbound Total:</span>' +
+            '<span class="total-preview-val text-warning" id="modalAutoTotal">0 PALLETS</span>' +
+          '</div>' +
+          '<div class="field"><label>Notes / Outbound Details</label><input type="text" name="notes" placeholder="e.g. shipped via Trailer 12345"></div>';
+      } else {
+        formHtml =
+          '<div class="grid g2">' +
+            '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
+            '<div class="field"><label>Division &amp; Packaging</label><div class="division-chip healthcare">🏥 Healthcare — BOXES</div></div>' +
+          '</div>' +
+          '<div class="grid g2">' +
+            '<div class="field"><label>Date</label><input type="date" name="date" value="' + today() + '" required></div>' +
+            '<div class="field"><label>Order / Reference #</label><input type="text" name="orderNumber" placeholder="Order / BOL #" required></div>' +
+          '</div>' +
+          '<div class="field"><label>Product</label><select name="materialId" required>' +
+            mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>'; }).join('') +
+          '</select></div>' +
+          '<div class="grid g2">' +
+            '<div class="field"><label>Container Number (optional)</label><input type="text" name="containerNumber" placeholder="MSMU 6896930 / Trailer"></div>' +
+            '<div class="field"><label>Seal Number (optional)</label><input type="text" name="sealNumber" placeholder="0336695"></div>' +
+          '</div>' +
+          '<label style="font-size:13px;font-weight:600;margin-top:10px;display:block">Quantities to Dispatch (Whole BOX counts only)</label>' +
+          '<div class="sizes-grid">' +
+            '<div class="field"><label>XL</label><input type="number" name="xl" min="0" step="1" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>L</label><input type="number" name="l" min="0" step="1" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>M</label><input type="number" name="m" min="0" step="1" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>S</label><input type="number" name="s" min="0" step="1" placeholder="0" class="size-input"></div>' +
+          '</div>' +
+          '<div class="total-preview-box">' +
+            '<span class="total-preview-label">Calculated Outbound Total:</span>' +
+            '<span class="total-preview-val text-warning" id="modalAutoTotal">0 BOXES</span>' +
+          '</div>' +
+          '<div class="field"><label>Notes / Outbound Details</label><input type="text" name="notes" placeholder="e.g. shipped via Trailer 12345"></div>';
+      }
 
       openModal('Ship Outbound (' + unitLabel + 'S)', formHtml, function (fd) {
         var parseWhole = function (val) {
@@ -1085,19 +1283,26 @@
           return n;
         };
 
-        var xl, l, m, s;
-        try {
-          xl = parseWhole(fd.xl);
-          l = parseWhole(fd.l);
-          m = parseWhole(fd.m);
-          s = parseWhole(fd.s);
-        } catch (e) {
-          toast(e.message);
-          return Promise.reject(e);
+        var xl = 0, l = 0, m = 0, s = 0, total = 0;
+        if (isRec) {
+          var pQty = parseWhole(fd.palletQty);
+          if (pQty <= 0) { toast('Please enter a valid Pallet Quantity.'); return Promise.reject(new Error('Zero quantity')); }
+          total = pQty;
+          xl = pQty;
+          l = 0; m = 0; s = 0;
+        } else {
+          try {
+            xl = parseWhole(fd.xl);
+            l = parseWhole(fd.l);
+            m = parseWhole(fd.m);
+            s = parseWhole(fd.s);
+          } catch (e) {
+            toast(e.message);
+            return Promise.reject(e);
+          }
+          total = xl + l + m + s;
+          if (total <= 0) { toast('Please enter a box quantity for at least one size.'); return Promise.reject(new Error('Zero quantity')); }
         }
-
-        var total = xl + l + m + s;
-        if (total <= 0) { toast('Please enter a quantity for at least one size.'); return Promise.reject(new Error('Zero quantity')); }
 
         var payload = {
           warehouseId: w.id,
@@ -1119,14 +1324,25 @@
         });
       });
 
-      $$('.size-input').forEach(function (inp) {
-        inp.addEventListener('input', function () {
-          var t = 0;
-          $$('.size-input').forEach(function (x) { t += Math.floor(Number(x.value) || 0); });
-          var totEl = $('#modalAutoTotal');
-          if (totEl) totEl.textContent = num(t);
+      if (isRec) {
+        var palInp = $('.pallet-input');
+        if (palInp) {
+          palInp.addEventListener('input', function () {
+            var val = Math.floor(Number(palInp.value) || 0);
+            var totEl = $('#modalAutoTotal');
+            if (totEl) totEl.textContent = num(val) + ' PALLETS';
+          });
+        }
+      } else {
+        $$('.size-input').forEach(function (inp) {
+          inp.addEventListener('input', function () {
+            var t = 0;
+            $$('.size-input').forEach(function (x) { t += Math.floor(Number(x.value) || 0); });
+            var totEl = $('#modalAutoTotal');
+            if (totEl) totEl.textContent = num(t) + ' BOXES';
+          });
         });
-      });
+      }
     });
   }
 
@@ -1143,26 +1359,44 @@
       var unitLabel = isRec ? 'PALLET' : 'BOX';
       var divName = isRec ? 'recycling' : 'healthcare';
 
-      var formHtml =
-        '<div class="grid g2">' +
-          '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
-          '<div class="field"><label>Division &amp; Packaging</label><div class="division-chip ' + (isRec ? '' : 'healthcare') + '">' + (isRec ? '♻️ Recycling — PALLETS' : '🏥 Healthcare — BOXES') + '</div></div>' +
-        '</div>' +
-        '<div class="field"><label>' + (isRec ? 'Material' : 'Product') + '</label><select name="materialId" required>' +
-          mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + ' (' + esc(m.unit) + ')</option>'; }).join('') +
-        '</select></div>' +
-        '<div class="field"><label>Reason for Adjustment (Required)</label><input type="text" name="reason" placeholder="e.g. physical recount, adjusted 5 units to match count" required></div>' +
-        '<label style="font-size:13px;font-weight:600;margin-top:10px;display:block">Adjustment Quantities (Whole ' + unitLabel + ' counts only)</label>' +
-        '<div class="sizes-grid">' +
-          '<div class="field"><label>XL</label><input type="number" name="xl" step="1" placeholder="0" class="size-input"></div>' +
-          '<div class="field"><label>L</label><input type="number" name="l" step="1" placeholder="0" class="size-input"></div>' +
-          '<div class="field"><label>M</label><input type="number" name="m" step="1" placeholder="0" class="size-input"></div>' +
-          '<div class="field"><label>S</label><input type="number" name="s" step="1" placeholder="0" class="size-input"></div>' +
-        '</div>' +
-        '<div class="total-preview-box">' +
-          '<span class="total-preview-label">Net Adjustment Total:</span>' +
-          '<span class="total-preview-val text-accent" id="modalAutoTotal">0</span>' +
-        '</div>';
+      var formHtml = '';
+      if (isRec) {
+        formHtml =
+          '<div class="grid g2">' +
+            '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
+            '<div class="field"><label>Division &amp; Packaging</label><div class="division-chip">♻️ Recycling — PALLETS</div></div>' +
+          '</div>' +
+          '<div class="field"><label>Material</label><select name="materialId" required>' +
+            mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>'; }).join('') +
+          '</select></div>' +
+          '<div class="field"><label>Reason for Adjustment (Required)</label><input type="text" name="reason" placeholder="e.g. physical recount, corrected pallet count" required></div>' +
+          '<div class="field"><label>Pallet Adjustment Quantity (+ / -)</label><input type="number" name="palletQty" step="1" placeholder="e.g. +2 or -1" required class="pallet-input"></div>' +
+          '<div class="total-preview-box">' +
+            '<span class="total-preview-label">Net Adjustment Total:</span>' +
+            '<span class="total-preview-val text-accent" id="modalAutoTotal">0 PALLETS</span>' +
+          '</div>';
+      } else {
+        formHtml =
+          '<div class="grid g2">' +
+            '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
+            '<div class="field"><label>Division &amp; Packaging</label><div class="division-chip healthcare">🏥 Healthcare — BOXES</div></div>' +
+          '</div>' +
+          '<div class="field"><label>Product</label><select name="materialId" required>' +
+            mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>'; }).join('') +
+          '</select></div>' +
+          '<div class="field"><label>Reason for Adjustment (Required)</label><input type="text" name="reason" placeholder="e.g. physical recount, adjusted 5 units to match count" required></div>' +
+          '<label style="font-size:13px;font-weight:600;margin-top:10px;display:block">Adjustment Quantities (Whole BOX counts only)</label>' +
+          '<div class="sizes-grid">' +
+            '<div class="field"><label>XL</label><input type="number" name="xl" step="1" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>L</label><input type="number" name="l" step="1" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>M</label><input type="number" name="m" step="1" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>S</label><input type="number" name="s" step="1" placeholder="0" class="size-input"></div>' +
+          '</div>' +
+          '<div class="total-preview-box">' +
+            '<span class="total-preview-label">Net Adjustment Total:</span>' +
+            '<span class="total-preview-val text-accent" id="modalAutoTotal">0 BOXES</span>' +
+          '</div>';
+      }
 
       openModal('Adjust Stock Balance (' + unitLabel + 'S)', formHtml, function (fd) {
         var reason = (fd.reason || '').trim();
@@ -1177,19 +1411,26 @@
           return n;
         };
 
-        var xl, l, m, s;
-        try {
-          xl = parseWholeAdj(fd.xl);
-          l = parseWholeAdj(fd.l);
-          m = parseWholeAdj(fd.m);
-          s = parseWholeAdj(fd.s);
-        } catch (e) {
-          toast(e.message);
-          return Promise.reject(e);
+        var xl = 0, l = 0, m = 0, s = 0, total = 0;
+        if (isRec) {
+          var pQty = parseWholeAdj(fd.palletQty);
+          if (pQty === 0) { toast('Please enter a non-zero adjustment quantity.'); return Promise.reject(new Error('Zero adjustment')); }
+          total = pQty;
+          xl = pQty;
+          l = 0; m = 0; s = 0;
+        } else {
+          try {
+            xl = parseWholeAdj(fd.xl);
+            l = parseWholeAdj(fd.l);
+            m = parseWholeAdj(fd.m);
+            s = parseWholeAdj(fd.s);
+          } catch (e) {
+            toast(e.message);
+            return Promise.reject(e);
+          }
+          total = xl + l + m + s;
+          if (total === 0 && !xl && !l && !m && !s) { toast('Enter adjustment values.'); return Promise.reject(new Error('Zero adjustment')); }
         }
-
-        var total = xl + l + m + s;
-        if (total === 0 && !xl && !l && !m && !s) { toast('Enter adjustment values.'); return Promise.reject(new Error('Zero adjustment')); }
 
         var payload = {
           warehouseId: w.id,
@@ -1207,14 +1448,25 @@
         });
       });
 
-      $$('.size-input').forEach(function (inp) {
-        inp.addEventListener('input', function () {
-          var t = 0;
-          $$('.size-input').forEach(function (x) { t += Math.floor(Number(x.value) || 0); });
-          var totEl = $('#modalAutoTotal');
-          if (totEl) totEl.textContent = (t >= 0 ? '+' : '') + num(t);
+      if (isRec) {
+        var palInp = $('.pallet-input');
+        if (palInp) {
+          palInp.addEventListener('input', function () {
+            var val = Math.floor(Number(palInp.value) || 0);
+            var totEl = $('#modalAutoTotal');
+            if (totEl) totEl.textContent = (val >= 0 ? '+' : '') + num(val) + ' PALLETS';
+          });
+        }
+      } else {
+        $$('.size-input').forEach(function (inp) {
+          inp.addEventListener('input', function () {
+            var t = 0;
+            $$('.size-input').forEach(function (x) { t += Math.floor(Number(x.value) || 0); });
+            var totEl = $('#modalAutoTotal');
+            if (totEl) totEl.textContent = (t >= 0 ? '+' : '') + num(t) + ' BOXES';
+          });
         });
-      });
+      }
     });
   }
 
@@ -1714,36 +1966,43 @@
     loadingState('#clockBody');
     loadUsersCache();
     Promise.all([Api.currentShift(), Api.shiftHistory()]).then(function (r) {
-      var open = r[0], mine = r[1];
+      var open = r[0], mine = r[1] || [];
       currentShiftCache = open;
       renderShiftChip();
 
       var weekAgo = Date.now() - 7 * 864e5;
       var weekMs = (mine || []).reduce(function (a, s) {
         var st = new Date(s.clockIn).getTime();
-        if (st < weekAgo) return a;
-        return a + ((s.clockOut ? new Date(s.clockOut).getTime() : Date.now()) - st);
+        if (isNaN(st) || st < weekAgo) return a;
+        var end = s.clockOut ? new Date(s.clockOut).getTime() : Date.now();
+        return a + Math.max(0, end - st);
       }, 0);
 
       var clockBody = $('#clockBody');
       if (clockBody) {
+        var startTimeStr = open ? new Date(open.clockIn).toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '—';
+        var elapsedMs = open ? Math.max(0, Date.now() - new Date(open.clockIn).getTime()) : 0;
+
         clockBody.innerHTML =
           '<div class="card"><div class="pad" style="text-align:center">' +
-            '<div style="font-size:14px;color:var(--muted)">' + (open ? 'On shift since ' + new Date(open.clockIn).toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit' }) : 'Clocked out') + '</div>' +
-            '<div style="font-size:36px;font-weight:700;font-family:var(--f-mono);margin:10px 0;' + (open ? 'color:var(--acc)' : 'color:var(--muted)') + '" id="clockTime">' +
-              (open ? hm(Date.now() - new Date(open.clockIn).getTime()) : '—') + '</div>' +
-            '<div style="font-size:13px;color:var(--muted);margin-bottom:16px">' + hm(weekMs) + ' logged in the last 7 days</div>' +
-            '<button type="button" class="btn btn-primary" id="clockBtn">' +
-              '<svg><use href="#i-' + (open ? 'stop' : 'play') + '"></use></svg>' + (open ? 'Clock out' : 'Clock in') + '</button>' +
+            '<div style="font-size:14px;color:var(--muted)">' + (open ? 'On shift since ' + startTimeStr : 'Clocked out') + '</div>' +
+            '<div style="font-size:40px;font-weight:700;font-family:var(--f-mono);margin:12px 0;' + (open ? 'color:var(--acc)' : 'color:var(--muted)') + '" id="clockTime">' +
+              (open ? hm(elapsedMs) : '—') + '</div>' +
+            '<div style="font-size:13px;color:var(--muted);margin-bottom:18px">' + hm(weekMs) + ' logged in the last 7 days</div>' +
+            '<button type="button" class="btn ' + (open ? 'btn-secondary' : 'btn-primary') + '" id="clockBtn">' +
+              '<svg><use href="#i-' + (open ? 'stop' : 'play') + '"></use></svg>' + (open ? 'Clock Out' : 'Clock In') + '</button>' +
           '</div></div>' +
 
           ((mine && mine.length) ? '<div class="card"><div class="pad"><h3>Your shift history</h3></div>' +
             '<div class="tablewrap"><table class="table"><thead><tr><th>Started</th><th>Ended</th><th class="num">Duration</th></tr></thead><tbody>' +
             mine.slice(0, 30).map(function (s) {
+              var st = new Date(s.clockIn).getTime();
+              var end = s.clockOut ? new Date(s.clockOut).getTime() : null;
+              var dur = end ? hm(end - st) : '<span class="badge badge-in">active</span>';
               return '<tr><td class="mono" style="font-size:13px">' + esc(when(s.clockIn)) + '</td>' +
                 '<td class="mono" style="font-size:13px">' + (s.clockOut ? esc(when(s.clockOut)) : '<span class="badge badge-in">open</span>') + '</td>' +
-                '<td class="num"><strong>' + (s.clockOut ? hm(new Date(s.clockOut) - new Date(s.clockIn)) : hm(Date.now() - new Date(s.clockIn))) + '</strong></td></tr>';
-            }).join('') + '</tbody></table></div></div>' : '') +
+                '<td class="num"><strong>' + dur + '</strong></td></tr>';
+            }).join('') + '</tbody></table></div></div>' : '<div class="card"><div class="pad" style="color:var(--muted);text-align:center">No shift history in the last 7 days.</div></div>') +
           '<div id="teamClockCard"></div>';
       }
 
@@ -1764,28 +2023,32 @@
         }).catch(function () { var host = $('#teamClockCard'); if (host) host.innerHTML = ''; });
       }
 
-      if (clockTimer) clearInterval(clockTimer);
+      if (clockTimer) { clearInterval(clockTimer); clockTimer = null; }
       if (open) {
         clockTimer = setInterval(function () {
           var el = $('#clockTime');
           if (!el) { clearInterval(clockTimer); clockTimer = null; return; }
-          el.textContent = hm(Date.now() - new Date(open.clockIn).getTime());
+          var ms = Math.max(0, Date.now() - new Date(open.clockIn).getTime());
+          el.textContent = hm(ms);
           renderShiftChip();
-        }, 30000);
+        }, 1000);
       }
     }).catch(function (err) { apiErrorState('#clockBody', err); });
   }
 
   function toggleClock() {
-    var btn = $('#clockBtn'); if (btn) btn.disabled = true;
+    var btn = $('#clockBtn'); if (btn) { btn.disabled = true; btn.textContent = 'Processing…'; }
     var open = currentShiftCache;
     var call = open ? Api.clockOut() : Api.clockIn(warehouseId);
     call.then(function () {
       toast(open ? 'Clocked out.' : 'Clocked in.');
-      renderTimeclock();
+      refreshShiftChip().then(function () {
+        renderTimeclock();
+      });
     }).catch(function (err) {
       if (btn) btn.disabled = false;
       toast(err.status === 409 ? 'You are already clocked in.' : (err.message || 'Could not update shift.'));
+      renderTimeclock();
     });
   }
 
@@ -2285,14 +2548,14 @@
       if (!pBody) return;
       if (!list.length) {
         pBody.innerHTML = emptyState('tag', 'No catalog items',
-          'Add materials or products to track inventory and prices.', 'Add material', 'newProduct');
+          'Add materials or products to track inventory.', 'Add material', 'newProduct');
         return;
       }
       pBody.innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
-        '<th>Name</th><th>Category</th><th>Unit</th><th class="num">Default Price</th></tr></thead><tbody>' +
+        '<th>Name</th><th>Category</th><th>SKU / Code</th><th>Description</th></tr></thead><tbody>' +
         list.map(function (m) {
           return '<tr><td><strong>' + esc(m.name) + '</strong></td><td>' + esc(m.category || '—') + '</td>' +
-            '<td>' + esc(m.unit) + '</td><td class="num">' + (m.defaultPrice ? moneyDollars(m.defaultPrice) : '—') + '</td></tr>';
+            '<td class="mono">' + esc(m.sku || m.code || '—') + '</td><td style="color:var(--muted)">' + esc(m.description || '—') + '</td></tr>';
         }).join('') + '</tbody></table></div></div>';
     }).catch(function (err) { apiErrorState('#productBody', err); });
   }
@@ -2305,7 +2568,7 @@
       Api.listWarehouses(false)
     ]).then(function (res) {
       var users = res[0] || [];
-      var allWhs = res[1] || [];
+      var allWhs = deduplicateWarehouses(res[1] || []);
       usersCache = users;
       var sBody = $('#staffBody');
       if (!sBody) return;
@@ -2314,7 +2577,7 @@
         '<th>Staff Name</th><th>Email</th><th>Role</th><th>Assigned Facilities</th><th>Actions</th></tr></thead><tbody>' +
         users.map(function (u) {
           var assignedWhNames = (u.warehouses && u.warehouses.length)
-            ? u.warehouses.map(function (w) { return esc(w.name); }).join(', ')
+            ? deduplicateWarehouses(u.warehouses).map(function (w) { return esc(w.name); }).join(', ')
             : (u.role === 'admin' ? '<em style="color:var(--muted)">All Facilities (Admin)</em>' : '<span style="color:var(--crit)">None</span>');
 
           return '<tr data-user-id="' + esc(u.id) + '"><td><strong>' + esc(u.name || u.fullName) + '</strong></td><td>' + esc(u.email) + '</td>' +
@@ -2335,7 +2598,7 @@
               var isChecked = currentAssignedIds.indexOf(w.id) >= 0;
               return '<label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer">' +
                 '<input type="checkbox" name="wh_' + esc(w.id) + '" value="' + esc(w.id) + '"' + (isChecked ? ' checked' : '') + '> ' +
-                '<span><strong>' + esc(w.name) + '</strong> (' + esc(w.code) + ' · ' + esc(w.province || '') + ')</span>' +
+                '<span><strong>' + esc(w.name) + '</strong> (' + esc(w.code) + ')</span>' +
               '</label>';
             }).join('');
 
@@ -2501,7 +2764,7 @@
       if (app) app.hidden = false;
 
       return Api.listWarehouses(false).then(function (whs) {
-        warehouses = whs || [];
+        warehouses = deduplicateWarehouses(whs || []);
         if (warehouses.length > 0) {
           if (!warehouseId || !warehouses.some(function (w) { return w.id === warehouseId; })) {
             warehouseId = warehouses[0].id;
@@ -2632,13 +2895,13 @@
     if (newProductBtn) {
       newProductBtn.addEventListener('click', function () {
         openModal('Add ' + (isRecycling() ? 'Material' : 'Product'),
-          field('name', 'Name', { required: true, placeholder: isRecycling() ? 'e.g. Mixed Electronics' : 'e.g. Synguard 100' }) +
-          field('category', 'Category', { placeholder: isRecycling() ? 'e.g. electronics / metal' : 'e.g. healthcare / ppe' }) +
-          field('unit', 'Unit of measure', { value: isRecycling() ? 'kg' : 'cases', required: true }) +
-          field('defaultPrice', 'Default Price ($)', { type: 'number', step: '0.01', placeholder: '0.00' }),
+          field('name', 'Name', { required: true, placeholder: isRecycling() ? 'e.g. Mixed Electronics' : 'e.g. Synguard 100 Nitrile Gloves' }) +
+          field('category', 'Category', { placeholder: isRecycling() ? 'e.g. Electronics / Plastics' : 'e.g. PPE / Gloves' }) +
+          field('sku', 'SKU / Code (Optional)', { placeholder: isRecycling() ? 'e.g. MAT-ELEC-01' : 'e.g. GLV-NIT-M' }) +
+          field('description', 'Description (Optional)', { type: 'textarea' }),
           function (fd) {
             return Api.createMaterial({
-              name: fd.name, category: fd.category, unit: fd.unit, defaultPrice: parseQty(fd.defaultPrice)
+              name: fd.name, category: fd.category, sku: fd.sku, description: fd.description, unit: isRecycling() ? 'pallet' : 'box'
             }).then(function () { toast('Catalog item added.'); renderProducts(); });
           });
       });
@@ -2647,8 +2910,9 @@
     var newStaffBtn = $('#newStaff');
     if (newStaffBtn) {
       newStaffBtn.addEventListener('click', function () {
-        Api.listWarehouses(false).then(function (allWhs) {
-          var whCheckboxes = (allWhs || []).map(function (w) {
+        Api.listWarehouses(false).then(function (whs) {
+          var allWhs = deduplicateWarehouses(whs || []);
+          var whCheckboxes = allWhs.map(function (w) {
             return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer">' +
               '<input type="checkbox" name="wh_' + esc(w.id) + '" value="' + esc(w.id) + '"> ' +
               '<span><strong>' + esc(w.name) + '</strong> (' + esc(w.code) + ')</span>' +
@@ -2674,7 +2938,7 @@
             '</div></div>',
             function (fd) {
               var selectedWhIds = [];
-              (allWhs || []).forEach(function (w) {
+              allWhs.forEach(function (w) {
                 if (fd['wh_' + w.id]) selectedWhIds.push(w.id);
               });
 
