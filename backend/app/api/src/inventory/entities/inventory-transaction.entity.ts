@@ -48,9 +48,34 @@ export class InventoryTransaction {
   @Column({ type: 'varchar', length: 100, nullable: true })
   reference: string | null;
 
+  @Index()
+  @Column({
+    name: 'order_number',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
+  orderNumber: string | null;
+
+  @Index()
+  @Column({
+    name: 'container_number',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+  })
+  containerNumber: string | null;
+
+  @Column({ name: 'seal_number', type: 'varchar', length: 100, nullable: true })
+  sealNumber: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  notes: string | null;
+
   @Column({ name: 'created_by', type: 'int' })
   createdBy: number;
 
+  @Index()
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 }

@@ -25,8 +25,11 @@ export class InventoryController {
 
   @Get('containers')
   @Roles('admin', 'manager', 'staff', 'driver')
-  listContainers(@Query('warehouseId') warehouseId?: string) {
-    return this.inventoryService.listContainers(warehouseId);
+  listContainers(
+    @Query('warehouseId') warehouseId?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.inventoryService.listContainers(warehouseId, search);
   }
 
   @Post('inventory/transactions')
@@ -43,8 +46,23 @@ export class InventoryController {
   listTransactions(
     @Query('warehouseId') warehouseId?: string,
     @Query('materialId') materialId?: string,
+    @Query('type') type?: string,
+    @Query('orderNumber') orderNumber?: string,
+    @Query('containerNumber') containerNumber?: string,
+    @Query('search') search?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
   ) {
-    return this.inventoryService.listTransactions(warehouseId, materialId);
+    return this.inventoryService.listTransactions({
+      warehouseId,
+      materialId,
+      type,
+      orderNumber,
+      containerNumber,
+      search,
+      startDate,
+      endDate,
+    });
   }
 
   @Get('inventory/balances')
