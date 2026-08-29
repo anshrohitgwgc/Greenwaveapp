@@ -287,8 +287,10 @@
   }
 
   function showGate() {
-    $('#app').hidden = true;
-    $('#gate').hidden = false;
+    var app = $('#app');
+    if (app) app.hidden = true;
+    var gate = $('#gate');
+    if (gate) gate.hidden = false;
     var pw = $('#gatePassword');
     if (pw) pw.value = '';
     var msg = $('#gateMsg');
@@ -319,8 +321,6 @@
       el.hidden = !(okEntity && okRole);
     });
 
-    var intakeEl = $('#intakeNav');
-    if (intakeEl) intakeEl.textContent = isRecycling() ? 'Weigh-in' : 'Receive';
     var prodEl = $('#productsNav');
     if (prodEl) prodEl.textContent = isRecycling() ? 'Materials' : 'Products';
 
@@ -333,9 +333,12 @@
     var prodTitle = $('#prodTitle');
     if (prodTitle) prodTitle.textContent = isRecycling() ? 'Materials Catalog' : 'Healthcare Products Catalog';
 
-    $('#meInitials').textContent = me ? initials(me.name) : '';
-    $('#meName').textContent = me ? me.name : '';
-    $('#meRole').textContent = me ? (ROLES[me.role] || {}).label || me.role : '';
+    var meInitialsEl = $('#meInitials');
+    if (meInitialsEl) meInitialsEl.textContent = me ? initials(me.name) : '';
+    var meNameEl = $('#meName');
+    if (meNameEl) meNameEl.textContent = me ? me.name : '';
+    var meRoleEl = $('#meRole');
+    if (meRoleEl) meRoleEl.textContent = me ? ((ROLES[me.role] || {}).label || me.role) : '';
 
     var whWrap = $('.wh');
     if (whWrap) {
@@ -365,7 +368,8 @@
 
     var w = warehouse();
     var prov = (w && w.province) || 'BC';
-    $('#taxNote').textContent = w ? prov + ' · ' + taxFor(prov).label : '';
+    var taxNoteEl = $('#taxNote');
+    if (taxNoteEl) taxNoteEl.textContent = w ? prov + ' · ' + taxFor(prov).label : '';
 
     renderTabbar();
     renderShiftChip();
@@ -383,7 +387,10 @@
       return can(x.v);
     });
 
-    $('#tabbar').innerHTML = items.map(function (x) {
+    var tabbar = $('#tabbar');
+    if (!tabbar) return;
+
+    tabbar.innerHTML = items.map(function (x) {
       var on = (view === x.v || (view === 'editor' && x.v === 'invoices'));
       return '<button type="button" data-view="' + x.v + '"' + (on ? ' aria-current="true"' : '') + '>' +
         '<svg><use href="#i-' + x.i + '"></use></svg>' + esc(x.l) + '</button>';
@@ -426,16 +433,20 @@
       var on = b.dataset.view === view || (view === 'editor' && b.dataset.view === 'invoices');
       if (on) b.classList.add('active'); else b.classList.remove('active');
     });
-    $('#app').classList.remove('menu-open');
-    $('#scroll').scrollTop = 0;
+    var app = $('#app');
+    if (app) app.classList.remove('menu-open');
+    var scroll = $('#scroll');
+    if (scroll) scroll.scrollTop = 0;
     renderTabbar();
     render();
   }
 
   function renderInventory() {
     var w = warehouse();
-    $('#invenSub').textContent = w ? 'Live balances & transactions at ' + w.name + ' (PostgreSQL ledger).' : '';
-    if (!w) { $('#invenBody').innerHTML = ''; return; }
+    var invSub = $('#invenSub');
+    if (invSub) invSub.textContent = w ? 'Live balances & transactions at ' + w.name + ' (PostgreSQL ledger).' : '';
+    var invBody = $('#invenBody');
+    if (!w) { if (invBody) invBody.innerHTML = ''; return; }
 
     loadingState('#invenBody');
 
@@ -482,10 +493,10 @@
         });
       }
 
-      $('#kpiCurrentStock').textContent = num(grandCurrent);
-      $('#kpiInboundTotal').textContent = num(grandInbound);
-      $('#kpiOutboundTotal').textContent = num(grandOutbound);
-      $('#kpiAdjustmentTotal').textContent = (grandAdj >= 0 ? '+' : '') + num(grandAdj);
+      var elCur = $('#kpiCurrentStock'); if (elCur) elCur.textContent = num(grandCurrent);
+      var elIn = $('#kpiInboundTotal'); if (elIn) elIn.textContent = num(grandInbound);
+      var elOut = $('#kpiOutboundTotal'); if (elOut) elOut.textContent = num(grandOutbound);
+      var elAdj = $('#kpiAdjustmentTotal'); if (elAdj) elAdj.textContent = (grandAdj >= 0 ? '+' : '') + num(grandAdj);
 
       if (invenTab === 'balances') {
         renderBalancesTab(visibleMats, balances, transactions);
@@ -500,8 +511,10 @@
   }
 
   function renderBalancesTab(materials, balances, transactions) {
+    var invBody = $('#invenBody');
+    if (!invBody) return;
     if (!materials.length) {
-      $('#invenBody').innerHTML = emptyState('tag', isRecycling() ? 'No materials cataloged' : 'No products cataloged',
+      invBody.innerHTML = emptyState('tag', isRecycling() ? 'No materials cataloged' : 'No products cataloged',
         'Add what you handle in Materials first to track stock balances.',
         can('products') ? 'Add catalog item' : null, 'goProducts');
       return;
@@ -604,12 +617,15 @@
       '<td></td>' +
       '</tr></tfoot>';
 
-    $('#invenBody').innerHTML = '<div class="card">' +
-      '<div class="tablewrap"><table class="table">' +
-      '<thead>' + head + '</thead>' +
-      '<tbody>' + (body || '<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:30px">No matching stock balances found.</td></tr>') + '</tbody>' +
-      foot +
-      '</table></div></div>';
+    var invBody = $('#invenBody');
+    if (invBody) {
+      invBody.innerHTML = '<div class="card">' +
+        '<div class="tablewrap"><table class="table">' +
+        '<thead>' + head + '</thead>' +
+        '<tbody>' + (body || '<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:30px">No matching stock balances found.</td></tr>') + '</tbody>' +
+        foot +
+        '</table></div></div>';
+    }
   }
 
   function renderTransactionsTab(materials, transactions) {
@@ -683,11 +699,14 @@
         '</tr>';
     }).join('');
 
-    $('#invenBody').innerHTML = '<div class="card">' +
-      '<div class="tablewrap"><table class="table">' +
-      '<thead>' + head + '</thead>' +
-      '<tbody>' + (body || '<tr><td colspan="15" style="text-align:center;color:var(--muted);padding:30px">No matching transactions found.</td></tr>') + '</tbody>' +
-      '</table></div></div>';
+    var invBody = $('#invenBody');
+    if (invBody) {
+      invBody.innerHTML = '<div class="card">' +
+        '<div class="tablewrap"><table class="table">' +
+        '<thead>' + head + '</thead>' +
+        '<tbody>' + (body || '<tr><td colspan="15" style="text-align:center;color:var(--muted);padding:30px">No matching transactions found.</td></tr>') + '</tbody>' +
+        '</table></div></div>';
+    }
 
     $$('.clickable-row[data-tx]').forEach(function (row) {
       row.addEventListener('click', function () {
@@ -815,11 +834,14 @@
         '</tr>';
     }).join('');
 
-    $('#invenBody').innerHTML = '<div class="card">' +
-      '<div class="tablewrap"><table class="table">' +
-      '<thead>' + head + '</thead>' +
-      '<tbody>' + (body || '<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:30px">No container records found.</td></tr>') + '</tbody>' +
-      '</table></div></div>';
+    var invBody = $('#invenBody');
+    if (invBody) {
+      invBody.innerHTML = '<div class="card">' +
+        '<div class="tablewrap"><table class="table">' +
+        '<thead>' + head + '</thead>' +
+        '<tbody>' + (body || '<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:30px">No container records found.</td></tr>') + '</tbody>' +
+        '</table></div></div>';
+    }
   }
 
   function openReceiveModal() {
@@ -1423,47 +1445,57 @@
 
   function renderIntake() {
     var w = warehouse();
-    $('#intakeTitle').textContent = isRecycling() ? 'Weigh-in' : 'Receive stock';
-    $('#intakeSub').textContent = isRecycling()
+    var titleEl = $('#intakeTitle');
+    if (titleEl) titleEl.textContent = isRecycling() ? 'Weigh-in' : 'Receive stock';
+    var subEl = $('#intakeSub');
+    if (subEl) subEl.textContent = isRecycling()
       ? 'Gross less tare gives net. It posts to ' + (w ? w.name : 'the warehouse') + '.'
       : 'Count what arrived. It posts to ' + (w ? w.name : 'the warehouse') + '.';
-    if (!w) { $('#intakeBody').innerHTML = ''; return; }
+    var body = $('#intakeBody');
+    if (!w) { if (body) body.innerHTML = ''; return; }
 
     loadingState('#intakeBody');
     Api.listMaterials().then(function (all) {
       var list = visibleMaterials(all);
       intakeMaterials = list;
       if (!list.length) {
-        $('#intakeBody').innerHTML = emptyState('tag', 'Nothing to record against',
-          'Add what you handle in Materials first.',
-          can('products') ? 'Add material' : null, 'goProducts');
+        if (body) {
+          body.innerHTML = emptyState('tag', 'Nothing to record against',
+            'Add what you handle in Materials first.',
+            can('products') ? 'Add material' : null, 'goProducts');
+        }
         return;
       }
 
       var dirOptions = '<option value="in">In — arriving</option><option value="out">Out — shipping</option>' +
         (isAdminOrManager() ? '<option value="adj">Adjustment — correct a count</option>' : '');
 
-      $('#intakeBody').innerHTML =
-        '<div class="card"><div class="cardhead"><h3>' + (isRecycling() ? 'Inbound ticket' : 'Receipt') + '</h3></div>' +
-        '<div class="pad"><div class="grid g2">' +
-          '<div class="field"><label>' + (isRecycling() ? 'Material' : 'Product') + '</label><select id="tkMaterial">' +
-            list.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + ' (' + esc(m.unit) + ')</option>'; }).join('') +
-          '</select></div>' +
-          '<div class="field"><label>Direction</label><select id="tkDir">' + dirOptions + '</select></div>' +
-          '<div class="field"><label>Date</label><input type="date" id="tkDate" value="' + today() + '"></div>' +
-          '<div class="field"><label>Reference</label><input type="text" id="tkRef" placeholder="Order #, container # or BOL"></div>' +
-        '</div><div id="tkReasonWrap" hidden style="margin-top:16px">' + field('reason', 'Reason for adjustment', { required: true }) + '</div>' +
-        '<div id="tkQty" style="margin-top:16px"></div>' +
-        '<div id="tkContainer" style="margin-top:16px"></div>' +
-        '<button type="button" class="btn btn-primary" id="tkPost" style="margin-top:18px"><svg><use href="#i-check"></use></svg>Post ticket</button>' +
-        '</div></div><div id="tkRecent"></div>';
+      if (body) {
+        body.innerHTML =
+          '<div class="card"><div class="cardhead"><h3>' + (isRecycling() ? 'Inbound ticket' : 'Receipt') + '</h3></div>' +
+          '<div class="pad"><div class="grid g2">' +
+            '<div class="field"><label>' + (isRecycling() ? 'Material' : 'Product') + '</label><select id="tkMaterial">' +
+              list.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + ' (' + esc(m.unit) + ')</option>'; }).join('') +
+            '</select></div>' +
+            '<div class="field"><label>Direction</label><select id="tkDir">' + dirOptions + '</select></div>' +
+            '<div class="field"><label>Date</label><input type="date" id="tkDate" value="' + today() + '"></div>' +
+            '<div class="field"><label>Reference</label><input type="text" id="tkRef" placeholder="Order #, container # or BOL"></div>' +
+          '</div><div id="tkReasonWrap" hidden style="margin-top:16px">' + field('reason', 'Reason for adjustment', { required: true }) + '</div>' +
+          '<div id="tkQty" style="margin-top:16px"></div>' +
+          '<div id="tkContainer" style="margin-top:16px"></div>' +
+          '<button type="button" class="btn btn-primary" id="tkPost" style="margin-top:18px"><svg><use href="#i-check"></use></svg>Post ticket</button>' +
+          '</div></div><div id="tkRecent"></div>';
+      }
 
-      $('#tkMaterial').addEventListener('change', renderQtyFields);
-      $('#tkDir').addEventListener('change', function () {
-        $('#tkReasonWrap').hidden = $('#tkDir').value !== 'adj';
-        renderContainerFields();
-      });
-      $('#tkPost').addEventListener('click', postTicket);
+      var tkMat = $('#tkMaterial'); if (tkMat) tkMat.addEventListener('change', renderQtyFields);
+      var tkDir = $('#tkDir');
+      if (tkDir) {
+        tkDir.addEventListener('change', function () {
+          var rWrap = $('#tkReasonWrap'); if (rWrap) rWrap.hidden = tkDir.value !== 'adj';
+          renderContainerFields();
+        });
+      }
+      var tkPost = $('#tkPost'); if (tkPost) tkPost.addEventListener('click', postTicket);
       renderQtyFields();
       renderContainerFields();
       renderRecent(w);
@@ -1595,9 +1627,12 @@
 
   function renderPhotos() {
     var isAdmin = isAdminOrManager();
-    $('#photoSub').textContent = isAdmin
-      ? 'Every photo uploaded across warehouses, newest first.'
-      : 'Photos you have taken. Administrators can view all.';
+    var pSub = $('#photoSub');
+    if (pSub) {
+      pSub.textContent = isAdmin
+        ? 'Every photo uploaded across warehouses, newest first.'
+        : 'Photos you have taken. Administrators can view all.';
+    }
 
     loadingState('#photoBody');
     loadUsersCache();
@@ -1605,15 +1640,17 @@
     Api.listPhotos({ warehouseId: w ? w.id : undefined }).then(function (all) {
       photoCache = all;
       var used = photoCache.reduce(function (a, p) { return a + (p.sizeBytes || 0); }, 0);
+      var pBody = $('#photoBody');
+      if (!pBody) return;
 
       if (!photoCache.length) {
-        $('#photoBody').innerHTML = emptyState('cam', 'No photos yet',
+        pBody.innerHTML = emptyState('cam', 'No photos yet',
           'Take a picture of a load, a seal, or an arrival. Photos are persisted in MinIO with GPS EXIF stripped.',
           'Add photo', 'addPhoto');
         return;
       }
 
-      $('#photoBody').innerHTML = '<div class="card">' +
+      pBody.innerHTML = '<div class="card">' +
         '<div class="pad" style="display:flex;align-items:center;border-bottom:1px solid var(--line)">' +
         '<span><b style="color:var(--ink)">' + photoCache.length + '</b> photos · ' + bytes(used) + '</span>' +
         '</div>' +
@@ -1632,18 +1669,22 @@
 
   function openLightbox(i) {
     var p = photoCache[i]; if (!p) return;
-    $('#lbImg').src = p.url;
-    $('#lbMeta').innerHTML = esc(userName(p.takenBy)) + ' · ' + esc(when(p.takenAt)) +
-      ' · ' + bytes(p.sizeBytes) +
-      (p.jobReference ? '<br>' + esc(p.jobReference) : '') +
-      (me && me.role === 'admin' ? '<br><button type="button" class="btn danger" id="lbDel" style="margin-top:12px">Delete this photo</button>' : '');
-    $('#lightbox').hidden = false;
+    var lbImg = $('#lbImg'); if (lbImg) lbImg.src = p.url;
+    var lbMeta = $('#lbMeta');
+    if (lbMeta) {
+      lbMeta.innerHTML = esc(userName(p.takenBy)) + ' · ' + esc(when(p.takenAt)) +
+        ' · ' + bytes(p.sizeBytes) +
+        (p.jobReference ? '<br>' + esc(p.jobReference) : '') +
+        (me && me.role === 'admin' ? '<br><button type="button" class="btn danger" id="lbDel" style="margin-top:12px">Delete this photo</button>' : '');
+    }
+    var lb = $('#lightbox');
+    if (lb) lb.hidden = false;
 
     var del = $('#lbDel');
     if (del) del.addEventListener('click', function () {
       if (!confirm('Delete this photo permanently?')) return;
       Api.deletePhoto(p.id).then(function () {
-        $('#lightbox').hidden = true;
+        if (lb) lb.hidden = true;
         renderPhotos();
         toast('Photo deleted.');
       }).catch(function (err) { toast(err.message || 'Could not delete photo.'); });
@@ -1684,26 +1725,30 @@
         return a + ((s.clockOut ? new Date(s.clockOut).getTime() : Date.now()) - st);
       }, 0);
 
-      $('#clockBody').innerHTML =
-        '<div class="card"><div class="pad" style="text-align:center">' +
-          '<div style="font-size:14px;color:var(--muted)">' + (open ? 'On shift since ' + new Date(open.clockIn).toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit' }) : 'Clocked out') + '</div>' +
-          '<div style="font-size:36px;font-weight:700;font-family:var(--f-mono);margin:10px 0;' + (open ? 'color:var(--acc)' : 'color:var(--muted)') + '" id="clockTime">' +
-            (open ? hm(Date.now() - new Date(open.clockIn).getTime()) : '—') + '</div>' +
-          '<div style="font-size:13px;color:var(--muted);margin-bottom:16px">' + hm(weekMs) + ' logged in the last 7 days</div>' +
-          '<button type="button" class="btn btn-primary" id="clockBtn">' +
-            '<svg><use href="#i-' + (open ? 'stop' : 'play') + '"></use></svg>' + (open ? 'Clock out' : 'Clock in') + '</button>' +
-        '</div></div>' +
+      var clockBody = $('#clockBody');
+      if (clockBody) {
+        clockBody.innerHTML =
+          '<div class="card"><div class="pad" style="text-align:center">' +
+            '<div style="font-size:14px;color:var(--muted)">' + (open ? 'On shift since ' + new Date(open.clockIn).toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit' }) : 'Clocked out') + '</div>' +
+            '<div style="font-size:36px;font-weight:700;font-family:var(--f-mono);margin:10px 0;' + (open ? 'color:var(--acc)' : 'color:var(--muted)') + '" id="clockTime">' +
+              (open ? hm(Date.now() - new Date(open.clockIn).getTime()) : '—') + '</div>' +
+            '<div style="font-size:13px;color:var(--muted);margin-bottom:16px">' + hm(weekMs) + ' logged in the last 7 days</div>' +
+            '<button type="button" class="btn btn-primary" id="clockBtn">' +
+              '<svg><use href="#i-' + (open ? 'stop' : 'play') + '"></use></svg>' + (open ? 'Clock out' : 'Clock in') + '</button>' +
+          '</div></div>' +
 
-        ((mine && mine.length) ? '<div class="card"><div class="pad"><h3>Your shift history</h3></div>' +
-          '<div class="tablewrap"><table class="table"><thead><tr><th>Started</th><th>Ended</th><th class="num">Duration</th></tr></thead><tbody>' +
-          mine.slice(0, 30).map(function (s) {
-            return '<tr><td class="mono" style="font-size:13px">' + esc(when(s.clockIn)) + '</td>' +
-              '<td class="mono" style="font-size:13px">' + (s.clockOut ? esc(when(s.clockOut)) : '<span class="badge badge-in">open</span>') + '</td>' +
-              '<td class="num"><strong>' + (s.clockOut ? hm(new Date(s.clockOut) - new Date(s.clockIn)) : hm(Date.now() - new Date(s.clockIn))) + '</strong></td></tr>';
-          }).join('') + '</tbody></table></div></div>' : '') +
-        '<div id="teamClockCard"></div>';
+          ((mine && mine.length) ? '<div class="card"><div class="pad"><h3>Your shift history</h3></div>' +
+            '<div class="tablewrap"><table class="table"><thead><tr><th>Started</th><th>Ended</th><th class="num">Duration</th></tr></thead><tbody>' +
+            mine.slice(0, 30).map(function (s) {
+              return '<tr><td class="mono" style="font-size:13px">' + esc(when(s.clockIn)) + '</td>' +
+                '<td class="mono" style="font-size:13px">' + (s.clockOut ? esc(when(s.clockOut)) : '<span class="badge badge-in">open</span>') + '</td>' +
+                '<td class="num"><strong>' + (s.clockOut ? hm(new Date(s.clockOut) - new Date(s.clockIn)) : hm(Date.now() - new Date(s.clockIn))) + '</strong></td></tr>';
+            }).join('') + '</tbody></table></div></div>' : '') +
+          '<div id="teamClockCard"></div>';
+      }
 
-      $('#clockBtn').addEventListener('click', toggleClock);
+      var clockBtn = $('#clockBtn');
+      if (clockBtn) clockBtn.addEventListener('click', toggleClock);
 
       if (isAdminOrManager()) {
         Api.teamShifts().then(function (rows) {
@@ -1882,13 +1927,15 @@
     loadingState('#invoiceList');
     Api.listInvoices({ warehouseId: warehouseId }).then(function (list) {
       invoiceListCache = list;
+      var invList = $('#invoiceList');
+      if (!invList) return;
       if (!list.length) {
-        $('#invoiceList').innerHTML = emptyState('doc', 'No invoices yet',
+        invList.innerHTML = emptyState('doc', 'No invoices yet',
           'Create professional invoices with rebate lines, tax calculation, and free text fields matching the Invoice 1114 reference.',
           'New invoice', 'newInvoice');
         return;
       }
-      $('#invoiceList').innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
+      invList.innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
         '<th>Invoice #</th><th>Bill To</th><th>Date</th><th>Due Date</th><th class="num">Total</th><th>Status</th><th>Actions</th></tr></thead><tbody>' +
         list.slice().sort(function (a, b) { return String(b.invoiceNumber).localeCompare(String(a.invoiceNumber), undefined, { numeric: true }); })
         .map(function (inv) {
@@ -1931,7 +1978,8 @@
      ========================================================================== */
   function renderEditor() {
     if (!draft) draft = newDraft();
-    $('#edTitle').textContent = draft.invoiceNumber ? 'Invoice ' + draft.invoiceNumber : 'New Invoice';
+    var edTitle = $('#edTitle');
+    if (edTitle) edTitle.textContent = draft.invoiceNumber ? 'Invoice ' + draft.invoiceNumber : 'New Invoice';
 
     var co = draft.companyInfo || {};
     var tot = totalsLocal(draft);
@@ -2003,79 +2051,75 @@
                   '<th style="width:120px">Product/service</th>' +
                   '<th style="width:60px">Unit.</th>' +
                   '<th>Description</th>' +
-                  '<th class="num" style="width:75px">Qty</th>' +
-                  '<th class="num" style="width:85px">Rate</th>' +
-                  '<th class="num" style="width:90px">Amount</th>' +
+                  '<th class="num" style="width:65px">Qty</th>' +
+                  '<th class="num" style="width:85px">Rate ($)</th>' +
+                  '<th class="num" style="width:90px">Amount ($)</th>' +
                   '<th style="width:60px">Tax</th>' +
-                  '<th class="noprint" style="width:40px"></th>' +
+                  '<th style="width:35px" class="noprint"></th>' +
                 '</tr>' +
               '</thead>' +
               '<tbody id="edLinesWrap">' +
                 draft.items.map(function (it, idx) {
                   var lineAmt = lineAmountDollars(it);
                   return '<tr data-line="' + idx + '">' +
-                    '<td class="mono" style="font-size:12px;color:#777">' + (idx + 1) + '.</td>' +
-                    '<td><input type="date" class="ed-sdate" value="' + esc(it.serviceDate || draft.invoiceDate || today()) + '"></td>' +
-                    '<td><input type="text" class="ed-pservice" value="' + esc(it.productService || 'supply') + '" placeholder="supply"></td>' +
-                    '<td><input type="text" class="ed-unit" value="' + esc(it.unit || '') + '" placeholder="Unit"></td>' +
-                    '<td><input type="text" class="ed-desc" value="' + esc(it.description || '') + '" placeholder="Description"></td>' +
-                    '<td class="num"><input type="number" step="any" class="ed-qty" style="text-align:right" value="' + (it.quantity != null ? it.quantity : '') + '" placeholder="0"></td>' +
-                    '<td class="num"><input type="number" step="any" class="ed-price" style="text-align:right" value="' + (it.unitPrice != null ? it.unitPrice : '') + '" placeholder="0.00"></td>' +
-                    '<td class="num mono" style="font-weight:700"><span class="ed-line-amount">' + moneyDollars(lineAmt) + '</span></td>' +
-                    '<td><input type="text" class="ed-taxlabel" value="' + esc(it.taxRateLabel || 'GST') + '" style="text-align:center"></td>' +
-                    '<td class="noprint">' + (draft.items.length > 1 ? '<button type="button" class="iconbtn text-crit ed-del-line" title="Delete row"><svg><use href="#i-trash"></use></svg></button>' : '') + '</td>' +
+                    '<td class="mono" style="font-size:12px;color:var(--muted)">' + (idx + 1) + '</td>' +
+                    '<td><input type="date" class="ed-sdate" value="' + esc(it.serviceDate || draft.invoiceDate) + '"></td>' +
+                    '<td><input type="text" class="ed-pservice" value="' + esc(it.productService || 'supply') + '" placeholder="e.g. supply / service"></td>' +
+                    '<td><input type="text" class="ed-unit" value="' + esc(it.unit || '') + '" placeholder="kg / box"></td>' +
+                    '<td><input type="text" class="ed-desc" value="' + esc(it.description || '') + '" placeholder="Item description"></td>' +
+                    '<td><input type="number" step="any" class="ed-qty num" value="' + (it.quantity != null ? it.quantity : 1) + '"></td>' +
+                    '<td><input type="number" step="0.01" class="ed-price num" value="' + (it.unitPrice != null ? it.unitPrice : 0) + '"></td>' +
+                    '<td class="num mono ed-line-amount" style="font-weight:600">' + moneyDollars(lineAmt) + '</td>' +
+                    '<td><input type="text" class="ed-taxlabel" value="' + esc(it.taxRateLabel || 'GST') + '" style="width:50px"></td>' +
+                    '<td class="noprint"><button type="button" class="iconbtn ed-del-line" title="Delete line"><svg><use href="#i-trash"></use></svg></button></td>' +
                   '</tr>';
                 }).join('') +
               '</tbody>' +
             '</table>' +
           '</div>' +
 
-          '<button type="button" class="btn ghost btn-sm noprint" id="edAddLine" style="margin-bottom:20px">' +
-            '<svg><use href="#i-plus"></use></svg> Add Line Item' +
-          '</button>' +
+          '<div class="noprint" style="margin-top:8px">' +
+            '<button type="button" class="btn ghost btn-sm" id="edAddLine"><svg><use href="#i-plus"></use></svg>Add Line</button>' +
+          '</div>' +
 
-          /* 5. FOOTER: WAYS TO PAY & TOTALS */
-          '<div class="inv-1114-footer-grid">' +
-            '<div class="inv-1114-pay-col">' +
-              '<div class="inv-1114-pay-title">Ways to pay</div>' +
-              '<div class="inv-1114-pay-badges">' +
-                '<span class="pay-badge pay-badge-visa">VISA</span>' +
-                '<span class="pay-badge pay-badge-mc">MasterCard</span>' +
-                '<span class="pay-badge pay-badge-disc">DISCOVER</span>' +
-                '<span class="pay-badge pay-badge-amex">AMEX</span>' +
-                '<span class="pay-badge pay-badge-jcb">JCB</span>' +
-                '<span class="pay-badge pay-badge-bank">BANK</span>' +
-              '</div>' +
-              '<button type="button" class="inv-1114-pay-btn" id="btnViewAndPay">View and pay</button>' +
+          /* 5. BOTTOM SECTION: Payment Instructions & Authoritative Summary */
+          '<div class="inv-1114-bottom-grid">' +
+            '<div class="inv-1114-instructions-col">' +
+              '<h4>Payment instructions:</h4>' +
+              '<textarea id="edPayInst" class="inv-1114-instructions-area" rows="4">' + esc(draft.paymentInstructions || 'sales@greenwaverecycling.ca\n6724720423') + '</textarea>' +
+              '<div style="margin-top:14px"><label style="font-size:12px;font-weight:600;color:var(--muted)">Additional Notes / Memo</label>' +
+              '<textarea id="edNotes" class="inv-1114-instructions-area" rows="2" placeholder="Internal/Customer notes">' + esc(draft.notes || '') + '</textarea></div>' +
             '</div>' +
 
-            '<div class="inv-1114-totals-block">' +
-              '<div class="inv-1114-total-row">' +
-                '<span>Subtotal</span>' +
+            '<div class="inv-1114-totals-col">' +
+              '<div class="inv-1114-totals-row">' +
+                '<span>Subtotal:</span>' +
                 '<span class="mono" id="edSubtotalVal" style="font-weight:600">' + moneyDollars(tot.subtotal) + '</span>' +
               '</div>' +
-              '<div class="inv-1114-total-row">' +
-                '<span>' + esc(draft.taxLabel || 'GST @ 5%') + ' on <span id="edTaxBase">' + moneyDollars(tot.subtotal) + '</span></span>' +
+              '<div class="inv-1114-totals-row">' +
+                '<span id="edTaxLabelStr">' + esc(draft.taxLabel || 'GST @ 5%') + ' on ' + moneyDollars(tot.subtotal) + ':</span>' +
                 '<span class="mono" id="edTaxVal" style="font-weight:600">' + moneyDollars(tot.tax) + '</span>' +
               '</div>' +
-              '<div class="inv-1114-total-row grand">' +
-                '<span>Total</span>' +
-                '<span class="mono" id="edTotalVal">' + moneyDollars(tot.total) + '</span>' +
+              '<div class="inv-1114-totals-row inv-1114-total-due-row">' +
+                '<span>Total:</span>' +
+                '<span class="mono" id="edTotalVal" style="font-weight:700;font-size:16px">' + moneyDollars(tot.total) + '</span>' +
               '</div>' +
             '</div>' +
           '</div>' +
 
-          '<div class="inv-editor-actions noprint" style="margin-top:32px;display:flex;gap:12px;justify-content:flex-end">' +
-            '<button type="button" class="btn ghost" id="edPrintBottom"><svg><use href="#i-print"></use></svg> Print / PDF</button>' +
-            '<button type="button" class="btn btn-primary" id="edSaveBottom"><svg><use href="#i-check"></use></svg> Save Invoice</button>' +
+          /* 6. BOTTOM ACTIONS (Save, Print, Back) */
+          '<div class="inv-1114-actions-bar noprint">' +
+            '<button type="button" class="btn ghost" id="edPrintBottom"><svg><use href="#i-print"></use></svg>Print / Save PDF</button>' +
+            '<button type="button" class="btn btn-primary" id="edSaveBottom"><svg><use href="#i-check"></use></svg>Save Invoice</button>' +
           '</div>' +
 
         '</div>' +
       '</div>';
 
-    $('#editorBody').innerHTML = html;
+    var edBody = $('#editorBody');
+    if (!edBody) return;
+    edBody.innerHTML = html;
 
-    // Real-time calculation updater across all fields
     var syncDraftValues = function () {
       draft.billTo = ($('#edBill') || {}).value || '';
       draft.shipTo = ($('#edShip') || {}).value || '';
@@ -2084,6 +2128,8 @@
       draft.paymentTerms = ($('#edTerms') || {}).value || 'Net 15';
       draft.invoiceDate = ($('#edDate') || {}).value || today();
       draft.dueDate = ($('#edDueDate') || {}).value || today();
+      draft.paymentInstructions = ($('#edPayInst') || {}).value || '';
+      draft.notes = ($('#edNotes') || {}).value || '';
 
       var coName = ($('#edCoName') || {}).value;
       var coBn = ($('#edCoBn') || {}).value;
@@ -2122,8 +2168,8 @@
       var currentTot = totalsLocal(draft);
       var subEl = $('#edSubtotalVal');
       if (subEl) subEl.textContent = moneyDollars(currentTot.subtotal);
-      var taxBaseEl = $('#edTaxBase');
-      if (taxBaseEl) taxBaseEl.textContent = moneyDollars(currentTot.subtotal);
+      var taxLabelStr = $('#edTaxLabelStr');
+      if (taxLabelStr) taxLabelStr.textContent = esc(draft.taxLabel || 'GST') + ' on ' + moneyDollars(currentTot.subtotal) + ':';
       var taxEl = $('#edTaxVal');
       if (taxEl) taxEl.textContent = moneyDollars(currentTot.tax);
       var totEl = $('#edTotalVal');
@@ -2134,10 +2180,13 @@
       inp.addEventListener('input', syncDraftValues);
     });
 
-    $('#edAddLine').addEventListener('click', function () {
-      draft.items.push(blankLine());
-      renderEditor();
-    });
+    var addLineBtn = $('#edAddLine');
+    if (addLineBtn) {
+      addLineBtn.addEventListener('click', function () {
+        draft.items.push(blankLine());
+        renderEditor();
+      });
+    }
 
     $$('.ed-del-line').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -2150,7 +2199,7 @@
     });
 
     var doPrint = function () { window.print(); };
-    if ($('#edPrint')) $('#edPrint').onclick = doPrint;
+    var edPrint = $('#edPrint'); if (edPrint) edPrint.onclick = doPrint;
     var printBottom = $('#edPrintBottom');
     if (printBottom) printBottom.onclick = doPrint;
 
@@ -2169,7 +2218,7 @@
         poReference: draft.poReference || '',
         companyInfo: draft.companyInfo,
         paymentInstructions: draft.paymentInstructions,
-        notes: draft.reference || '',
+        notes: draft.notes || '',
         taxLabel: draft.taxLabel || 'GST @ 5%',
         taxRate: Number(draft.taxRatePct) || 5,
         items: draft.items.map(function (it) {
@@ -2202,7 +2251,7 @@
       });
     };
 
-    $('#edSave').onclick = doSave;
+    var edSave = $('#edSave'); if (edSave) edSave.onclick = doSave;
     var saveBottom = $('#edSaveBottom');
     if (saveBottom) saveBottom.onclick = doSave;
   }
@@ -2210,12 +2259,14 @@
   function renderCustomers() {
     loadingState('#customerBody');
     Api.listCustomers(warehouseId).then(function (list) {
+      var cBody = $('#customerBody');
+      if (!cBody) return;
       if (!list.length) {
-        $('#customerBody').innerHTML = emptyState('users', 'No customers saved yet',
+        cBody.innerHTML = emptyState('users', 'No customers saved yet',
           'Save customer addresses and billing information.', 'Add customer', 'newCustomer');
         return;
       }
-      $('#customerBody').innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
+      cBody.innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
         '<th>Customer Name</th><th>Bill To</th><th>Ship To</th><th>Email</th></tr></thead><tbody>' +
         list.map(function (c) {
           return '<tr><td><strong>' + esc(c.name) + '</strong></td><td>' + esc((c.billTo || '').split('\n')[0] || '—') + '</td>' +
@@ -2225,16 +2276,19 @@
   }
 
   function renderProducts() {
-    $('#prodTitle').textContent = isRecycling() ? 'Materials Catalog' : 'Healthcare Products';
+    var pTitle = $('#prodTitle');
+    if (pTitle) pTitle.textContent = isRecycling() ? 'Materials Catalog' : 'Healthcare Products';
     loadingState('#productBody');
     Api.listMaterials().then(function (all) {
       var list = visibleMaterials(all);
+      var pBody = $('#productBody');
+      if (!pBody) return;
       if (!list.length) {
-        $('#productBody').innerHTML = emptyState('tag', 'No catalog items',
+        pBody.innerHTML = emptyState('tag', 'No catalog items',
           'Add materials or products to track inventory and prices.', 'Add material', 'newProduct');
         return;
       }
-      $('#productBody').innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
+      pBody.innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
         '<th>Name</th><th>Category</th><th>Unit</th><th class="num">Default Price</th></tr></thead><tbody>' +
         list.map(function (m) {
           return '<tr><td><strong>' + esc(m.name) + '</strong></td><td>' + esc(m.category || '—') + '</td>' +
@@ -2253,8 +2307,10 @@
       var users = res[0] || [];
       var allWhs = res[1] || [];
       usersCache = users;
+      var sBody = $('#staffBody');
+      if (!sBody) return;
 
-      $('#staffBody').innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
+      sBody.innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
         '<th>Staff Name</th><th>Email</th><th>Role</th><th>Assigned Facilities</th><th>Actions</th></tr></thead><tbody>' +
         users.map(function (u) {
           var assignedWhNames = (u.warehouses && u.warehouses.length)
@@ -2308,11 +2364,13 @@
   function renderHistory() {
     loadingState('#historyBody');
     Api.listAudit({ warehouseId: warehouseId }).then(function (logs) {
+      var hBody = $('#historyBody');
+      if (!hBody) return;
       if (!logs.length) {
-        $('#historyBody').innerHTML = emptyState('history', 'No audit logs yet', 'Every sign-in, transaction, and update is logged here.');
+        hBody.innerHTML = emptyState('history', 'No audit logs yet', 'Every sign-in, transaction, and update is logged here.');
         return;
       }
-      $('#historyBody').innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
+      hBody.innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
         '<th>Timestamp</th><th>Action</th><th>Summary</th><th>Actor</th></tr></thead><tbody>' +
         logs.map(function (l) {
           return '<tr><td class="mono" style="font-size:12.5px">' + esc(when(l.occurredAt)) + '</td>' +
@@ -2325,7 +2383,9 @@
 
   function renderSettings() {
     var co = db.company || {};
-    $('#settingsBody').innerHTML = '<div class="card pad">' +
+    var sBody = $('#settingsBody');
+    if (!sBody) return;
+    sBody.innerHTML = '<div class="card pad">' +
       '<h3>Company Details &amp; Letterhead</h3>' +
       '<form id="setForm" style="margin-top:14px">' +
         field('name', 'Company Name', { value: co.name || 'GreenWave Recycling Inc.' }) +
@@ -2342,43 +2402,71 @@
         '<button type="submit" class="btn btn-primary" style="margin-top:10px">Save Settings</button>' +
       '</form></div>';
 
-    $('#setForm').addEventListener('submit', function (e) {
-      e.preventDefault();
-      db.company = {
-        name: $('[name="name"]', '#setForm').value.trim(),
-        line1: $('[name="line1"]', '#setForm').value.trim(),
-        line2: $('[name="line2"]', '#setForm').value.trim(),
-        phone: $('[name="phone"]', '#setForm').value.trim(),
-        email: $('[name="email"]', '#setForm').value.trim(),
-        bn: $('[name="bn"]', '#setForm').value.trim(),
-        gst: $('[name="gst"]', '#setForm').value.trim()
-      };
-      S.save(db);
-      toast('Company settings saved.');
-    });
+    var setForm = $('#setForm');
+    if (setForm) {
+      setForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var fName = $('[name="name"]', '#setForm');
+        var fLine1 = $('[name="line1"]', '#setForm');
+        var fLine2 = $('[name="line2"]', '#setForm');
+        var fPhone = $('[name="phone"]', '#setForm');
+        var fEmail = $('[name="email"]', '#setForm');
+        var fBn = $('[name="bn"]', '#setForm');
+        var fGst = $('[name="gst"]', '#setForm');
+        db.company = {
+          name: fName ? fName.value.trim() : '',
+          line1: fLine1 ? fLine1.value.trim() : '',
+          line2: fLine2 ? fLine2.value.trim() : '',
+          phone: fPhone ? fPhone.value.trim() : '',
+          email: fEmail ? fEmail.value.trim() : '',
+          bn: fBn ? fBn.value.trim() : '',
+          gst: fGst ? fGst.value.trim() : ''
+        };
+        S.save(db);
+        toast('Company settings saved.');
+      });
+    }
   }
 
   function openModal(title, bodyHtml, onSave) {
     var wrap = $('#modalWrap');
-    $('#modalTitle').textContent = title;
-    $('#modalForm').innerHTML = bodyHtml;
+    if (!wrap) return;
+    var titleEl = $('#modalTitle');
+    if (titleEl) titleEl.textContent = title;
+    var formEl = $('#modalForm');
+    if (formEl) formEl.innerHTML = bodyHtml;
     wrap.hidden = false;
 
-    var close = function () { wrap.hidden = true; };
-    $('#modalClose').onclick = close;
-    $('#modalCancel').onclick = close;
+    var okBtn = $('#modalOk'); if (okBtn) okBtn.hidden = false;
+    var cancelBtn = $('#modalCancel'); if (cancelBtn) cancelBtn.textContent = 'Cancel';
 
-    $('#modalForm').onsubmit = function (e) {
-      e.preventDefault();
-      var fd = {};
-      new FormData($('#modalForm')).forEach(function (v, k) { fd[k] = v; });
-      var res = onSave(fd);
-      if (res && typeof res.then === 'function') {
-        res.then(close).catch(function (err) { toast(err.message || 'Action failed.'); });
-      } else {
-        close();
-      }
+    var close = function () {
+      wrap.hidden = true;
+      if (formEl) formEl.innerHTML = '';
     };
+
+    var closeBtn = $('#modalClose');
+    if (closeBtn) closeBtn.onclick = close;
+    var cancelBtnEl = $('#modalCancel');
+    if (cancelBtnEl) cancelBtnEl.onclick = close;
+
+    if (formEl) {
+      formEl.onsubmit = function (e) {
+        e.preventDefault();
+        var fd = {};
+        new FormData(formEl).forEach(function (v, k) { fd[k] = v; });
+        if (typeof onSave === 'function') {
+          var res = onSave(fd);
+          if (res && typeof res.then === 'function') {
+            res.then(close).catch(function (err) { toast(err.message || 'Action failed.'); });
+          } else {
+            close();
+          }
+        } else {
+          close();
+        }
+      };
+    }
   }
 
   function render() {
@@ -2398,7 +2486,7 @@
   }
 
   function boot() {
-    Api.me().then(function (user) {
+    return Api.me().then(function (user) {
       me = {
         id: user.id,
         name: user.fullName || user.email,
@@ -2407,8 +2495,10 @@
       };
       S.setServerSession(me);
 
-      $('#gate').hidden = true;
-      $('#app').hidden = false;
+      var gate = $('#gate');
+      if (gate) gate.hidden = true;
+      var app = $('#app');
+      if (app) app.hidden = false;
 
       return Api.listWarehouses(false).then(function (whs) {
         warehouses = whs || [];
@@ -2431,7 +2521,10 @@
         show(view);
       });
     }).catch(function (err) {
-      showGate();
+      console.error('Boot error:', err);
+      if (err && err.status === 401) {
+        showGate();
+      }
     });
   }
 
@@ -2439,11 +2532,14 @@
     setupSignIn();
     setupChatComposer();
 
-    $('#wh').addEventListener('change', function (e) {
-      warehouseId = e.target.value;
-      S.setWarehouse(warehouseId);
-      render();
-    });
+    var whEl = $('#wh');
+    if (whEl) {
+      whEl.addEventListener('change', function (e) {
+        warehouseId = e.target.value;
+        S.setWarehouse(warehouseId);
+        render();
+      });
+    }
 
     $$('.entsw button').forEach(function (b) {
       b.addEventListener('click', function () {
@@ -2466,11 +2562,14 @@
       });
     });
 
-    $('#btnReceiveStock').addEventListener('click', openReceiveModal);
-    $('#btnShipStock').addEventListener('click', openShipModal);
+    var rxBtn = $('#btnReceiveStock');
+    if (rxBtn) rxBtn.addEventListener('click', openReceiveModal);
+    var shipBtn = $('#btnShipStock');
+    if (shipBtn) shipBtn.addEventListener('click', openShipModal);
     var adjBtn = $('#btnAdjustStock');
     if (adjBtn) adjBtn.addEventListener('click', openAdjustModal);
-    $('#btnExportInventory').addEventListener('click', exportInventoryCsv);
+    var expBtn = $('#btnExportInventory');
+    if (expBtn) expBtn.addEventListener('click', exportInventoryCsv);
 
     $$('.inven-tab').forEach(function (tab) {
       tab.addEventListener('click', function () {
@@ -2504,85 +2603,100 @@
       });
     }
 
-    $('#addPhoto').addEventListener('click', function () { $('#photoFile').click(); });
-    $('#photoFile').addEventListener('change', function (e) { addPhotos(e.target.files); });
-    $('#lbClose').addEventListener('click', function () { $('#lightbox').hidden = true; });
+    var addPhotoBtn = $('#addPhoto');
+    if (addPhotoBtn) addPhotoBtn.addEventListener('click', function () { var pf = $('#photoFile'); if (pf) pf.click(); });
+    var photoFileEl = $('#photoFile');
+    if (photoFileEl) photoFileEl.addEventListener('change', function (e) { addPhotos(e.target.files); });
+    var lbCloseBtn = $('#lbClose');
+    if (lbCloseBtn) lbCloseBtn.addEventListener('click', function () { var lb = $('#lightbox'); if (lb) lb.hidden = true; });
 
-    $('#newInvoice').addEventListener('click', function () { draft = newDraft(); show('editor'); });
-    $('#newCustomer').addEventListener('click', function () {
-      openModal('Add Customer',
-        field('name', 'Customer / Company Name', { required: true }) +
-        field('billTo', 'Billing Address', { type: 'textarea', required: true }) +
-        field('shipTo', 'Shipping Address', { type: 'textarea' }) +
-        field('email', 'Email Address', { type: 'email' }),
-        function (fd) {
-          return Api.createCustomer({
-            name: fd.name, billTo: fd.billTo, shipTo: fd.shipTo, email: fd.email, warehouseId: warehouseId
-          }).then(function () { toast('Customer added.'); renderCustomers(); });
-        });
-    });
-
-    $('#newProduct').addEventListener('click', function () {
-      openModal('Add ' + (isRecycling() ? 'Material' : 'Product'),
-        field('name', 'Name', { required: true, placeholder: isRecycling() ? 'e.g. Mixed Electronics' : 'e.g. Synguard 100' }) +
-        field('category', 'Category', { placeholder: isRecycling() ? 'e.g. electronics / metal' : 'e.g. healthcare / ppe' }) +
-        field('unit', 'Unit of measure', { value: isRecycling() ? 'kg' : 'cases', required: true }) +
-        field('defaultPrice', 'Default Price ($)', { type: 'number', step: '0.01', placeholder: '0.00' }),
-        function (fd) {
-          return Api.createMaterial({
-            name: fd.name, category: fd.category, unit: fd.unit, defaultPrice: parseQty(fd.defaultPrice)
-          }).then(function () { toast('Catalog item added.'); renderProducts(); });
-        });
-    });
-
-    $('#newStaff').addEventListener('click', function () {
-      Api.listWarehouses(false).then(function (allWhs) {
-        var whCheckboxes = (allWhs || []).map(function (w) {
-          return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer">' +
-            '<input type="checkbox" name="wh_' + esc(w.id) + '" value="' + esc(w.id) + '"> ' +
-            '<span><strong>' + esc(w.name) + '</strong> (' + esc(w.code) + ')</span>' +
-          '</label>';
-        }).join('');
-
-        openModal('Add Staff Member',
-          field('fullName', 'Full Name', { required: true }) +
-          field('email', 'Work Email', { type: 'email', required: true }) +
-          field('password', 'Temporary Password', { type: 'password', required: true, help: 'Min 8 chars' }) +
-          field('role', 'Role', {
-            type: 'select',
-            options: [
-              { value: 'staff', label: 'Staff (Warehouse / Ops)' },
-              { value: 'driver', label: 'Driver (Transit & Photos)' },
-              { value: 'manager', label: 'Manager (Invoices & Adjustments)' },
-              { value: 'admin', label: 'Administrator (Full Access)' }
-            ]
-          }) +
-          '<div style="margin-top:10px"><label style="font-size:12px;font-weight:700;color:var(--muted)">ASSIGN INITIAL FACILITIES</label>' +
-          '<div style="background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--r);padding:8px 12px;margin-top:4px">' +
-            (whCheckboxes || '<em style="color:var(--muted)">No facilities available</em>') +
-          '</div></div>',
+    var newInvoiceBtn = $('#newInvoice');
+    if (newInvoiceBtn) newInvoiceBtn.addEventListener('click', function () { draft = newDraft(); show('editor'); });
+    var newCustomerBtn = $('#newCustomer');
+    if (newCustomerBtn) {
+      newCustomerBtn.addEventListener('click', function () {
+        openModal('Add Customer',
+          field('name', 'Customer / Company Name', { required: true }) +
+          field('billTo', 'Billing Address', { type: 'textarea', required: true }) +
+          field('shipTo', 'Shipping Address', { type: 'textarea' }) +
+          field('email', 'Email Address', { type: 'email' }),
           function (fd) {
-            var selectedWhIds = [];
-            (allWhs || []).forEach(function (w) {
-              if (fd['wh_' + w.id]) selectedWhIds.push(w.id);
-            });
-
-            return Api.createUser({
-              fullName: fd.fullName,
-              email: fd.email,
-              password: fd.password,
-              role: fd.role,
-              warehouseIds: selectedWhIds
-            }).then(function () {
-              toast('Staff account created.');
-              renderStaff();
-            });
+            return Api.createCustomer({
+              name: fd.name, billTo: fd.billTo, shipTo: fd.shipTo, email: fd.email, warehouseId: warehouseId
+            }).then(function () { toast('Customer added.'); renderCustomers(); });
           });
       });
-    });
+    }
 
-    $('#menuBtn').addEventListener('click', function () { $('#app').classList.toggle('menu-open'); });
-    $('#signOut').addEventListener('click', signOut);
+    var newProductBtn = $('#newProduct');
+    if (newProductBtn) {
+      newProductBtn.addEventListener('click', function () {
+        openModal('Add ' + (isRecycling() ? 'Material' : 'Product'),
+          field('name', 'Name', { required: true, placeholder: isRecycling() ? 'e.g. Mixed Electronics' : 'e.g. Synguard 100' }) +
+          field('category', 'Category', { placeholder: isRecycling() ? 'e.g. electronics / metal' : 'e.g. healthcare / ppe' }) +
+          field('unit', 'Unit of measure', { value: isRecycling() ? 'kg' : 'cases', required: true }) +
+          field('defaultPrice', 'Default Price ($)', { type: 'number', step: '0.01', placeholder: '0.00' }),
+          function (fd) {
+            return Api.createMaterial({
+              name: fd.name, category: fd.category, unit: fd.unit, defaultPrice: parseQty(fd.defaultPrice)
+            }).then(function () { toast('Catalog item added.'); renderProducts(); });
+          });
+      });
+    }
+
+    var newStaffBtn = $('#newStaff');
+    if (newStaffBtn) {
+      newStaffBtn.addEventListener('click', function () {
+        Api.listWarehouses(false).then(function (allWhs) {
+          var whCheckboxes = (allWhs || []).map(function (w) {
+            return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer">' +
+              '<input type="checkbox" name="wh_' + esc(w.id) + '" value="' + esc(w.id) + '"> ' +
+              '<span><strong>' + esc(w.name) + '</strong> (' + esc(w.code) + ')</span>' +
+            '</label>';
+          }).join('');
+
+          openModal('Add Staff Member',
+            field('fullName', 'Full Name', { required: true }) +
+            field('email', 'Work Email', { type: 'email', required: true }) +
+            field('password', 'Temporary Password', { type: 'password', required: true, help: 'Min 8 chars' }) +
+            field('role', 'Role', {
+              type: 'select',
+              options: [
+                { value: 'staff', label: 'Staff (Warehouse / Ops)' },
+                { value: 'driver', label: 'Driver (Transit & Photos)' },
+                { value: 'manager', label: 'Manager (Invoices & Adjustments)' },
+                { value: 'admin', label: 'Administrator (Full Access)' }
+              ]
+            }) +
+            '<div style="margin-top:10px"><label style="font-size:12px;font-weight:700;color:var(--muted)">ASSIGN INITIAL FACILITIES</label>' +
+            '<div style="background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--r);padding:8px 12px;margin-top:4px">' +
+              (whCheckboxes || '<em style="color:var(--muted)">No facilities available</em>') +
+            '</div></div>',
+            function (fd) {
+              var selectedWhIds = [];
+              (allWhs || []).forEach(function (w) {
+                if (fd['wh_' + w.id]) selectedWhIds.push(w.id);
+              });
+
+              return Api.createUser({
+                fullName: fd.fullName,
+                email: fd.email,
+                password: fd.password,
+                role: fd.role,
+                warehouseIds: selectedWhIds
+              }).then(function () {
+                toast('Staff account created.');
+                renderStaff();
+              });
+            });
+        });
+      });
+    }
+
+    var menuBtnEl = $('#menuBtn');
+    if (menuBtnEl) menuBtnEl.addEventListener('click', function () { var a = $('#app'); if (a) a.classList.toggle('menu-open'); });
+    var signOutBtn = $('#signOut');
+    if (signOutBtn) signOutBtn.addEventListener('click', signOut);
 
     document.addEventListener('click', function (e) {
       var goto = e.target.closest('[data-goto]');
@@ -2591,8 +2705,8 @@
       if (act) {
         var a = act.dataset.action;
         if (a === 'goProducts') show('products');
-        else if (a === 'addPhoto') $('#addPhoto').click();
-        else if (a === 'newInvoice') $('#newInvoice').click();
+        else if (a === 'addPhoto') { var ap = $('#addPhoto'); if (ap) ap.click(); }
+        else if (a === 'newInvoice') { var ni = $('#newInvoice'); if (ni) ni.click(); }
       }
     });
   }

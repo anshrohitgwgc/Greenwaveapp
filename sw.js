@@ -1,14 +1,14 @@
 /* Offline cache for Greenwave Ops */
-var CACHE = 'greenwave-v6';
+var CACHE = 'greenwave-v9';
 var FILES = [
   '/',
   '/index.html',
-  '/manifest.webmanifest',
-  '/assets/app.css',
-  '/assets/api.js',
-  '/assets/app.js',
-  '/assets/store.js',
-  '/assets/photos.js',
+  '/manifest.webmanifest?v=20260829_120000',
+  '/assets/app.css?v=20260829_120000',
+  '/assets/api.js?v=20260829_120000',
+  '/assets/app.js?v=20260829_120000',
+  '/assets/store.js?v=20260829_120000',
+  '/assets/photos.js?v=20260829_120000',
   '/assets/logo.png',
   '/assets/icon-192.png',
   '/assets/icon-512.png'
@@ -39,6 +39,12 @@ self.addEventListener('activate', function (e) {
 self.addEventListener('fetch', function (e) {
   if (e.request.method !== 'GET') return;
   if (!e.request.url.startsWith('http')) return;
+
+  var url = new URL(e.request.url);
+  // Bypass all API backend endpoints and SSE streams
+  if (url.pathname.match(/^\/(api|auth|users|warehouses|customers|materials|containers|inventory|invoices|timesheets|photos|audit|pickups|chat)(\/.*)?$/)) {
+    return;
+  }
 
   e.respondWith(
     fetch(e.request).then(function (res) {
