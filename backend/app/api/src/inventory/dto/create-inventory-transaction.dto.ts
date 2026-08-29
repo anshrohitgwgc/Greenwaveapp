@@ -42,8 +42,7 @@ export class CreateInventoryTransactionDto {
   @Min(0)
   s?: number;
 
-  // Required whenever type === 'adjustment' — enforced again in the
-  // service/DB layer, not just here, since a client could omit this check.
+  // Required whenever type === 'adjustment' — enforced again in service/DB
   @ValidateIf((dto: CreateInventoryTransactionDto) => dto.type === 'adjustment')
   @IsString()
   reason?: string;
@@ -51,4 +50,20 @@ export class CreateInventoryTransactionDto {
   @IsOptional()
   @IsString()
   reference?: string;
+
+  @IsOptional()
+  @IsString()
+  orderNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  containerNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  sealNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
 }

@@ -10,7 +10,18 @@ import { InventoryService } from './inventory.service';
 
 describe('InventoryService', () => {
   let service: InventoryService;
-  let transactionRepo: { create: jest.Mock; save: jest.Mock };
+  let transactionRepo: {
+    create: jest.Mock;
+    save: jest.Mock;
+    createQueryBuilder: jest.Mock;
+  };
+  let containerRepo: {
+    create: jest.Mock;
+    save: jest.Mock;
+    createQueryBuilder: jest.Mock;
+    findOne: jest.Mock;
+  };
+  let balanceRepo: { find: jest.Mock; findOne: jest.Mock };
   let auditService: { record: jest.Mock };
 
   const staffActor = { id: 1, role: 'staff', email: 'staff@example.com' };
@@ -18,22 +29,56 @@ describe('InventoryService', () => {
 
   beforeEach(async () => {
     transactionRepo = {
-      create: jest.fn((data: Record<string, unknown>) => data),
+      create: jest.fn((data: Record<string, unknown>) => ({ ...data })),
       save: jest.fn((data: Record<string, unknown>) =>
         Promise.resolve({ ...data }),
       ),
+      createQueryBuilder: jest.fn(() => ({
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      })),
     };
-    auditService = { record: jest.fn() };
+    containerRepo = {
+      create: jest.fn((data: Record<string, unknown>) => ({ ...data })),
+      save: jest.fn((data: Record<string, unknown>) =>
+        Promise.resolve({ ...data }),
+      ),
+      findOne: jest.fn(() =>
+        Promise.resolve({ id: 'c1', containerNumber: 'MSMU6896930' }),
+      ),
+      createQueryBuilder: jest.fn(() => ({
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      })),
+    };
+    balanceRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue({
+        warehouseId: 'w1',
+        materialId: 'm1',
+        balance: '500',
+        xlBalance: '100',
+        lBalance: '200',
+        mBalance: '100',
+        sBalance: '100',
+      }),
+    };
+    auditService = { record: jest.fn().mockResolvedValue(undefined) };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         InventoryService,
-        { provide: getRepositoryToken(Container), useValue: {} },
+        { provide: getRepositoryToken(Container), useValue: containerRepo },
         {
           provide: getRepositoryToken(InventoryTransaction),
           useValue: transactionRepo,
         },
-        { provide: getRepositoryToken(InventoryBalance), useValue: {} },
+        {
+          provide: getRepositoryToken(InventoryBalance),
+          useValue: balanceRepo,
+        },
         { provide: AuditService, useValue: auditService },
       ],
     }).compile();
@@ -88,21 +133,21 @@ describe('InventoryService', () => {
     );
   });
 
-  it('computes total as the sum of XL/L/M/S for inbound transactions', async () => {
+  it('computes total as the sum of XL/L/M/S for inbound transactions (100+200+300+400=1000)', async () => {
     const result = await service.createTransaction(
       {
         warehouseId: 'w1',
         materialId: 'm1',
         type: 'inbound',
-        xl: 1.5,
-        l: 2,
-        m: 0.5,
-        s: 1,
+        xl: 100,
+        l: 200,
+        m: 300,
+        s: 400,
       },
       staffActor,
     );
 
-    expect(result.total).toBe('5');
+    expect(result.total).toBe('1000');
   });
 
   it('allows staff to record inbound/outbound without a reason', async () => {
@@ -112,5 +157,26 @@ describe('InventoryService', () => {
         staffActor,
       ),
     ).resolves.toBeDefined();
+  });
+
+  it('tracks container loading details and calculates total size breakdown', async () => {
+    const container = await service.createContainer(
+      {
+        warehouseId: 'w1',
+        orderNumber: 'Jul20-DIVESTPC-AB38A',
+        containerNumber: 'MSMU 6896930',
+        sealNumber: '0336695',
+        productName: 'Synguard 100',
+        xl: 0,
+        l: 0,
+        m: 3581,
+        s: 0,
+      },
+      1,
+    );
+
+    expect(container.total).toBe('3581');
+    expect(container.containerNumber).toBe('MSMU 6896930');
+    expect(container.status).toBe('in_transit');
   });
 });

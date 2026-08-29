@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   HttpCode,
   HttpStatus,
   Post,
@@ -9,7 +10,6 @@ import {
 
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
-import { RegisterDto } from './dto/register.dto';
 import { LoginRateLimitGuard } from './login-rate-limit.guard';
 
 @Controller('auth')
@@ -17,8 +17,10 @@ export class AuthController {
   constructor(private authService: AuthService) {}
 
   @Post('register')
-  register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto);
+  register() {
+    throw new ForbiddenException(
+      'Public registration is disabled. Staff accounts must be created by an administrator.',
+    );
   }
 
   @Post('login')

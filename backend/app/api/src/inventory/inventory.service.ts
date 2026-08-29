@@ -22,6 +22,17 @@ interface Actor {
   email: string;
 }
 
+export interface ListTransactionsFilter {
+  warehouseId?: string;
+  materialId?: string;
+  type?: string;
+  search?: string;
+  orderNumber?: string;
+  containerNumber?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
 @Injectable()
 export class InventoryService {
   constructor(
@@ -34,19 +45,55 @@ export class InventoryService {
     private readonly auditService: AuditService,
   ) {}
 
-  createContainer(dto: CreateContainerDto, actorId: number) {
+  async createContainer(dto: CreateContainerDto, actorId: number) {
+    const xl = roundQuantity(dto.xl ?? 0);
+    const l = roundQuantity(dto.l ?? 0);
+    const m = roundQuantity(dto.m ?? 0);
+    const s = roundQuantity(dto.s ?? 0);
+    const calculatedTotal = roundQuantity(xl + l + m + s);
+    const total =
+      dto.total !== undefined && dto.total > 0
+        ? roundQuantity(dto.total)
+        : calculatedTotal;
+
     const container = this.containerRepository.create({
       id: randomUUID(),
-      ...dto,
+      warehouseId: dto.warehouseId,
+      orderNumber: dto.orderNumber ?? null,
+      blNumber: dto.blNumber ?? null,
+      shippingLine: dto.shippingLine ?? null,
+      containerNumber: dto.containerNumber ?? null,
+      sealNumber: dto.sealNumber ?? null,
+      productName: dto.productName ?? null,
+      materialId: dto.materialId ?? null,
+      xl: String(xl),
+      l: String(l),
+      m: String(m),
+      s: String(s),
+      total: String(total),
+      eta: dto.eta ?? null,
+      status: dto.status || 'in_transit',
+      notes: dto.notes ?? null,
       createdBy: actorId,
     });
+
     return this.containerRepository.save(container);
   }
 
-  listContainers(warehouseId?: string) {
-    if (warehouseId)
-      return this.containerRepository.find({ where: { warehouseId } });
-    return this.containerRepository.find();
+  listContainers(warehouseId?: string, search?: string) {
+    const qb = this.containerRepository.createQueryBuilder('c');
+    if (warehouseId) {
+      qb.andWhere('c.warehouseId = :warehouseId', { warehouseId });
+    }
+    if (search && search.trim()) {
+      const q = `%${search.trim()}%`;
+      qb.andWhere(
+        '(c.containerNumber ILIKE :q OR c.sealNumber ILIKE :q OR c.orderNumber ILIKE :q OR c.blNumber ILIKE :q OR c.productName ILIKE :q)',
+        { q },
+      );
+    }
+    qb.orderBy('c.createdAt', 'DESC');
+    return qb.getMany();
   }
 
   async createTransaction(dto: CreateInventoryTransactionDto, actor: Actor) {
@@ -65,6 +112,7 @@ export class InventoryService {
     const l = roundQuantity(dto.l ?? 0);
     const m = roundQuantity(dto.m ?? 0);
     const s = roundQuantity(dto.s ?? 0);
+    // Automatic server calculation of Total = XL + L + M + S
     const total = roundQuantity(xl + l + m + s);
 
     const transaction = this.transactionRepository.create({
@@ -79,11 +127,45 @@ export class InventoryService {
       s: String(s),
       total: String(total),
       reason: dto.reason ?? null,
-      reference: dto.reference ?? null,
+      reference: dto.reference ?? dto.orderNumber ?? null,
+      orderNumber: dto.orderNumber ?? dto.reference ?? null,
+      containerNumber: dto.containerNumber ?? null,
+      sealNumber: dto.sealNumber ?? null,
+      notes: dto.notes ?? null,
       createdBy: actor.id,
     });
 
     const saved = await this.transactionRepository.save(transaction);
+
+    // If container number is provided and containerId is not, link or auto-create container record for traceability
+    if (!dto.containerId && (dto.containerNumber || dto.sealNumber)) {
+      try {
+        await this.createContainer(
+          {
+            warehouseId: dto.warehouseId,
+            orderNumber: dto.orderNumber ?? dto.reference,
+            containerNumber: dto.containerNumber,
+            sealNumber: dto.sealNumber,
+            materialId: dto.materialId,
+            xl,
+            l,
+            m,
+            s,
+            total,
+            status:
+              dto.type === 'inbound'
+                ? 'received'
+                : dto.type === 'outbound'
+                  ? 'dispatched'
+                  : 'adjusted',
+            notes: dto.notes ?? dto.reason,
+          },
+          actor.id,
+        );
+      } catch {
+        // Trace container log failure should not fail transaction
+      }
+    }
 
     await this.auditService.record({
       actorUserId: actor.id,
@@ -99,20 +181,64 @@ export class InventoryService {
       metadata: {
         materialId: dto.materialId,
         containerId: dto.containerId ?? null,
+        orderNumber: dto.orderNumber ?? null,
+        containerNumber: dto.containerNumber ?? null,
+        sealNumber: dto.sealNumber ?? null,
+        xl,
+        l,
+        m,
+        s,
+        total,
       },
     });
 
     return saved;
   }
 
-  listTransactions(warehouseId?: string, materialId?: string) {
-    const where: Record<string, string> = {};
-    if (warehouseId) where.warehouseId = warehouseId;
-    if (materialId) where.materialId = materialId;
-    return this.transactionRepository.find({
-      where,
-      order: { createdAt: 'DESC' },
-    });
+  listTransactions(filters?: ListTransactionsFilter) {
+    const qb = this.transactionRepository.createQueryBuilder('tx');
+
+    if (filters?.warehouseId) {
+      qb.andWhere('tx.warehouseId = :warehouseId', {
+        warehouseId: filters.warehouseId,
+      });
+    }
+    if (filters?.materialId) {
+      qb.andWhere('tx.materialId = :materialId', {
+        materialId: filters.materialId,
+      });
+    }
+    if (filters?.type) {
+      qb.andWhere('tx.type = :type', { type: filters.type });
+    }
+    if (filters?.orderNumber) {
+      qb.andWhere('tx.orderNumber = :orderNumber', {
+        orderNumber: filters.orderNumber,
+      });
+    }
+    if (filters?.containerNumber) {
+      qb.andWhere('tx.containerNumber = :containerNumber', {
+        containerNumber: filters.containerNumber,
+      });
+    }
+    if (filters?.startDate) {
+      qb.andWhere('tx.createdAt >= :startDate', {
+        startDate: filters.startDate,
+      });
+    }
+    if (filters?.endDate) {
+      qb.andWhere('tx.createdAt <= :endDate', { endDate: filters.endDate });
+    }
+    if (filters?.search && filters.search.trim()) {
+      const q = `%${filters.search.trim()}%`;
+      qb.andWhere(
+        '(tx.orderNumber ILIKE :q OR tx.reference ILIKE :q OR tx.containerNumber ILIKE :q OR tx.sealNumber ILIKE :q OR tx.reason ILIKE :q OR tx.notes ILIKE :q)',
+        { q },
+      );
+    }
+
+    qb.orderBy('tx.createdAt', 'DESC');
+    return qb.getMany();
   }
 
   async getBalance(warehouseId: string, materialId: string): Promise<number> {
