@@ -4,7 +4,9 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 
 import { RedisModule } from '../redis/redis.module';
+import { RolesModule } from '../roles/roles.module';
 import { UsersModule } from '../users/users.module';
+import { WarehousesModule } from '../warehouses/warehouses.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
@@ -13,6 +15,8 @@ import { LoginRateLimitGuard } from './login-rate-limit.guard';
 @Module({
   imports: [
     UsersModule,
+    RolesModule,
+    WarehousesModule,
     RedisModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
 
@@ -31,6 +35,6 @@ import { LoginRateLimitGuard } from './login-rate-limit.guard';
 
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, LoginRateLimitGuard],
-  exports: [JwtModule],
+  exports: [AuthService, JwtModule],
 })
 export class AuthModule {}

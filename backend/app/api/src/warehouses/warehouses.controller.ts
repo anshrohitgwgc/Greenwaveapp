@@ -46,15 +46,26 @@ export class WarehousesController {
     return warehouse;
   }
 
-  // Any authenticated role can list warehouses — the selector needs to be
-  // visible to staff, not just admins.
+  // Returns ONLY warehouses the authenticated user is authorized to access
   @Get()
-  findAll(@Query('includeInactive') includeInactive?: string) {
-    return this.warehousesService.findAll(includeInactive === 'true');
+  findAll(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Query('includeInactive') includeInactive?: string,
+  ) {
+    return this.warehousesService.getUserAuthorizedWarehouses(
+      actor.id,
+      actor.role,
+      actor.permissions,
+      includeInactive === 'true',
+    );
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
+  async findOne(
+    @Param('id') id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    await this.warehousesService.assertWarehouseAccess(actor, id);
     return this.warehousesService.findOne(id);
   }
 

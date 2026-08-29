@@ -33,7 +33,7 @@ export class CustomersController {
     @Body() dto: CreateCustomerDto,
     @CurrentUser() actor: AuthenticatedUser,
   ) {
-    const customer = await this.customersService.create(dto, actor.id);
+    const customer = await this.customersService.create(dto, actor);
     await this.auditService.record({
       actorUserId: actor.id,
       actorRole: actor.role,
@@ -48,14 +48,20 @@ export class CustomersController {
 
   @Get()
   @Roles('admin', 'manager')
-  findAll(@Query('warehouseId') warehouseId?: string) {
-    return this.customersService.findAll(warehouseId);
+  findAll(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Query('warehouseId') warehouseId?: string,
+  ) {
+    return this.customersService.findAll(actor, warehouseId);
   }
 
   @Get(':id')
   @Roles('admin', 'manager')
-  findOne(@Param('id') id: string) {
-    return this.customersService.findOne(id);
+  findOne(
+    @Param('id') id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.customersService.findOne(id, actor);
   }
 
   @Patch(':id')
@@ -65,7 +71,7 @@ export class CustomersController {
     @Body() dto: UpdateCustomerDto,
     @CurrentUser() actor: AuthenticatedUser,
   ) {
-    const customer = await this.customersService.update(id, dto, actor.id);
+    const customer = await this.customersService.update(id, dto, actor);
     await this.auditService.record({
       actorUserId: actor.id,
       actorRole: actor.role,

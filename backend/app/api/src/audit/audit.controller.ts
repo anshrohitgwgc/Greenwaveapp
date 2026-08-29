@@ -1,5 +1,7 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -13,6 +15,7 @@ export class AuditController {
   @Get()
   @Roles('admin', 'manager')
   search(
+    @CurrentUser() actor: AuthenticatedUser,
     @Query('entityType') entityType?: string,
     @Query('actorUserId') actorUserId?: string,
     @Query('action') action?: string,
@@ -22,7 +25,7 @@ export class AuditController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
-    return this.auditService.search({
+    return this.auditService.searchAuthorized(actor, {
       entityType,
       actorUserId: actorUserId ? Number(actorUserId) : undefined,
       action,

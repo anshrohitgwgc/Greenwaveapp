@@ -326,12 +326,30 @@
     $('#meName').textContent = me ? me.name : '';
     $('#meRole').textContent = me ? (ROLES[me.role] || {}).label || me.role : '';
 
-    var sel = $('#wh');
-    if (sel && warehouses.length) {
-      sel.innerHTML = warehouses.map(function (w) {
-        return '<option value="' + esc(w.id) + '">' + esc(w.name) + '</option>';
-      }).join('');
-      sel.value = warehouseId;
+    var whWrap = $('.wh');
+    if (whWrap) {
+      if (!warehouses || warehouses.length === 0) {
+        whWrap.innerHTML = '<label>FACILITY</label><div class="wh-readonly-chip wh-unassigned" title="No assigned warehouse"><span class="wh-pin">⚠️</span> No warehouse assigned. Contact administrator.</div>';
+      } else if (warehouses.length === 1) {
+        warehouseId = warehouses[0].id;
+        S.setWarehouse(warehouseId);
+        whWrap.innerHTML = '<label>FACILITY (ASSIGNED)</label><div class="wh-readonly-chip" title="Assigned Facility"><span class="wh-pin">📍</span> ' + esc(warehouses[0].name) + '</div>';
+      } else {
+        whWrap.innerHTML = '<label for="wh">FACILITY</label><div class="wh-select-wrap"><select id="wh" aria-label="Selected Warehouse">' +
+          warehouses.map(function (w) {
+            return '<option value="' + esc(w.id) + '"' + (w.id === warehouseId ? ' selected' : '') + '>' + esc(w.name) + '</option>';
+          }).join('') +
+          '</select></div>';
+        var sel = $('#wh');
+        if (sel) {
+          sel.value = warehouseId;
+          sel.onchange = function (e) {
+            warehouseId = e.target.value;
+            S.setWarehouse(warehouseId);
+            render();
+          };
+        }
+      }
     }
 
     var w = warehouse();
@@ -1985,15 +2003,62 @@
   function renderStaff() {
     if (!isAdmin()) return;
     loadingState('#staffBody');
-    Api.listUsers().then(function (users) {
+    Promise.all([
+      Api.listUsers(),
+      Api.listWarehouses(false)
+    ]).then(function (res) {
+      var users = res[0] || [];
+      var allWhs = res[1] || [];
       usersCache = users;
+
       $('#staffBody').innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
-        '<th>Staff Name</th><th>Email</th><th>Role</th><th>Created</th></tr></thead><tbody>' +
+        '<th>Staff Name</th><th>Email</th><th>Role</th><th>Assigned Facilities</th><th>Actions</th></tr></thead><tbody>' +
         users.map(function (u) {
-          return '<tr><td><strong>' + esc(u.name || u.fullName) + '</strong></td><td>' + esc(u.email) + '</td>' +
+          var assignedWhNames = (u.warehouses && u.warehouses.length)
+            ? u.warehouses.map(function (w) { return esc(w.name); }).join(', ')
+            : (u.role === 'admin' ? '<em style="color:var(--muted)">All Facilities (Admin)</em>' : '<span style="color:var(--crit)">None</span>');
+
+          return '<tr data-user-id="' + esc(u.id) + '"><td><strong>' + esc(u.name || u.fullName) + '</strong></td><td>' + esc(u.email) + '</td>' +
             '<td><span class="badge ' + (u.role === 'admin' ? 'badge-in' : 'badge-transit') + '">' + esc(u.role) + '</span></td>' +
-            '<td class="mono" style="font-size:12.5px">' + esc(when(u.createdAt).split(' ')[0]) + '</td></tr>';
+            '<td>' + assignedWhNames + '</td>' +
+            '<td><button type="button" class="btn ghost btn-sm btn-edit-user-access" data-user-id="' + esc(u.id) + '">Edit Facilities</button></td></tr>';
         }).join('') + '</tbody></table></div></div>';
+
+      $$('.btn-edit-user-access').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var uid = Number(btn.dataset.userId);
+          var targetUser = users.filter(function (x) { return x.id === uid; })[0];
+          if (!targetUser) return;
+
+          Api.getUserWarehouses(uid).then(function (userWhs) {
+            var currentAssignedIds = (userWhs || []).map(function (w) { return w.id; });
+            var checkboxesHtml = allWhs.map(function (w) {
+              var isChecked = currentAssignedIds.indexOf(w.id) >= 0;
+              return '<label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer">' +
+                '<input type="checkbox" name="wh_' + esc(w.id) + '" value="' + esc(w.id) + '"' + (isChecked ? ' checked' : '') + '> ' +
+                '<span><strong>' + esc(w.name) + '</strong> (' + esc(w.code) + ' · ' + esc(w.province || '') + ')</span>' +
+              '</label>';
+            }).join('');
+
+            openModal('Assign Facilities: ' + (targetUser.name || targetUser.fullName || targetUser.email),
+              '<p style="color:var(--ink-2);margin-bottom:12px">Select the warehouse facilities this user is authorized to access:</p>' +
+              '<div style="background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--r);padding:10px 14px">' +
+                checkboxesHtml +
+              '</div>',
+              function (fd) {
+                var selectedIds = [];
+                allWhs.forEach(function (w) {
+                  if (fd['wh_' + w.id]) selectedIds.push(w.id);
+                });
+                return Api.assignUserWarehouses(uid, selectedIds).then(function () {
+                  toast('Warehouse assignments updated for ' + (targetUser.name || targetUser.email));
+                  renderStaff();
+                });
+              }
+            );
+          });
+        });
+      });
     }).catch(function (err) { apiErrorState('#staffBody', err); });
   }
 
@@ -2104,17 +2169,14 @@
 
       return Api.listWarehouses(false).then(function (whs) {
         warehouses = whs || [];
-        if (!warehouses.length) {
-          warehouses = [
-            { id: '22222222-2222-4222-8222-222222222222', name: 'Calgary, AB', code: 'CGY', province: 'AB' },
-            { id: '33333333-3333-4333-8333-333333333333', name: 'Ontario', code: 'ON', province: 'ON' },
-            { id: '11111111-1111-4111-8111-111111111111', name: 'Maple Ridge, BC', code: 'MR', province: 'BC' }
-          ];
-        }
-
-        if (!warehouseId || !warehouses.some(function (w) { return w.id === warehouseId; })) {
-          warehouseId = warehouses[0].id;
-          S.setWarehouse(warehouseId);
+        if (warehouses.length > 0) {
+          if (!warehouseId || !warehouses.some(function (w) { return w.id === warehouseId; })) {
+            warehouseId = warehouses[0].id;
+            S.setWarehouse(warehouseId);
+          }
+        } else {
+          warehouseId = '';
+          S.setWarehouse('');
         }
 
         refreshShiftChip();
@@ -2231,23 +2293,49 @@
     });
 
     $('#newStaff').addEventListener('click', function () {
-      openModal('Add Staff Member',
-        field('fullName', 'Full Name', { required: true }) +
-        field('email', 'Work Email', { type: 'email', required: true }) +
-        field('password', 'Temporary Password', { type: 'password', required: true, help: 'Min 8 chars' }) +
-        field('role', 'Role', {
-          type: 'select',
-          options: [
-            { value: 'staff', label: 'Staff (Warehouse / Ops)' },
-            { value: 'manager', label: 'Manager (Invoices & Adjustments)' },
-            { value: 'admin', label: 'Administrator (Full Access)' }
-          ]
-        }),
-        function (fd) {
-          return Api.createUser({
-            fullName: fd.fullName, email: fd.email, password: fd.password, role: fd.role
-          }).then(function () { toast('Staff account created.'); renderStaff(); });
-        });
+      Api.listWarehouses(false).then(function (allWhs) {
+        var whCheckboxes = (allWhs || []).map(function (w) {
+          return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer">' +
+            '<input type="checkbox" name="wh_' + esc(w.id) + '" value="' + esc(w.id) + '"> ' +
+            '<span><strong>' + esc(w.name) + '</strong> (' + esc(w.code) + ')</span>' +
+          '</label>';
+        }).join('');
+
+        openModal('Add Staff Member',
+          field('fullName', 'Full Name', { required: true }) +
+          field('email', 'Work Email', { type: 'email', required: true }) +
+          field('password', 'Temporary Password', { type: 'password', required: true, help: 'Min 8 chars' }) +
+          field('role', 'Role', {
+            type: 'select',
+            options: [
+              { value: 'staff', label: 'Staff (Warehouse / Ops)' },
+              { value: 'driver', label: 'Driver (Transit & Photos)' },
+              { value: 'manager', label: 'Manager (Invoices & Adjustments)' },
+              { value: 'admin', label: 'Administrator (Full Access)' }
+            ]
+          }) +
+          '<div style="margin-top:10px"><label style="font-size:12px;font-weight:700;color:var(--muted)">ASSIGN INITIAL FACILITIES</label>' +
+          '<div style="background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--r);padding:8px 12px;margin-top:4px">' +
+            (whCheckboxes || '<em style="color:var(--muted)">No facilities available</em>') +
+          '</div></div>',
+          function (fd) {
+            var selectedWhIds = [];
+            (allWhs || []).forEach(function (w) {
+              if (fd['wh_' + w.id]) selectedWhIds.push(w.id);
+            });
+
+            return Api.createUser({
+              fullName: fd.fullName,
+              email: fd.email,
+              password: fd.password,
+              role: fd.role,
+              warehouseIds: selectedWhIds
+            }).then(function () {
+              toast('Staff account created.');
+              renderStaff();
+            });
+          });
+      });
     });
 
     $('#menuBtn').addEventListener('click', function () { $('#app').classList.toggle('menu-open'); });

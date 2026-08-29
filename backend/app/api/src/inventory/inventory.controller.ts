@@ -20,16 +20,17 @@ export class InventoryController {
     @Body() dto: CreateContainerDto,
     @CurrentUser() actor: AuthenticatedUser,
   ) {
-    return this.inventoryService.createContainer(dto, actor.id);
+    return this.inventoryService.createContainer(dto, actor);
   }
 
   @Get('containers')
   @Roles('admin', 'manager', 'staff', 'driver')
   listContainers(
+    @CurrentUser() actor: AuthenticatedUser,
     @Query('warehouseId') warehouseId?: string,
     @Query('search') search?: string,
   ) {
-    return this.inventoryService.listContainers(warehouseId, search);
+    return this.inventoryService.listContainers(actor, warehouseId, search);
   }
 
   @Post('inventory/transactions')
@@ -44,6 +45,7 @@ export class InventoryController {
   @Get('inventory/transactions')
   @Roles('admin', 'manager', 'staff', 'driver')
   listTransactions(
+    @CurrentUser() actor: AuthenticatedUser,
     @Query('warehouseId') warehouseId?: string,
     @Query('materialId') materialId?: string,
     @Query('type') type?: string,
@@ -53,7 +55,7 @@ export class InventoryController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
-    return this.inventoryService.listTransactions({
+    return this.inventoryService.listTransactions(actor, {
       warehouseId,
       materialId,
       type,
@@ -67,7 +69,10 @@ export class InventoryController {
 
   @Get('inventory/balances')
   @Roles('admin', 'manager', 'staff', 'driver')
-  getBalances(@Query('warehouseId') warehouseId?: string) {
-    return this.inventoryService.getBalances(warehouseId);
+  getBalances(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Query('warehouseId') warehouseId?: string,
+  ) {
+    return this.inventoryService.getBalances(actor, warehouseId);
   }
 }

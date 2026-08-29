@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 
+import { WarehousesService } from '../warehouses/warehouses.service';
 import { AuditService } from './audit.service';
 import { AuditEvent } from './entities/audit-event.entity';
 
@@ -18,6 +19,13 @@ describe('AuditService', () => {
       providers: [
         AuditService,
         { provide: getRepositoryToken(AuditEvent), useValue: repo },
+        {
+          provide: WarehousesService,
+          useValue: {
+            assertWarehouseAccess: jest.fn().mockResolvedValue(undefined),
+            getUserAuthorizedWarehouseIds: jest.fn().mockResolvedValue([]),
+          },
+        },
       ],
     }).compile();
 

@@ -14,10 +14,13 @@ describe('UsersController', () => {
         {
           provide: UsersService,
           useValue: {
-            findAll: jest.fn(),
+            findAll: jest.fn().mockResolvedValue([]),
             findOne: jest.fn(),
             create: jest.fn(),
             update: jest.fn(),
+            getUserWarehouses: jest.fn().mockResolvedValue([]),
+            getUserProfile: jest.fn(),
+            assignUserWarehouses: jest.fn().mockResolvedValue([]),
           },
         },
         {

@@ -3,6 +3,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 
 import { AuditService } from '../audit/audit.service';
+import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { WarehousesService } from '../warehouses/warehouses.service';
 import { Container } from './entities/container.entity';
 import { InventoryBalance } from './entities/inventory-balance.entity';
 import { InventoryTransaction } from './entities/inventory-transaction.entity';
@@ -23,9 +25,25 @@ describe('InventoryService', () => {
   };
   let balanceRepo: { find: jest.Mock; findOne: jest.Mock };
   let auditService: { record: jest.Mock };
+  let warehousesService: {
+    assertWarehouseAccess: jest.Mock;
+    getUserAuthorizedWarehouseIds: jest.Mock;
+  };
 
-  const staffActor = { id: 1, role: 'staff', email: 'staff@example.com' };
-  const managerActor = { id: 2, role: 'manager', email: 'manager@example.com' };
+  const staffActor: AuthenticatedUser = {
+    id: 1,
+    role: 'staff',
+    email: 'staff@example.com',
+    fullName: 'Staff',
+    warehouseIds: ['w1'],
+  };
+  const managerActor: AuthenticatedUser = {
+    id: 2,
+    role: 'manager',
+    email: 'manager@example.com',
+    fullName: 'Manager',
+    warehouseIds: ['w1'],
+  };
 
   beforeEach(async () => {
     transactionRepo = {
@@ -66,6 +84,10 @@ describe('InventoryService', () => {
       }),
     };
     auditService = { record: jest.fn().mockResolvedValue(undefined) };
+    warehousesService = {
+      assertWarehouseAccess: jest.fn().mockResolvedValue(undefined),
+      getUserAuthorizedWarehouseIds: jest.fn().mockResolvedValue(['w1']),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -80,6 +102,7 @@ describe('InventoryService', () => {
           useValue: balanceRepo,
         },
         { provide: AuditService, useValue: auditService },
+        { provide: WarehousesService, useValue: warehousesService },
       ],
     }).compile();
 
@@ -172,7 +195,7 @@ describe('InventoryService', () => {
         m: 3581,
         s: 0,
       },
-      1,
+      staffActor,
     );
 
     expect(container.total).toBe('3581');

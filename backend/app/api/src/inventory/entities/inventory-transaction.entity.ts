@@ -76,6 +76,6 @@ export class InventoryTransaction {
   createdBy: number;
 
   @Index()
-  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 }

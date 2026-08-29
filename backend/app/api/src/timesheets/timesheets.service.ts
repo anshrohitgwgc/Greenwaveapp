@@ -5,17 +5,13 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
-import { IsNull, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 
 import { AuditService } from '../audit/audit.service';
+import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { WarehousesService } from '../warehouses/warehouses.service';
 import { ClockInDto } from './dto/clock-in.dto';
 import { Timesheet } from './entities/timesheet.entity';
-
-interface Actor {
-  id: number;
-  role: string;
-  email: string;
-}
 
 @Injectable()
 export class TimesheetsService {
@@ -23,9 +19,14 @@ export class TimesheetsService {
     @InjectRepository(Timesheet)
     private readonly timesheetRepository: Repository<Timesheet>,
     private readonly auditService: AuditService,
+    private readonly warehousesService: WarehousesService,
   ) {}
 
-  async clockIn(dto: ClockInDto, actor: Actor) {
+  async clockIn(dto: ClockInDto, actor: AuthenticatedUser) {
+    if (dto.warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(actor, dto.warehouseId);
+    }
+
     const active = await this.timesheetRepository.findOne({
       where: { userId: actor.id, clockOut: IsNull() },
     });
@@ -55,7 +56,7 @@ export class TimesheetsService {
     return saved;
   }
 
-  async clockOut(actor: Actor) {
+  async clockOut(actor: AuthenticatedUser) {
     const active = await this.timesheetRepository.findOne({
       where: { userId: actor.id, clockOut: IsNull() },
     });
@@ -95,11 +96,32 @@ export class TimesheetsService {
     return qb.getMany();
   }
 
-  /** MANAGER/ADMIN only — enforced at the controller. */
-  teamStatus() {
+  /** MANAGER/ADMIN only */
+  async teamStatus(actor: AuthenticatedUser) {
+    if (!actor.hasGlobalAccess && (!actor.permissions || !actor.permissions.includes('warehouses:global_access'))) {
+      const authorizedIds = await this.warehousesService.getUserAuthorizedWarehouseIds(
+        actor.id,
+        actor.role,
+        actor.permissions,
+      );
+      if (authorizedIds.length === 0) {
+        return this.timesheetRepository.find({
+          where: { clockOut: IsNull(), warehouseId: IsNull() },
+          order: { clockIn: 'DESC' },
+        });
+      }
+      return this.timesheetRepository.find({
+        where: [
+          { clockOut: IsNull(), warehouseId: In(authorizedIds) },
+          { clockOut: IsNull(), warehouseId: IsNull() },
+        ],
+        order: { clockIn: 'DESC' },
+      });
+    }
+
     return this.timesheetRepository.find({
       where: { clockOut: IsNull() },
-      order: { clockIn: 'ASC' },
+      order: { clockIn: 'DESC' },
     });
   }
 }

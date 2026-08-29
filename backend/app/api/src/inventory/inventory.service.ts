@@ -6,21 +6,17 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 
 import { AuditService } from '../audit/audit.service';
+import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { roundQuantity } from '../common/rounding';
+import { WarehousesService } from '../warehouses/warehouses.service';
 import { CreateContainerDto } from './dto/create-container.dto';
 import { CreateInventoryTransactionDto } from './dto/create-inventory-transaction.dto';
 import { Container } from './entities/container.entity';
 import { InventoryBalance } from './entities/inventory-balance.entity';
 import { InventoryTransaction } from './entities/inventory-transaction.entity';
-
-interface Actor {
-  id: number;
-  role: string;
-  email: string;
-}
 
 export interface ListTransactionsFilter {
   warehouseId?: string;
@@ -43,9 +39,12 @@ export class InventoryService {
     @InjectRepository(InventoryBalance)
     private readonly balanceRepository: Repository<InventoryBalance>,
     private readonly auditService: AuditService,
+    private readonly warehousesService: WarehousesService,
   ) {}
 
-  async createContainer(dto: CreateContainerDto, actorId: number) {
+  async createContainer(dto: CreateContainerDto, actor: AuthenticatedUser) {
+    await this.warehousesService.assertWarehouseAccess(actor, dto.warehouseId);
+
     const xl = roundQuantity(dto.xl ?? 0);
     const l = roundQuantity(dto.l ?? 0);
     const m = roundQuantity(dto.m ?? 0);
@@ -74,17 +73,31 @@ export class InventoryService {
       eta: dto.eta ?? null,
       status: dto.status || 'in_transit',
       notes: dto.notes ?? null,
-      createdBy: actorId,
+      createdBy: actor.id,
     });
 
     return this.containerRepository.save(container);
   }
 
-  listContainers(warehouseId?: string, search?: string) {
+  async listContainers(actor: AuthenticatedUser, warehouseId?: string, search?: string) {
+    if (warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(actor, warehouseId);
+    }
+
     const qb = this.containerRepository.createQueryBuilder('c');
+
     if (warehouseId) {
       qb.andWhere('c.warehouseId = :warehouseId', { warehouseId });
+    } else if (!actor.hasGlobalAccess && (!actor.permissions || !actor.permissions.includes('warehouses:global_access'))) {
+      const authorizedIds = await this.warehousesService.getUserAuthorizedWarehouseIds(
+        actor.id,
+        actor.role,
+        actor.permissions,
+      );
+      if (authorizedIds.length === 0) return [];
+      qb.andWhere('c.warehouseId IN (:...authorizedIds)', { authorizedIds });
     }
+
     if (search && search.trim()) {
       const q = `%${search.trim()}%`;
       qb.andWhere(
@@ -96,7 +109,9 @@ export class InventoryService {
     return qb.getMany();
   }
 
-  async createTransaction(dto: CreateInventoryTransactionDto, actor: Actor) {
+  async createTransaction(dto: CreateInventoryTransactionDto, actor: AuthenticatedUser) {
+    await this.warehousesService.assertWarehouseAccess(actor, dto.warehouseId);
+
     if (dto.type === 'adjustment') {
       if (!dto.reason || dto.reason.trim().length === 0) {
         throw new BadRequestException('reason is required for adjustments');
@@ -137,7 +152,7 @@ export class InventoryService {
 
     const saved = await this.transactionRepository.save(transaction);
 
-    // If container number is provided and containerId is not, link or auto-create container record for traceability
+    // Link/trace container record if container number provided
     if (!dto.containerId && (dto.containerNumber || dto.sealNumber)) {
       try {
         await this.createContainer(
@@ -160,10 +175,10 @@ export class InventoryService {
                   : 'adjusted',
             notes: dto.notes ?? dto.reason,
           },
-          actor.id,
+          actor,
         );
       } catch {
-        // Trace container log failure should not fail transaction
+        // Trace container failure should not fail transaction
       }
     }
 
@@ -195,14 +210,27 @@ export class InventoryService {
     return saved;
   }
 
-  listTransactions(filters?: ListTransactionsFilter) {
+  async listTransactions(actor: AuthenticatedUser, filters?: ListTransactionsFilter) {
+    if (filters?.warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(actor, filters.warehouseId);
+    }
+
     const qb = this.transactionRepository.createQueryBuilder('tx');
 
     if (filters?.warehouseId) {
       qb.andWhere('tx.warehouseId = :warehouseId', {
         warehouseId: filters.warehouseId,
       });
+    } else if (!actor.hasGlobalAccess && (!actor.permissions || !actor.permissions.includes('warehouses:global_access'))) {
+      const authorizedIds = await this.warehousesService.getUserAuthorizedWarehouseIds(
+        actor.id,
+        actor.role,
+        actor.permissions,
+      );
+      if (authorizedIds.length === 0) return [];
+      qb.andWhere('tx.warehouseId IN (:...authorizedIds)', { authorizedIds });
     }
+
     if (filters?.materialId) {
       qb.andWhere('tx.materialId = :materialId', {
         materialId: filters.materialId,
@@ -241,16 +269,22 @@ export class InventoryService {
     return qb.getMany();
   }
 
-  async getBalance(warehouseId: string, materialId: string): Promise<number> {
-    const row = await this.balanceRepository.findOne({
-      where: { warehouseId, materialId },
-    });
-    return row ? Number(row.balance) : 0;
-  }
-
-  getBalances(warehouseId?: string) {
-    if (warehouseId)
+  async getBalances(actor: AuthenticatedUser, warehouseId?: string) {
+    if (warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(actor, warehouseId);
       return this.balanceRepository.find({ where: { warehouseId } });
+    }
+
+    if (!actor.hasGlobalAccess && (!actor.permissions || !actor.permissions.includes('warehouses:global_access'))) {
+      const authorizedIds = await this.warehousesService.getUserAuthorizedWarehouseIds(
+        actor.id,
+        actor.role,
+        actor.permissions,
+      );
+      if (authorizedIds.length === 0) return [];
+      return this.balanceRepository.find({ where: { warehouseId: In(authorizedIds) } });
+    }
+
     return this.balanceRepository.find();
   }
 

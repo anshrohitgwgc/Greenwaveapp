@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+import { WarehousesModule } from '../warehouses/warehouses.module';
 import { Container } from './entities/container.entity';
 import { InventoryBalance } from './entities/inventory-balance.entity';
 import { InventoryTransaction } from './entities/inventory-transaction.entity';
@@ -14,6 +15,7 @@ import { InventoryService } from './inventory.service';
       InventoryTransaction,
       InventoryBalance,
     ]),
+    WarehousesModule,
   ],
   controllers: [InventoryController],
   providers: [InventoryService],

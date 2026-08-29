@@ -14,7 +14,12 @@ export class PhotoAsset {
   @Column({ name: 'object_key', type: 'varchar', length: 500 })
   objectKey: string;
 
-  @Column({ name: 'bucket_name', type: 'varchar', length: 255 })
+  @Column({
+    name: 'bucket_name',
+    type: 'varchar',
+    length: 255,
+    default: 'greenwave-photos',
+  })
   bucketName: string;
 
   @Column({ name: 'original_filename', type: 'varchar', length: 255 })
@@ -33,12 +38,7 @@ export class PhotoAsset {
   @Column({ name: 'customer_id', type: 'uuid', nullable: true })
   customerId: string | null;
 
-  @Column({
-    name: 'job_reference',
-    type: 'varchar',
-    length: 100,
-    nullable: true,
-  })
+  @Column({ name: 'job_reference', type: 'varchar', length: 100, nullable: true })
   jobReference: string | null;
 
   @Index()
@@ -49,9 +49,9 @@ export class PhotoAsset {
   @Column({ name: 'taken_by', type: 'int' })
   takenBy: number;
 
-  @Column({ name: 'taken_at', type: 'timestamptz' })
+  @Column({ name: 'taken_at', type: 'datetime' })
   takenAt: Date;
 
-  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 }

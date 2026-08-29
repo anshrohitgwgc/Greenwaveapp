@@ -44,7 +44,9 @@ export class PhotosController {
     // staging testing), which is a real stored-content risk (MinIO would
     // happily serve back whatever was uploaded, Content-Type and all).
     if (!ALLOWED_MIME.has(file.mimetype)) {
-      throw new BadRequestException('Only JPEG, PNG or WebP images are accepted');
+      throw new BadRequestException(
+        'Only JPEG, PNG or WebP images are accepted',
+      );
     }
     return this.photosService.upload(file, meta, actor);
   }

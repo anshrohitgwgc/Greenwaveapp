@@ -39,16 +39,17 @@ export class InvoicesController {
 
   @Get()
   findAll(
+    @CurrentUser() actor: AuthenticatedUser,
     @Query('customerId') customerId?: string,
     @Query('warehouseId') warehouseId?: string,
     @Query('status') status?: string,
   ) {
-    return this.invoicesService.findAll({ customerId, warehouseId, status });
+    return this.invoicesService.findAll(actor, { customerId, warehouseId, status });
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.invoicesService.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.invoicesService.findOne(id, actor);
   }
 
   @Patch(':id')

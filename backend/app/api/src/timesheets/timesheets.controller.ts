@@ -41,11 +41,9 @@ export class TimesheetsController {
     );
   }
 
-  // Staff cannot view unauthorized staff information — team status is
-  // manager/admin only.
   @Get('team')
   @Roles('admin', 'manager')
-  team() {
-    return this.timesheetsService.teamStatus();
+  team(@CurrentUser() actor: AuthenticatedUser) {
+    return this.timesheetsService.teamStatus(actor);
   }
 }

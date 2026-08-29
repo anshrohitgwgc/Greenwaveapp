@@ -53,6 +53,7 @@
   --acc-hover: #1D768A;
 }
 
+[hidden] { display: none !important; }
 *, *::before, *::after { box-sizing: border-box; }
 html, body { height: 100%; }
 body {
@@ -149,7 +150,44 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; color: var(--ink); }
   padding: 10px 24px; display: flex; align-items: center; gap: 16px;
   flex: none; min-height: 56px;
 }
-.menubtn { display: none; background: transparent; border: 0; cursor: pointer; padding: 6px; }
+.menubtn {
+  display: none;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: var(--r);
+  color: var(--ink);
+  align-items: center;
+  justify-content: center;
+}
+.menubtn svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+.linkback {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 0.15s;
+}
+.linkback:hover {
+  color: var(--ink);
+}
+.linkback svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
 .grow { flex: 1; }
 
 /* Multi-Warehouse Selector */
@@ -910,4 +948,27 @@ th.num { text-align: right; }
     background: #ffffff !important;
     border: 1px solid #999999 !important;
   }
+}
+
+/* Authoritative Warehouse Badges & Chips */
+.wh-readonly-chip {
+  background: var(--panel-2);
+  border: 1px solid var(--line-2);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: var(--r);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.wh-readonly-chip.wh-unassigned {
+  background: var(--crit-bg);
+  border-color: rgba(185, 28, 28, 0.25);
+  color: var(--crit);
+  font-size: 12.5px;
+}
+.wh-pin {
+  font-size: 14px;
 }

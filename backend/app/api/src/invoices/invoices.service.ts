@@ -1,21 +1,17 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
-import { DataSource, QueryRunner, Repository } from 'typeorm';
+import { DataSource, In, QueryRunner, Repository } from 'typeorm';
 
 import { AuditService } from '../audit/audit.service';
+import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { roundCurrency } from '../common/rounding';
+import { WarehousesService } from '../warehouses/warehouses.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { InvoiceItemDto } from './dto/invoice-item.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { InvoiceItem } from './entities/invoice-item.entity';
 import { Invoice } from './entities/invoice.entity';
-
-interface Actor {
-  id: number;
-  role: string;
-  email: string;
-}
 
 interface ComputedTotals {
   items: InvoiceItem[];
@@ -71,14 +67,12 @@ export class InvoicesService {
     @InjectDataSource()
     private readonly dataSource: DataSource,
     private readonly auditService: AuditService,
+    private readonly warehousesService: WarehousesService,
   ) {}
 
   /**
    * Allocates the next invoice number from a single-row counter table
-   * inside the caller's transaction. On Postgres this takes a row lock
-   * (`FOR UPDATE`) so two concurrent creates cannot receive the same
-   * number; on other drivers (e.g. sqlite in tests) the surrounding
-   * transaction's own write-serialization provides the same guarantee.
+   * inside the caller's transaction with row locking.
    */
   private async allocateInvoiceNumber(
     queryRunner: QueryRunner,
@@ -94,7 +88,11 @@ export class InvoicesService {
     return String(nextValue);
   }
 
-  async create(dto: CreateInvoiceDto, actor: Actor): Promise<Invoice> {
+  async create(dto: CreateInvoiceDto, actor: AuthenticatedUser): Promise<Invoice> {
+    if (dto.warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(actor, dto.warehouseId);
+    }
+
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -145,7 +143,7 @@ export class InvoicesService {
         summary: `${actor.email} created invoice #${invoiceNumber} (total ${totals.total})`,
       });
 
-      return this.findOne(invoiceId);
+      return this.findOneInternal(invoiceId);
     } catch (err) {
       await queryRunner.rollbackTransaction();
       throw err;
@@ -154,8 +152,12 @@ export class InvoicesService {
     }
   }
 
-  async duplicate(id: string, actor: Actor): Promise<Invoice> {
-    const source = await this.findOne(id);
+  async duplicate(id: string, actor: AuthenticatedUser): Promise<Invoice> {
+    const source = await this.findOneInternal(id);
+    if (source.warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(actor, source.warehouseId);
+    }
+
     const dto: CreateInvoiceDto = {
       invoiceDate: new Date().toISOString().slice(0, 10),
       dueDate: source.dueDate ?? undefined,
@@ -198,9 +200,15 @@ export class InvoicesService {
   async update(
     id: string,
     dto: UpdateInvoiceDto,
-    actor: Actor,
+    actor: AuthenticatedUser,
   ): Promise<Invoice> {
-    const existing = await this.findOne(id);
+    const existing = await this.findOneInternal(id);
+    if (existing.warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(actor, existing.warehouseId);
+    }
+    if (dto.warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(actor, dto.warehouseId);
+    }
 
     const items =
       dto.items ??
@@ -222,8 +230,7 @@ export class InvoicesService {
       invoiceDate: dto.invoiceDate ?? existing.invoiceDate,
       dueDate: dto.dueDate ?? existing.dueDate,
       customerId: dto.customerId ?? existing.customerId,
-
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- simple-json column, TypeORM's DeepPartial can't express it precisely
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
       companyInfo: (dto.companyInfo ?? existing.companyInfo) as any,
       billTo: dto.billTo ?? existing.billTo,
       shipTo: dto.shipTo ?? existing.shipTo,
@@ -255,26 +262,63 @@ export class InvoicesService {
       summary: `${actor.email} updated invoice #${existing.invoiceNumber}`,
     });
 
-    return this.findOne(id);
+    return this.findOneInternal(id);
   }
 
-  findAll(filters: {
-    customerId?: string;
-    warehouseId?: string;
-    status?: string;
-  }) {
-    const where: Record<string, string> = {};
-    if (filters.customerId) where.customerId = filters.customerId;
-    if (filters.warehouseId) where.warehouseId = filters.warehouseId;
-    if (filters.status) where.status = filters.status;
-    return this.invoiceRepository.find({
-      where,
-      relations: ['items'],
-      order: { createdAt: 'DESC' },
-    });
+  async findAll(
+    actor: AuthenticatedUser,
+    filters: {
+      customerId?: string;
+      warehouseId?: string;
+      status?: string;
+    },
+  ) {
+    if (filters.warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(actor, filters.warehouseId);
+    }
+
+    const qb = this.invoiceRepository
+      .createQueryBuilder('inv')
+      .leftJoinAndSelect('inv.items', 'items')
+      .orderBy('inv.createdAt', 'DESC');
+
+    if (filters.customerId) {
+      qb.andWhere('inv.customerId = :customerId', { customerId: filters.customerId });
+    }
+
+    if (filters.warehouseId) {
+      qb.andWhere('inv.warehouseId = :warehouseId', { warehouseId: filters.warehouseId });
+    } else if (!actor.hasGlobalAccess && (!actor.permissions || !actor.permissions.includes('warehouses:global_access'))) {
+      const authorizedIds = await this.warehousesService.getUserAuthorizedWarehouseIds(
+        actor.id,
+        actor.role,
+        actor.permissions,
+      );
+      if (authorizedIds.length === 0) {
+        qb.andWhere('inv.warehouseId IS NULL');
+      } else {
+        qb.andWhere('(inv.warehouseId IN (:...authorizedIds) OR inv.warehouseId IS NULL)', {
+          authorizedIds,
+        });
+      }
+    }
+
+    if (filters.status) {
+      qb.andWhere('inv.status = :status', { status: filters.status });
+    }
+
+    return qb.getMany();
   }
 
-  async findOne(id: string): Promise<Invoice> {
+  async findOne(id: string, actor: AuthenticatedUser): Promise<Invoice> {
+    const invoice = await this.findOneInternal(id);
+    if (invoice.warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(actor, invoice.warehouseId);
+    }
+    return invoice;
+  }
+
+  private async findOneInternal(id: string): Promise<Invoice> {
     const invoice = await this.invoiceRepository.findOne({
       where: { id },
       relations: ['items'],
