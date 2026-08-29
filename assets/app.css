@@ -538,6 +538,29 @@ th.num { text-align: right; }
 }
 .toast.show { opacity: 1; transform: translateY(0); }
 
+/* Photo Lightbox */
+.lightbox {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  z-index: 500; padding: 20px;
+}
+.lightbox[hidden] { display: none !important; }
+.lbclose {
+  position: absolute; top: 20px; right: 20px;
+  background: rgba(255,255,255,0.15); border: none; color: #fff;
+  width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
+  cursor: pointer; transition: background 0.2s ease; z-index: 510;
+}
+.lbclose:hover { background: rgba(255,255,255,0.3); }
+.lbclose svg { width: 22px; height: 22px; }
+#lbImg {
+  max-width: 90vw; max-height: 80vh; object-fit: contain;
+  border-radius: 6px; box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+}
+.lbmeta {
+  margin-top: 14px; color: rgba(255,255,255,0.85); font-size: 13.5px; text-align: center;
+}
+
 /* Empty States */
 .empty {
   text-align: center; padding: 40px 20px;
@@ -581,6 +604,11 @@ th.num { text-align: right; }
   .kpi-grid { grid-template-columns: 1fr 1fr; }
   .chat-container { height: calc(100vh - 130px); }
   .sizes-grid { grid-template-columns: 1fr 1fr; }
+  .modalwrap { padding: 8px; }
+  .modal { max-height: 96vh; border-radius: 6px; }
+  .modalhead { padding: 12px 14px; }
+  .modalbody { padding: 12px 14px; }
+  .modalfoot { padding: 10px 14px; }
 }
 
 @media print {

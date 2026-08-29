@@ -58,11 +58,12 @@ export class StorageService implements OnModuleInit {
     objectKey: string,
     expirySeconds = 3600,
   ): Promise<string> {
-    return this.client.presignedGetObject(
+    const raw = await this.client.presignedGetObject(
       this.bucket,
       objectKey,
       expirySeconds,
     );
+    return raw.replace(/^https?:\/\/[^\/]+/, '');
   }
 
   async delete(objectKey: string): Promise<void> {

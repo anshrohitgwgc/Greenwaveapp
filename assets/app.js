@@ -27,10 +27,10 @@
   };
 
   var ROLES = {
-    admin:   { label: 'Administrator', sees: ['inventory','intake','photos','timeclock','chat','invoices','editor','customers','products','staff','history','settings'] },
-    manager: { label: 'Manager',       sees: ['inventory','intake','photos','timeclock','chat','invoices','editor','customers','products','history'] },
-    staff:   { label: 'Staff',         sees: ['inventory','intake','photos','timeclock','chat'] },
-    driver:  { label: 'Driver',        sees: ['inventory','intake','photos','timeclock','chat'] }
+    admin:   { label: 'Administrator', sees: ['inventory','photos','timeclock','chat','invoices','editor','customers','products','staff','history','settings'] },
+    manager: { label: 'Manager',       sees: ['inventory','photos','timeclock','chat','invoices','editor','customers','products','history'] },
+    staff:   { label: 'Staff',         sees: ['inventory','photos','timeclock','chat'] },
+    driver:  { label: 'Driver',        sees: ['inventory','photos','timeclock','chat'] }
   };
 
   var SIZE_KEYS = ['xl', 'l', 'm', 's'];
@@ -85,6 +85,10 @@
   function hm(ms) {
     var m = Math.max(0, Math.floor(ms / 60000)), h = Math.floor(m / 60);
     return h + 'h ' + String(m % 60).padStart(2, '0') + 'm';
+  }
+  function hms(ms) {
+    var s = Math.max(0, Math.floor(ms / 1000)), m = Math.floor(s / 60), h = Math.floor(m / 60);
+    return h + 'h ' + String(m % 60).padStart(2, '0') + 'm ' + String(s % 60).padStart(2, '0') + 's';
   }
   function bytes(n) {
     if (n > 1048576) return (n / 1048576).toFixed(1) + ' MB';
@@ -398,7 +402,7 @@
 
   function renderTabbar() {
     var items = [
-      { v: 'inventory', i: 'box',   l: isRecycling() ? 'Pallets' : 'Boxes' },
+      { v: 'inventory', i: 'box',   l: 'Inventory' },
       { v: 'chat',      i: 'chat',  l: 'Chat' },
       { v: 'invoices',  i: 'doc',   l: 'Invoices' },
       { v: 'photos',    i: 'cam',   l: 'Photos' },
@@ -824,7 +828,10 @@
         photoHtml = '<div class="tx-detail-item" style="grid-column: 1 / -1;margin-top:8px"><span class="tx-detail-label">Associated Photos</span><span class="tx-detail-val" style="color:var(--muted)">— None attached</span></div>';
       }
 
-      var txIsRec = (tx.division === 'recycling' || (!tx.division && tx.unitType === 'pallet') || isRecycling());
+      var txIsRec = (tx.division === 'recycling' || tx.unitType === 'pallet' || (!tx.division && !tx.unitType && (tx.weightValue != null && Number(tx.weightValue) > 0)));
+      if (tx.division === 'healthcare' || tx.unitType === 'box') {
+        txIsRec = false;
+      }
       var divLabel = txIsRec ? 'Recycling (Pallets)' : 'Healthcare (Boxes)';
       var unitLabel = txIsRec ? 'PALLET' : 'BOX';
       var typeLabel = tx.type === 'inbound' ? 'Inbound (IN)' : tx.type === 'outbound' ? 'Outbound (OUT)' : 'Adjustment (ADJ)';
@@ -1059,7 +1066,7 @@
 
       var selectedPhotoFile = null;
 
-      openModal('Receive Inbound (' + unitLabel + 'S)', formHtml, function (fd) {
+      openModal('Receive Inbound (' + (isRec ? 'PALLETS' : 'BOXES') + ')', formHtml, function (fd) {
         var parseWhole = function (val) {
           if (!val || val === '') return 0;
           var n = Number(val);
@@ -1273,7 +1280,7 @@
           '<div class="field"><label>Notes / Outbound Details</label><input type="text" name="notes" placeholder="e.g. shipped via Trailer 12345"></div>';
       }
 
-      openModal('Ship Outbound (' + unitLabel + 'S)', formHtml, function (fd) {
+      openModal('Ship Outbound (' + (isRec ? 'PALLETS' : 'BOXES') + ')', formHtml, function (fd) {
         var parseWhole = function (val) {
           if (!val || val === '') return 0;
           var n = Number(val);
@@ -1398,7 +1405,7 @@
           '</div>';
       }
 
-      openModal('Adjust Stock Balance (' + unitLabel + 'S)', formHtml, function (fd) {
+      openModal('Adjust Stock Balance (' + (isRec ? 'PALLETS' : 'BOXES') + ')', formHtml, function (fd) {
         var reason = (fd.reason || '').trim();
         if (!reason) { toast('Adjustment reason is required.'); return Promise.reject(new Error('Reason required')); }
 
@@ -1987,7 +1994,7 @@
           '<div class="card"><div class="pad" style="text-align:center">' +
             '<div style="font-size:14px;color:var(--muted)">' + (open ? 'On shift since ' + startTimeStr : 'Clocked out') + '</div>' +
             '<div style="font-size:40px;font-weight:700;font-family:var(--f-mono);margin:12px 0;' + (open ? 'color:var(--acc)' : 'color:var(--muted)') + '" id="clockTime">' +
-              (open ? hm(elapsedMs) : '—') + '</div>' +
+              (open ? hms(elapsedMs) : '—') + '</div>' +
             '<div style="font-size:13px;color:var(--muted);margin-bottom:18px">' + hm(weekMs) + ' logged in the last 7 days</div>' +
             '<button type="button" class="btn ' + (open ? 'btn-secondary' : 'btn-primary') + '" id="clockBtn">' +
               '<svg><use href="#i-' + (open ? 'stop' : 'play') + '"></use></svg>' + (open ? 'Clock Out' : 'Clock In') + '</button>' +
@@ -2029,7 +2036,7 @@
           var el = $('#clockTime');
           if (!el) { clearInterval(clockTimer); clockTimer = null; return; }
           var ms = Math.max(0, Date.now() - new Date(open.clockIn).getTime());
-          el.textContent = hm(ms);
+          el.textContent = hms(ms);
           renderShiftChip();
         }, 1000);
       }

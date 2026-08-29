@@ -1,14 +1,14 @@
 /* Offline cache for Greenwave Ops */
-var CACHE = 'greenwave-v10';
+var CACHE = 'greenwave-v11';
 var FILES = [
   '/',
   '/index.html',
-  '/manifest.webmanifest?v=20260829_180000',
-  '/assets/app.css?v=20260829_180000',
-  '/assets/api.js?v=20260829_180000',
-  '/assets/app.js?v=20260829_180000',
-  '/assets/store.js?v=20260829_180000',
-  '/assets/photos.js?v=20260829_180000',
+  '/manifest.webmanifest?v=20260829_190000',
+  '/assets/app.css?v=20260829_190000',
+  '/assets/api.js?v=20260829_190000',
+  '/assets/app.js?v=20260829_190000',
+  '/assets/store.js?v=20260829_190000',
+  '/assets/photos.js?v=20260829_190000',
   '/assets/logo.png',
   '/assets/icon-192.png',
   '/assets/icon-512.png'
@@ -41,8 +41,8 @@ self.addEventListener('fetch', function (e) {
   if (!e.request.url.startsWith('http')) return;
 
   var url = new URL(e.request.url);
-  // Bypass all API backend endpoints and SSE streams
-  if (url.pathname.match(/^\/(api|auth|users|warehouses|customers|materials|containers|inventory|invoices|timesheets|photos|audit|pickups|chat)(\/.*)?$/)) {
+  // Bypass all API backend endpoints, photo streams, and SSE streams
+  if (url.pathname.match(/^\/(api|auth|users|warehouses|customers|materials|containers|inventory|invoices|timesheets|photos|greenwave-photos|audit|pickups|chat)(\/.*)?$/)) {
     return;
   }
 
