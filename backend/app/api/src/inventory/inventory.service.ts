@@ -10,7 +10,12 @@ import { In, Repository } from 'typeorm';
 
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
-import { roundQuantity } from '../common/rounding';
+
+import { Material } from '../materials/entities/material.entity';
+import { PhotoAsset } from '../photos/entities/photo-asset.entity';
+import { StorageService } from '../storage/storage.service';
+import { User } from '../users/entities/user.entity';
+import { Warehouse } from '../warehouses/entities/warehouse.entity';
 import { WarehousesService } from '../warehouses/warehouses.service';
 import { CreateContainerDto } from './dto/create-container.dto';
 import { CreateInventoryTransactionDto } from './dto/create-inventory-transaction.dto';
@@ -38,21 +43,88 @@ export class InventoryService {
     private readonly transactionRepository: Repository<InventoryTransaction>,
     @InjectRepository(InventoryBalance)
     private readonly balanceRepository: Repository<InventoryBalance>,
+    @InjectRepository(Material)
+    private readonly materialRepository: Repository<Material>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+    @InjectRepository(Warehouse)
+    private readonly warehouseRepository: Repository<Warehouse>,
+    @InjectRepository(PhotoAsset)
+    private readonly photoRepository: Repository<PhotoAsset>,
+    private readonly storageService: StorageService,
     private readonly auditService: AuditService,
     private readonly warehousesService: WarehousesService,
   ) {}
 
+  private validateDivisionAndUnitType(division?: string, unitType?: string) {
+    const div = (division || 'recycling').toLowerCase();
+    const unit = (unitType || (div === 'healthcare' ? 'box' : 'pallet')).toLowerCase();
+
+    if (!['recycling', 'healthcare'].includes(div)) {
+      throw new BadRequestException('division must be either recycling or healthcare');
+    }
+    if (!['pallet', 'box'].includes(unit)) {
+      throw new BadRequestException('unitType must be either pallet or box');
+    }
+    if (div === 'recycling' && unit === 'box') {
+      throw new BadRequestException('Recycling division handles pallets only');
+    }
+    if (div === 'healthcare' && unit === 'pallet') {
+      throw new BadRequestException('Healthcare division handles boxes only');
+    }
+    return { division: div, unitType: unit };
+  }
+
+  private validateQuantities(quantities: { [key: string]: number | undefined }) {
+    for (const [key, val] of Object.entries(quantities)) {
+      if (val !== undefined && val !== null) {
+        if (!Number.isInteger(Number(val)) || Number(val) < 0) {
+          throw new BadRequestException(`Quantity field ${key} must be a whole number (no decimal fractions)`);
+        }
+      }
+    }
+  }
+
+  private validateWeight(weightValue?: number, weightUnit?: string) {
+    if (weightValue !== undefined && weightValue !== null) {
+      const num = Number(weightValue);
+      if (isNaN(num) || num < 0) {
+        throw new BadRequestException('weightValue must be a valid non-negative number');
+      }
+      if (!weightUnit || !['kg', 'lb'].includes(weightUnit.toLowerCase())) {
+        throw new BadRequestException('weightUnit must be either kg or lb');
+      }
+      return {
+        weightValue: num,
+        weightUnit: weightUnit.toLowerCase(),
+      };
+    }
+    if (weightUnit) {
+      if (!['kg', 'lb'].includes(weightUnit.toLowerCase())) {
+        throw new BadRequestException('weightUnit must be either kg or lb');
+      }
+      return {
+        weightValue: null,
+        weightUnit: weightUnit.toLowerCase(),
+      };
+    }
+    return { weightValue: null, weightUnit: null };
+  }
+
   async createContainer(dto: CreateContainerDto, actor: AuthenticatedUser) {
     await this.warehousesService.assertWarehouseAccess(actor, dto.warehouseId);
+    this.validateQuantities({ xl: dto.xl, l: dto.l, m: dto.m, s: dto.s, total: dto.total });
+    const { division, unitType } = this.validateDivisionAndUnitType(dto.division, dto.unitType);
+    const { weightValue, weightUnit } = this.validateWeight(dto.weightValue, dto.weightUnit);
 
-    const xl = roundQuantity(dto.xl ?? 0);
-    const l = roundQuantity(dto.l ?? 0);
-    const m = roundQuantity(dto.m ?? 0);
-    const s = roundQuantity(dto.s ?? 0);
-    const calculatedTotal = roundQuantity(xl + l + m + s);
+    const xl = Math.round(dto.xl ?? 0);
+    const l = Math.round(dto.l ?? 0);
+    const m = Math.round(dto.m ?? 0);
+    const s = Math.round(dto.s ?? 0);
+    const calculatedTotal = xl + l + m + s;
     const total =
       dto.total !== undefined && dto.total > 0
-        ? roundQuantity(dto.total)
+        ? Math.round(dto.total)
         : calculatedTotal;
 
     const container = this.containerRepository.create({
@@ -65,6 +137,11 @@ export class InventoryService {
       sealNumber: dto.sealNumber ?? null,
       productName: dto.productName ?? null,
       materialId: dto.materialId ?? null,
+      unitType,
+      division,
+      weightValue: weightValue !== null ? String(weightValue) : null,
+      weightUnit,
+      photoId: dto.photoId ?? null,
       xl: String(xl),
       l: String(l),
       m: String(m),
@@ -111,6 +188,9 @@ export class InventoryService {
 
   async createTransaction(dto: CreateInventoryTransactionDto, actor: AuthenticatedUser) {
     await this.warehousesService.assertWarehouseAccess(actor, dto.warehouseId);
+    this.validateQuantities({ xl: dto.xl, l: dto.l, m: dto.m, s: dto.s });
+    const { division, unitType } = this.validateDivisionAndUnitType(dto.division, dto.unitType);
+    const { weightValue, weightUnit } = this.validateWeight(dto.weightValue, dto.weightUnit);
 
     if (dto.type === 'adjustment') {
       if (!dto.reason || dto.reason.trim().length === 0) {
@@ -123,12 +203,12 @@ export class InventoryService {
       }
     }
 
-    const xl = roundQuantity(dto.xl ?? 0);
-    const l = roundQuantity(dto.l ?? 0);
-    const m = roundQuantity(dto.m ?? 0);
-    const s = roundQuantity(dto.s ?? 0);
+    const xl = Math.round(dto.xl ?? 0);
+    const l = Math.round(dto.l ?? 0);
+    const m = Math.round(dto.m ?? 0);
+    const s = Math.round(dto.s ?? 0);
     // Automatic server calculation of Total = XL + L + M + S
-    const total = roundQuantity(xl + l + m + s);
+    const total = xl + l + m + s;
 
     const transaction = this.transactionRepository.create({
       id: randomUUID(),
@@ -136,6 +216,11 @@ export class InventoryService {
       materialId: dto.materialId,
       containerId: dto.containerId ?? null,
       type: dto.type,
+      unitType,
+      division,
+      weightValue: weightValue !== null ? String(weightValue) : null,
+      weightUnit,
+      photoId: dto.photoId ?? null,
       xl: String(xl),
       l: String(l),
       m: String(m),
@@ -162,6 +247,11 @@ export class InventoryService {
             containerNumber: dto.containerNumber,
             sealNumber: dto.sealNumber,
             materialId: dto.materialId,
+            unitType: unitType as 'pallet' | 'box',
+            division: division as 'recycling' | 'healthcare',
+            weightValue: weightValue ?? undefined,
+            weightUnit: (weightUnit as 'kg' | 'lb') ?? undefined,
+            photoId: dto.photoId,
             xl,
             l,
             m,
@@ -191,14 +281,19 @@ export class InventoryService {
       warehouseId: dto.warehouseId,
       summary:
         dto.type === 'adjustment'
-          ? `${actor.email} adjusted stock by ${total} (reason: ${dto.reason})`
-          : `${actor.email} recorded ${dto.type} of ${total}`,
+          ? `${actor.email} adjusted stock by ${total} ${unitType}s (${division}) (reason: ${dto.reason})`
+          : `${actor.email} recorded ${dto.type} of ${total} ${unitType}s (${division})${weightValue ? ` [${weightValue} ${weightUnit?.toUpperCase()}]` : ''}`,
       metadata: {
         materialId: dto.materialId,
         containerId: dto.containerId ?? null,
         orderNumber: dto.orderNumber ?? null,
         containerNumber: dto.containerNumber ?? null,
         sealNumber: dto.sealNumber ?? null,
+        unitType,
+        division,
+        weightValue,
+        weightUnit,
+        photoId: dto.photoId ?? null,
         xl,
         l,
         m,
@@ -208,6 +303,100 @@ export class InventoryService {
     });
 
     return saved;
+  }
+
+  async getTransactionById(id: string, actor: AuthenticatedUser) {
+    const tx = await this.transactionRepository.findOne({ where: { id } });
+    if (!tx) {
+      throw new NotFoundException('Inventory transaction not found');
+    }
+
+    await this.warehousesService.assertWarehouseAccess(actor, tx.warehouseId);
+
+    const [warehouse, material, creator, container] = await Promise.all([
+      this.warehouseRepository.findOne({ where: { id: tx.warehouseId } }),
+      this.materialRepository.findOne({ where: { id: tx.materialId } }),
+      this.userRepository.findOne({ where: { id: tx.createdBy } }),
+      tx.containerId ? this.containerRepository.findOne({ where: { id: tx.containerId } }) : null,
+    ]);
+
+    // Find associated photos
+    const photoQb = this.photoRepository.createQueryBuilder('p')
+      .where('p.warehouseId = :warehouseId', { warehouseId: tx.warehouseId });
+
+    if (tx.photoId) {
+      photoQb.andWhere('(p.id = :photoId OR p.jobReference = :ref OR p.jobReference = :orderNum)', {
+        photoId: tx.photoId,
+        ref: tx.reference || tx.orderNumber || tx.id,
+        orderNum: tx.orderNumber || tx.id,
+      });
+    } else if (tx.orderNumber || tx.reference) {
+      photoQb.andWhere('p.jobReference IN (:...refs)', {
+        refs: [tx.orderNumber, tx.reference, tx.id].filter(Boolean),
+      });
+    } else {
+      photoQb.andWhere('p.jobReference = :txId', { txId: tx.id });
+    }
+
+    const photoAssets = await photoQb.getMany();
+    const photos = await Promise.all(
+      photoAssets.map(async (p) => {
+        let presignedUrl = '';
+        try {
+          presignedUrl = await this.storageService.presignedGetUrl(p.objectKey);
+        } catch {
+          presignedUrl = `/photos/${p.id}/view`;
+        }
+        return {
+          id: p.id,
+          url: presignedUrl,
+          originalFilename: p.originalFilename,
+          mimeType: p.mimeType,
+          sizeBytes: p.sizeBytes,
+          photoType: p.photoType,
+          takenBy: p.takenBy,
+          takenAt: p.takenAt,
+        };
+      }),
+    );
+
+    return {
+      id: tx.id,
+      warehouseId: tx.warehouseId,
+      warehouseName: warehouse?.name || '—',
+      warehouseCode: warehouse?.code || '—',
+      materialId: tx.materialId,
+      materialName: material?.name || '—',
+      materialCategory: material?.category || '—',
+      materialUnit: material?.unit || '—',
+      containerId: tx.containerId,
+      type: tx.type,
+      unitType: tx.unitType || (tx.division === 'healthcare' ? 'box' : 'pallet'),
+      division: tx.division || 'recycling',
+      weightValue: tx.weightValue ? Number(tx.weightValue) : null,
+      weightUnit: tx.weightUnit || null,
+      photoId: tx.photoId,
+      xl: Number(tx.xl),
+      l: Number(tx.l),
+      m: Number(tx.m),
+      s: Number(tx.s),
+      total: Number(tx.total),
+      reason: tx.reason || '—',
+      reference: tx.reference || '—',
+      orderNumber: tx.orderNumber || '—',
+      containerNumber: tx.containerNumber || '—',
+      sealNumber: tx.sealNumber || '—',
+      blNumber: container?.blNumber || '—',
+      shippingLine: container?.shippingLine || '—',
+      eta: container?.eta || '—',
+      notes: tx.notes || '—',
+      createdBy: tx.createdBy,
+      creatorName: creator?.fullName || creator?.email || '—',
+      creatorEmail: creator?.email || '—',
+      creatorRole: creator?.role || '—',
+      createdAt: tx.createdAt,
+      photos,
+    };
   }
 
   async listTransactions(actor: AuthenticatedUser, filters?: ListTransactionsFilter) {

@@ -115,4 +115,28 @@ describe('Unit: Invoice Creator & Greenwave Ops.pdf Verification', () => {
     assert.equal(result.tax, 9.38);
     assert.equal(result.total, 196.96);
   });
+
+  it('4. Exact Match to Authoritative Reference Invoice 1114.pdf: OCC 12 Cardboard, 5% GST, and $537.73 Total', () => {
+    const lines: InvoiceLine[] = [
+      {
+        description: 'OCC 12 Cardboard (12 Bales)',
+        unit: '',
+        quantity: 3.658,
+        unitPrice: 140.00,
+        discount: 0,
+        isRebate: false,
+      },
+    ];
+
+    // Line amount: 3.658 * 140.00 = 512.12
+    assert.equal(calculateLineAmount(lines[0]), 512.12);
+
+    const result = calculateInvoiceTotals(lines, 5.0);
+    // Subtotal: 512.12
+    assert.equal(result.subtotal, 512.12);
+    // GST @ 5% on 512.12: 25.61
+    assert.equal(result.tax, 25.61);
+    // Total: 537.73
+    assert.equal(result.total, 537.73);
+  });
 });

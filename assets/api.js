@@ -131,6 +131,9 @@
     listInventoryTransactions: function (params) {
       return request('GET', '/inventory/transactions' + qs(params));
     },
+    getInventoryTransaction: function (id) {
+      return request('GET', '/inventory/transactions/' + id);
+    },
     createInventoryTransaction: function (data) {
       return request('POST', '/inventory/transactions', data);
     },

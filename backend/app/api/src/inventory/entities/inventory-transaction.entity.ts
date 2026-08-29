@@ -69,6 +69,21 @@ export class InventoryTransaction {
   @Column({ name: 'seal_number', type: 'varchar', length: 100, nullable: true })
   sealNumber: string | null;
 
+  @Column({ name: 'unit_type', type: 'varchar', length: 32, default: 'pallet' })
+  unitType: string;
+
+  @Column({ type: 'varchar', length: 32, default: 'recycling' })
+  division: string;
+
+  @Column({ name: 'weight_value', type: 'numeric', precision: 12, scale: 3, nullable: true })
+  weightValue: string | null;
+
+  @Column({ name: 'weight_unit', type: 'varchar', length: 8, nullable: true })
+  weightUnit: string | null;
+
+  @Column({ name: 'photo_id', type: 'uuid', nullable: true })
+  photoId: string | null;
+
   @Column({ type: 'text', nullable: true })
   notes: string | null;
 

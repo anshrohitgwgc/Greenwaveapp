@@ -51,6 +51,12 @@ export class Invoice {
   })
   paymentTerms: string | null;
 
+  @Column({ name: 'ship_via', type: 'varchar', length: 150, nullable: true })
+  shipVia: string | null;
+
+  @Column({ name: 'ship_date', type: 'date', nullable: true })
+  shipDate: string | null;
+
   @Column({ type: 'numeric', precision: 12, scale: 2, default: 0 })
   subtotal: string;
 

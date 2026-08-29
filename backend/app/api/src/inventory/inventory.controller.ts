@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
@@ -65,6 +65,15 @@ export class InventoryController {
       startDate,
       endDate,
     });
+  }
+
+  @Get('inventory/transactions/:id')
+  @Roles('admin', 'manager', 'staff', 'driver')
+  getTransaction(
+    @Param('id') id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.inventoryService.getTransactionById(id, actor);
   }
 
   @Get('inventory/balances')
