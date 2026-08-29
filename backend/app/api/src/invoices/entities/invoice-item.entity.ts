@@ -1,4 +1,4 @@
-import { Column, Entity, ManyToOne, PrimaryColumn } from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne, PrimaryColumn } from 'typeorm';
 
 import { Invoice } from './invoice.entity';
 
@@ -10,7 +10,14 @@ export class InvoiceItem {
   @Column({ name: 'invoice_id', type: 'uuid' })
   invoiceId: string;
 
+  // Without an explicit @JoinColumn, TypeORM invents its own join column
+  // (named `invoiceId`, camelCase) instead of reusing the `invoice_id`
+  // column declared above — that phantom column doesn't exist in Postgres,
+  // so any query that loads this relation (e.g. GET /invoices) 500s. This
+  // only worked in the unit-test suite because it runs against sqlite with
+  // synchronize:true, which silently creates both columns.
   @ManyToOne(() => Invoice, (invoice) => invoice.items, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'invoice_id' })
   invoice: Invoice;
 
   @Column({ type: 'text' })

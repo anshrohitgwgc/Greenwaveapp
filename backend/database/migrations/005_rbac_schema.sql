@@ -71,5 +71,5 @@ ON CONFLICT DO NOTHING;
 -- row and is intentionally left unlinked, it's handled as a STAFF-tier
 -- alias in the application's RolesGuard rather than in this schema).
 INSERT INTO user_roles (user_id, role_id)
-SELECT u.id, r.id FROM "user" u JOIN roles r ON r.name = u.role
+SELECT u.id, r.id FROM "user" u JOIN roles r ON r.name = u.role::text
 ON CONFLICT DO NOTHING;
