@@ -49,7 +49,7 @@ export class PhotoAsset {
   @Column({ name: 'taken_by', type: 'int' })
   takenBy: number;
 
-  @Column({ name: 'taken_at', type: 'datetime' })
+  @CreateDateColumn({ name: 'taken_at' })
   takenAt: Date;
 
   @CreateDateColumn({ name: 'created_at' })

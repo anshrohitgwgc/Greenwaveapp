@@ -1,6 +1,7 @@
 import {
   Column,
   CreateDateColumn,
+  DeleteDateColumn,
   Entity,
   Index,
   PrimaryColumn,
@@ -19,10 +20,10 @@ export class Timesheet {
   @Column({ name: 'warehouse_id', type: 'uuid', nullable: true })
   warehouseId: string | null;
 
-  @Column({ name: 'clock_in', type: 'datetime' })
+  @CreateDateColumn({ name: 'clock_in' })
   clockIn: Date;
 
-  @Column({ name: 'clock_out', type: 'datetime', nullable: true })
+  @DeleteDateColumn({ name: 'clock_out', nullable: true })
   clockOut: Date | null;
 
   @CreateDateColumn({ name: 'created_at' })
