@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsDateString,
   IsNumber,
   IsOptional,
   IsString,
@@ -8,6 +9,14 @@ import {
 } from 'class-validator';
 
 export class InvoiceItemDto {
+  @IsOptional()
+  @IsDateString()
+  serviceDate?: string;
+
+  @IsOptional()
+  @IsString()
+  productService?: string;
+
   @IsString()
   @MinLength(1)
   description: string;
@@ -18,6 +27,10 @@ export class InvoiceItemDto {
   @IsOptional()
   @IsString()
   unit?: string;
+
+  @IsOptional()
+  @IsString()
+  taxRateLabel?: string;
 
   @IsNumber()
   @Min(0)

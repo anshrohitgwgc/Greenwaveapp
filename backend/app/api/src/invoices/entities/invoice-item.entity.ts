@@ -20,6 +20,12 @@ export class InvoiceItem {
   @JoinColumn({ name: 'invoice_id' })
   invoice: Invoice;
 
+  @Column({ name: 'service_date', type: 'date', nullable: true })
+  serviceDate: string | null;
+
+  @Column({ name: 'product_service', type: 'varchar', length: 100, nullable: true })
+  productService: string | null;
+
   @Column({ type: 'text' })
   description: string;
 
@@ -28,6 +34,9 @@ export class InvoiceItem {
 
   @Column({ type: 'varchar', length: 32, nullable: true })
   unit: string | null;
+
+  @Column({ name: 'tax_rate_label', type: 'varchar', length: 32, nullable: true, default: 'GST' })
+  taxRateLabel: string | null;
 
   @Column({ name: 'unit_price', type: 'numeric', precision: 12, scale: 4 })
   unitPrice: string;

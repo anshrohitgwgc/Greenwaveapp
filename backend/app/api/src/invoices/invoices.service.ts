@@ -40,9 +40,12 @@ export function computeTotals(
     const entity = new InvoiceItem();
     entity.id = randomUUID();
     entity.invoiceId = invoiceId;
+    entity.serviceDate = item.serviceDate ?? null;
+    entity.productService = item.productService ?? 'supply';
     entity.description = item.description;
     entity.quantity = String(item.quantity);
     entity.unit = item.unit ?? null;
+    entity.taxRateLabel = item.taxRateLabel ?? 'GST';
     entity.unitPrice = String(item.unitPrice);
     entity.discount = String(discount);
     entity.isRebate = item.isRebate ?? false;
@@ -113,6 +116,8 @@ export class InvoicesService {
         shipTo: dto.shipTo ?? null,
         poReference: dto.poReference ?? null,
         paymentTerms: dto.paymentTerms ?? null,
+        shipVia: dto.shipVia ?? 'Greenwave Recycling Truck',
+        shipDate: dto.shipDate ?? null,
         subtotal: String(totals.subtotal),
         discountTotal: String(totals.discountTotal),
         taxLabel: dto.taxLabel ?? null,
@@ -167,6 +172,8 @@ export class InvoicesService {
       shipTo: source.shipTo ?? undefined,
       poReference: source.poReference ?? undefined,
       paymentTerms: source.paymentTerms ?? undefined,
+      shipVia: source.shipVia ?? undefined,
+      shipDate: source.shipDate ?? undefined,
       taxLabel: source.taxLabel ?? undefined,
       taxRate: Number(source.taxRate),
       notes: source.notes ?? undefined,
@@ -176,9 +183,12 @@ export class InvoicesService {
       warehouseId: source.warehouseId ?? undefined,
       status: 'draft',
       items: source.items.map((item) => ({
+        serviceDate: item.serviceDate ?? undefined,
+        productService: item.productService ?? undefined,
         description: item.description,
         quantity: Number(item.quantity),
         unit: item.unit ?? undefined,
+        taxRateLabel: item.taxRateLabel ?? undefined,
         unitPrice: Number(item.unitPrice),
         discount: Number(item.discount),
         isRebate: item.isRebate,
@@ -213,9 +223,12 @@ export class InvoicesService {
     const items =
       dto.items ??
       existing.items.map((item) => ({
+        serviceDate: item.serviceDate ?? undefined,
+        productService: item.productService ?? undefined,
         description: item.description,
         quantity: Number(item.quantity),
         unit: item.unit ?? undefined,
+        taxRateLabel: item.taxRateLabel ?? undefined,
         unitPrice: Number(item.unitPrice),
         discount: Number(item.discount),
         isRebate: item.isRebate,
@@ -236,6 +249,8 @@ export class InvoicesService {
       shipTo: dto.shipTo ?? existing.shipTo,
       poReference: dto.poReference ?? existing.poReference,
       paymentTerms: dto.paymentTerms ?? existing.paymentTerms,
+      shipVia: dto.shipVia ?? existing.shipVia,
+      shipDate: dto.shipDate ?? existing.shipDate,
       subtotal: String(totals.subtotal),
       discountTotal: String(totals.discountTotal),
       taxLabel: dto.taxLabel ?? existing.taxLabel,

@@ -48,6 +48,14 @@ export class CreateInvoiceDto {
 
   @IsOptional()
   @IsString()
+  shipVia?: string;
+
+  @IsOptional()
+  @IsDateString()
+  shipDate?: string;
+
+  @IsOptional()
+  @IsString()
   taxLabel?: string;
 
   @IsOptional()

@@ -319,8 +319,19 @@
       el.hidden = !(okEntity && okRole);
     });
 
-    $('#intakeNav').textContent   = isRecycling() ? 'Weigh-in' : 'Receive';
-    $('#productsNav').textContent = isRecycling() ? 'Materials' : 'Products';
+    var intakeEl = $('#intakeNav');
+    if (intakeEl) intakeEl.textContent = isRecycling() ? 'Weigh-in' : 'Receive';
+    var prodEl = $('#productsNav');
+    if (prodEl) prodEl.textContent = isRecycling() ? 'Materials' : 'Products';
+
+    var inBtn = $('#btnReceiveStock');
+    if (inBtn) inBtn.innerHTML = '<svg><use href="#i-plus"></use></svg>' + (isRecycling() ? 'Receive Pallets' : 'Receive Boxes');
+    var outBtn = $('#btnShipStock');
+    if (outBtn) outBtn.innerHTML = '<svg><use href="#i-truck"></use></svg>' + (isRecycling() ? 'Ship Pallets' : 'Ship Boxes');
+    var invSub = $('#invenSub');
+    if (invSub) invSub.textContent = isRecycling() ? 'Recycling Division — Pallet inventory balances, container tracking, and transaction ledger.' : 'Healthcare Division — Box inventory balances, container tracking, and transaction ledger.';
+    var prodTitle = $('#prodTitle');
+    if (prodTitle) prodTitle.textContent = isRecycling() ? 'Materials Catalog' : 'Healthcare Products Catalog';
 
     $('#meInitials').textContent = me ? initials(me.name) : '';
     $('#meName').textContent = me ? me.name : '';
@@ -362,8 +373,7 @@
 
   function renderTabbar() {
     var items = [
-      { v: 'inventory', i: 'box',   l: 'Stock' },
-      { v: 'intake',    i: 'scale', l: isRecycling() ? 'Weigh' : 'Receive' },
+      { v: 'inventory', i: 'box',   l: isRecycling() ? 'Pallets' : 'Boxes' },
       { v: 'chat',      i: 'chat',  l: 'Chat' },
       { v: 'invoices',  i: 'doc',   l: 'Invoices' },
       { v: 'photos',    i: 'cam',   l: 'Photos' },
@@ -633,6 +643,8 @@
       '<th>Order / Ref #</th>' +
       '<th>Type</th>' +
       '<th>Product</th>' +
+      '<th>Unit</th>' +
+      '<th>Weight</th>' +
       '<th>Container No.</th>' +
       '<th>Seal No.</th>' +
       '<th class="num">XL</th>' +
@@ -649,12 +661,16 @@
       var badgeClass = t.type === 'inbound' ? 'badge-in' : t.type === 'outbound' ? 'badge-out' : 'badge-adj';
       var typeLabel = t.type === 'inbound' ? 'IN' : t.type === 'outbound' ? 'OUT' : 'ADJ';
       var by = (me && t.createdBy === me.id) ? me.name : (usersCache ? userName(t.createdBy) : ('Staff #' + t.createdBy));
+      var unitStr = (t.unitType || (isRecycling() ? 'pallet' : 'box')).toUpperCase();
+      var weightStr = (t.weightValue != null && Number(t.weightValue) > 0) ? (num(t.weightValue) + ' ' + (t.weightUnit || 'kg').toUpperCase()) : '—';
 
-      return '<tr>' +
+      return '<tr class="clickable-row" data-tx="' + esc(t.id) + '" title="Click to view full transaction details and photos">' +
         '<td class="mono" style="font-size:12.5px">' + esc(when(t.createdAt).split(' ')[0]) + '</td>' +
         '<td class="mono"><strong>' + esc(t.orderNumber || t.reference || '—') + '</strong></td>' +
         '<td><span class="badge ' + badgeClass + '">' + typeLabel + '</span></td>' +
         '<td>' + esc(m.name) + '</td>' +
+        '<td><span class="mono" style="font-size:11.5px;font-weight:700">' + esc(unitStr) + '</span></td>' +
+        '<td class="mono" style="font-size:12px">' + esc(weightStr) + '</td>' +
         '<td class="mono">' + esc(t.containerNumber || '—') + '</td>' +
         '<td class="mono">' + esc(t.sealNumber || '—') + '</td>' +
         '<td class="num">' + num(t.xl) + '</td>' +
@@ -670,8 +686,85 @@
     $('#invenBody').innerHTML = '<div class="card">' +
       '<div class="tablewrap"><table class="table">' +
       '<thead>' + head + '</thead>' +
-      '<tbody>' + (body || '<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:30px">No matching transactions found.</td></tr>') + '</tbody>' +
+      '<tbody>' + (body || '<tr><td colspan="15" style="text-align:center;color:var(--muted);padding:30px">No matching transactions found.</td></tr>') + '</tbody>' +
       '</table></div></div>';
+
+    $$('.clickable-row[data-tx]').forEach(function (row) {
+      row.addEventListener('click', function () {
+        openTransactionDetailModal(row.dataset.tx);
+      });
+    });
+  }
+
+  function openTransactionDetailModal(txId) {
+    Api.getInventoryTransaction(txId).then(function (tx) {
+      var photoHtml = '';
+      if (tx.photos && tx.photos.length > 0) {
+        photoHtml = '<div class="tx-photos-section" style="margin-top:16px">' +
+          '<span class="tx-detail-label">Associated Photos (' + tx.photos.length + ') — Click thumbnail to open lightbox</span>' +
+          '<div class="tx-photos-grid">' +
+          tx.photos.map(function (p) {
+            return '<div class="tx-photo-card" data-url="' + esc(p.url) + '" data-meta="' + esc(p.filename || 'Photo') + '">' +
+              '<img src="' + esc(p.url) + '" alt="Photo" class="tx-photo-img">' +
+              '<div class="tx-photo-meta">' + esc(p.filename || 'Photo') + '</div>' +
+              '</div>';
+          }).join('') +
+          '</div></div>';
+      } else {
+        photoHtml = '<div class="tx-detail-item" style="grid-column: 1 / -1;margin-top:8px"><span class="tx-detail-label">Associated Photos</span><span class="tx-detail-val" style="color:var(--muted)">— None attached</span></div>';
+      }
+
+      var weightStr = (tx.weightValue != null && Number(tx.weightValue) > 0) ? (num(tx.weightValue) + ' ' + (tx.weightUnit || 'KG').toUpperCase()) : '—';
+      var typeLabel = tx.type === 'inbound' ? 'Inbound (IN)' : tx.type === 'outbound' ? 'Outbound (OUT)' : 'Adjustment (ADJ)';
+      var divLabel = tx.division === 'recycling' ? 'Recycling (Pallets)' : (tx.division === 'healthcare' ? 'Healthcare (Boxes)' : (tx.division || '—'));
+      var unitLabel = tx.unitType ? tx.unitType.toUpperCase() : '—';
+
+      var bodyHtml =
+        '<div class="tx-detail-card">' +
+          '<div class="tx-detail-grid">' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Transaction ID</span><span class="tx-detail-val mono" style="font-size:12px">' + esc(tx.id) + '</span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Recorded At</span><span class="tx-detail-val mono">' + esc(when(tx.createdAt)) + '</span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Facility / Warehouse</span><span class="tx-detail-val">📍 ' + esc(tx.warehouseName || 'Assigned Facility') + (tx.warehouseCode ? ' (' + esc(tx.warehouseCode) + ')' : '') + '</span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Division</span><span class="tx-detail-val">🏢 ' + esc(divLabel) + '</span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Transaction Type</span><span class="tx-detail-val"><strong>' + esc(typeLabel) + '</strong></span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Order / Reference #</span><span class="tx-detail-val mono"><strong>' + esc(tx.orderNumber || tx.reference || '—') + '</strong></span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Product / Material</span><span class="tx-detail-val"><strong>' + esc(tx.materialName || '—') + '</strong></span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Unit Type</span><span class="tx-detail-val">' + esc(unitLabel) + '</span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Recorded Weight</span><span class="tx-detail-val mono">⚖️ ' + esc(weightStr) + '</span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Total Unit Quantity</span><span class="tx-detail-val mono text-success" style="font-size:16px"><strong>' + num(tx.total) + '</strong></span></div>' +
+            '<div class="tx-detail-item" style="grid-column: 1 / -1"><span class="tx-detail-label">Size Breakdown (XL / L / M / S)</span><span class="tx-detail-val mono">XL: ' + num(tx.xl) + '  |  L: ' + num(tx.l) + '  |  M: ' + num(tx.m) + '  |  S: ' + num(tx.s) + '</span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Container Number</span><span class="tx-detail-val mono">' + esc(tx.containerNumber || '—') + '</span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Seal Number</span><span class="tx-detail-val mono">' + esc(tx.sealNumber || '—') + '</span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">BL / Tracking Number</span><span class="tx-detail-val mono">' + esc(tx.blNumber || '—') + '</span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Shipping Line / Carrier</span><span class="tx-detail-val">' + esc(tx.shippingLine || '—') + '</span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">ETA / Expected Date</span><span class="tx-detail-val mono">' + esc(tx.eta || '—') + '</span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Recorded By</span><span class="tx-detail-val">👤 ' + esc(tx.creatorName || ('Staff #' + tx.createdBy)) + '</span></div>' +
+            '<div class="tx-detail-item" style="grid-column: 1 / -1"><span class="tx-detail-label">Notes / Reason</span><span class="tx-detail-val">' + esc(tx.reason || tx.notes || '—') + '</span></div>' +
+          '</div>' +
+          photoHtml +
+        '</div>';
+
+      openModal('Transaction Details · ' + (tx.orderNumber || tx.reference || tx.id.slice(0, 8)), bodyHtml, null);
+      var okBtn = $('#modalOk'); if (okBtn) okBtn.hidden = true;
+      var cancelBtn = $('#modalCancel'); if (cancelBtn) cancelBtn.textContent = 'Close';
+
+      $$('.tx-photo-card').forEach(function (card) {
+        card.addEventListener('click', function () {
+          var url = card.dataset.url;
+          var meta = card.dataset.meta;
+          var lb = $('#lightbox');
+          var lbImg = $('#lbImg');
+          var lbMeta = $('#lbMeta');
+          if (lb && lbImg) {
+            lbImg.src = url;
+            if (lbMeta) lbMeta.textContent = meta;
+            lb.hidden = false;
+          }
+        });
+      });
+    }).catch(function (err) {
+      toast('Failed to load transaction details: ' + (err.message || err));
+    });
   }
 
   function renderContainersTab(containers) {
@@ -737,59 +830,180 @@
       var mats = visibleMaterials(all);
       if (!mats.length) { toast('Please create materials in the catalog first.'); return; }
 
+      var isRec = isRecycling();
+      var unitType = isRec ? 'pallet' : 'box';
+      var unitLabel = isRec ? 'PALLET' : 'BOX';
+      var divName = isRec ? 'recycling' : 'healthcare';
+
       var formHtml =
-        '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
+        '<div class="grid g2">' +
+          '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
+          '<div class="field"><label>Division &amp; Packaging</label><div class="division-chip ' + (isRec ? '' : 'healthcare') + '">' + (isRec ? '♻️ Recycling — PALLETS' : '🏥 Healthcare — BOXES') + '</div></div>' +
+        '</div>' +
         '<div class="grid g2">' +
           '<div class="field"><label>Date</label><input type="date" name="date" value="' + today() + '" required></div>' +
           '<div class="field"><label>Order Number (e.g. Jul20-DIVESTPC-AB38A)</label><input type="text" name="orderNumber" placeholder="Order / PO #" required></div>' +
         '</div>' +
-        '<div class="field"><label>Product / Material</label><select name="materialId" required>' +
+        '<div class="field"><label>' + (isRec ? 'Material' : 'Product') + '</label><select name="materialId" required>' +
           mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + ' (' + esc(m.unit) + ')</option>'; }).join('') +
         '</select></div>' +
         '<div class="grid g2">' +
+          '<div class="field"><label>Dedicated Weight</label>' +
+            '<div class="weight-input-group">' +
+              '<input type="number" name="weightValue" step="any" min="0" placeholder="e.g. 3658">' +
+              '<select name="weightUnit" class="weight-unit-select"><option value="kg" selected>KG</option><option value="lb">LB</option></select>' +
+            '</div>' +
+          '</div>' +
           '<div class="field"><label>Container Number (e.g. MSMU 6896930)</label><input type="text" name="containerNumber" placeholder="MSMU 6896930"></div>' +
-          '<div class="field"><label>Seal Number (e.g. 0336695)</label><input type="text" name="sealNumber" placeholder="0336695"></div>' +
         '</div>' +
-        '<label style="font-size:13px;font-weight:600;margin-top:10px;display:block">Quantities by Size</label>' +
+        '<div class="field"><label>Seal Number (e.g. 0336695)</label><input type="text" name="sealNumber" placeholder="0336695"></div>' +
+        '<label style="font-size:13px;font-weight:600;margin-top:10px;display:block">Quantities by Size (Whole ' + unitLabel + ' counts only)</label>' +
         '<div class="sizes-grid">' +
-          '<div class="field"><label>XL</label><input type="number" name="xl" min="0" step="any" placeholder="0" class="size-input"></div>' +
-          '<div class="field"><label>L</label><input type="number" name="l" min="0" step="any" placeholder="0" class="size-input"></div>' +
-          '<div class="field"><label>M</label><input type="number" name="m" min="0" step="any" placeholder="0" class="size-input"></div>' +
-          '<div class="field"><label>S</label><input type="number" name="s" min="0" step="any" placeholder="0" class="size-input"></div>' +
+          '<div class="field"><label>XL</label><input type="number" name="xl" min="0" step="1" placeholder="0" class="size-input"></div>' +
+          '<div class="field"><label>L</label><input type="number" name="l" min="0" step="1" placeholder="0" class="size-input"></div>' +
+          '<div class="field"><label>M</label><input type="number" name="m" min="0" step="1" placeholder="0" class="size-input"></div>' +
+          '<div class="field"><label>S</label><input type="number" name="s" min="0" step="1" placeholder="0" class="size-input"></div>' +
         '</div>' +
         '<div class="total-preview-box">' +
-          '<span class="total-preview-label">Calculated Total (XL + L + M + S):</span>' +
+          '<span class="total-preview-label">Calculated Total (' + unitLabel + 'S = XL + L + M + S):</span>' +
           '<span class="total-preview-val" id="modalAutoTotal">0</span>' +
+        '</div>' +
+        '<div class="field">' +
+          '<label>Inbound Photo Capture (Optional)</label>' +
+          '<div class="inbound-photo-zone">' +
+            '<div class="inbound-photo-btns">' +
+              '<input type="file" id="inboundPhotoInput" accept="image/*" capture="environment" style="display:none">' +
+              '<button type="button" class="btn ghost btn-sm" id="btnInboundTakePhoto"><svg><use href="#i-cam"></use></svg> Take Photo</button>' +
+              '<button type="button" class="btn ghost btn-sm" id="btnInboundUploadPhoto"><svg><use href="#i-download"></use></svg> Upload Photo</button>' +
+            '</div>' +
+            '<div id="inboundPhotoPreviewWrap" hidden>' +
+              '<div class="inbound-photo-preview">' +
+                '<img id="inboundPhotoThumb" src="" alt="Thumbnail">' +
+                '<span id="inboundPhotoName" style="font-size:12px;color:var(--ink-2);flex:1"></span>' +
+                '<button type="button" class="btn ghost btn-sm text-crit" id="btnInboundRemovePhoto" style="padding:2px 8px">Remove</button>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
         '</div>' +
         '<div class="field"><label>Notes / Comments (optional)</label><input type="text" name="notes" placeholder="e.g. SI SENT, cross dock"></div>';
 
-      openModal('Receive Inbound Stock', formHtml, function (fd) {
-        var xl = parseQty(fd.xl), l = parseQty(fd.l), m = parseQty(fd.m), s = parseQty(fd.s);
-        var total = xl + l + m + s;
-        if (total <= 0) { toast('Please enter a quantity for at least one size.'); return; }
+      var selectedPhotoFile = null;
 
-        var payload = {
-          warehouseId: w.id,
-          materialId: fd.materialId,
-          type: 'inbound',
-          orderNumber: fd.orderNumber,
-          reference: fd.orderNumber,
-          containerNumber: fd.containerNumber || undefined,
-          sealNumber: fd.sealNumber || undefined,
-          xl: xl, l: l, m: m, s: s,
-          notes: fd.notes || undefined
+      openModal('Receive Inbound (' + unitLabel + 'S)', formHtml, function (fd) {
+        var parseWhole = function (val) {
+          if (!val || val === '') return 0;
+          var n = Number(val);
+          if (isNaN(n) || !Number.isInteger(n) || n < 0) {
+            throw new Error('Quantity counts must be non-negative whole integers (received ' + val + ').');
+          }
+          return n;
         };
 
-        return Api.createInventoryTransaction(payload).then(function () {
-          toast('Inbound shipment received and stock updated.');
-          renderInventory();
-        });
+        var xl, l, m, s;
+        try {
+          xl = parseWhole(fd.xl);
+          l = parseWhole(fd.l);
+          m = parseWhole(fd.m);
+          s = parseWhole(fd.s);
+        } catch (e) {
+          toast(e.message);
+          return Promise.reject(e);
+        }
+
+        var total = xl + l + m + s;
+        if (total <= 0) { toast('Please enter a quantity for at least one size.'); return Promise.reject(new Error('Zero quantity')); }
+
+        var weightVal = fd.weightValue ? Number(fd.weightValue) : undefined;
+        if (weightVal !== undefined && (isNaN(weightVal) || weightVal < 0)) {
+          toast('Weight value must be a positive number.');
+          return Promise.reject(new Error('Invalid weight'));
+        }
+
+        var doSubmit = function (photoId) {
+          var payload = {
+            warehouseId: w.id,
+            materialId: fd.materialId,
+            type: 'inbound',
+            division: divName,
+            unitType: unitType,
+            weightValue: weightVal,
+            weightUnit: fd.weightUnit || 'kg',
+            photoId: photoId || undefined,
+            orderNumber: fd.orderNumber,
+            reference: fd.orderNumber,
+            containerNumber: fd.containerNumber || undefined,
+            sealNumber: fd.sealNumber || undefined,
+            xl: xl, l: l, m: m, s: s,
+            notes: fd.notes || undefined
+          };
+
+          return Api.createInventoryTransaction(payload).then(function () {
+            toast('Inbound shipment received (' + num(total) + ' ' + unitLabel + 's) and stock updated.');
+            renderInventory();
+          });
+        };
+
+        if (selectedPhotoFile) {
+          return Api.uploadPhoto(selectedPhotoFile, {
+            warehouseId: w.id,
+            photoType: 'inventory_inbound',
+            jobReference: fd.orderNumber
+          }).then(function (res) {
+            return doSubmit(res.id);
+          }).catch(function (err) {
+            toast('Photo upload failed: ' + (err.message || err));
+            return doSubmit(undefined);
+          });
+        } else {
+          return doSubmit(undefined);
+        }
       });
+
+      var pInput = $('#inboundPhotoInput');
+      var pWrap = $('#inboundPhotoPreviewWrap');
+      var pThumb = $('#inboundPhotoThumb');
+      var pName = $('#inboundPhotoName');
+
+      var btnTake = $('#btnInboundTakePhoto');
+      if (btnTake) {
+        btnTake.addEventListener('click', function () {
+          if (pInput) pInput.click();
+        });
+      }
+      var btnUp = $('#btnInboundUploadPhoto');
+      if (btnUp) {
+        btnUp.addEventListener('click', function () {
+          if (pInput) pInput.click();
+        });
+      }
+      var btnRem = $('#btnInboundRemovePhoto');
+      if (btnRem) {
+        btnRem.addEventListener('click', function () {
+          selectedPhotoFile = null;
+          if (pInput) pInput.value = '';
+          if (pWrap) pWrap.hidden = true;
+        });
+      }
+      if (pInput) {
+        pInput.addEventListener('change', function (e) {
+          var f = e.target.files && e.target.files[0];
+          if (f) {
+            selectedPhotoFile = f;
+            if (pName) pName.textContent = f.name + ' (' + Math.round(f.size / 1024) + ' KB)';
+            var reader = new FileReader();
+            reader.onload = function (ev) {
+              if (pThumb) pThumb.src = ev.target.result;
+              if (pWrap) pWrap.hidden = false;
+            };
+            reader.readAsDataURL(f);
+          }
+        });
+      }
 
       $$('.size-input').forEach(function (inp) {
         inp.addEventListener('input', function () {
           var t = 0;
-          $$('.size-input').forEach(function (x) { t += parseQty(x.value); });
+          $$('.size-input').forEach(function (x) { t += Math.floor(Number(x.value) || 0); });
           var totEl = $('#modalAutoTotal');
           if (totEl) totEl.textContent = num(t);
         });
@@ -805,25 +1019,33 @@
       var mats = visibleMaterials(all);
       if (!mats.length) { toast('Please create materials in the catalog first.'); return; }
 
+      var isRec = isRecycling();
+      var unitType = isRec ? 'pallet' : 'box';
+      var unitLabel = isRec ? 'PALLET' : 'BOX';
+      var divName = isRec ? 'recycling' : 'healthcare';
+
       var formHtml =
-        '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
+        '<div class="grid g2">' +
+          '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
+          '<div class="field"><label>Division &amp; Packaging</label><div class="division-chip ' + (isRec ? '' : 'healthcare') + '">' + (isRec ? '♻️ Recycling — PALLETS' : '🏥 Healthcare — BOXES') + '</div></div>' +
+        '</div>' +
         '<div class="grid g2">' +
           '<div class="field"><label>Date</label><input type="date" name="date" value="' + today() + '" required></div>' +
           '<div class="field"><label>Order / Reference #</label><input type="text" name="orderNumber" placeholder="Order / BOL #" required></div>' +
         '</div>' +
-        '<div class="field"><label>Product / Material</label><select name="materialId" required>' +
+        '<div class="field"><label>' + (isRec ? 'Material' : 'Product') + '</label><select name="materialId" required>' +
           mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + ' (' + esc(m.unit) + ')</option>'; }).join('') +
         '</select></div>' +
         '<div class="grid g2">' +
           '<div class="field"><label>Container Number (optional)</label><input type="text" name="containerNumber" placeholder="MSMU 6896930 / Trailer"></div>' +
           '<div class="field"><label>Seal Number (optional)</label><input type="text" name="sealNumber" placeholder="0336695"></div>' +
         '</div>' +
-        '<label style="font-size:13px;font-weight:600;margin-top:10px;display:block">Quantities to Dispatch</label>' +
+        '<label style="font-size:13px;font-weight:600;margin-top:10px;display:block">Quantities to Dispatch (Whole ' + unitLabel + ' counts only)</label>' +
         '<div class="sizes-grid">' +
-          '<div class="field"><label>XL</label><input type="number" name="xl" min="0" step="any" placeholder="0" class="size-input"></div>' +
-          '<div class="field"><label>L</label><input type="number" name="l" min="0" step="any" placeholder="0" class="size-input"></div>' +
-          '<div class="field"><label>M</label><input type="number" name="m" min="0" step="any" placeholder="0" class="size-input"></div>' +
-          '<div class="field"><label>S</label><input type="number" name="s" min="0" step="any" placeholder="0" class="size-input"></div>' +
+          '<div class="field"><label>XL</label><input type="number" name="xl" min="0" step="1" placeholder="0" class="size-input"></div>' +
+          '<div class="field"><label>L</label><input type="number" name="l" min="0" step="1" placeholder="0" class="size-input"></div>' +
+          '<div class="field"><label>M</label><input type="number" name="m" min="0" step="1" placeholder="0" class="size-input"></div>' +
+          '<div class="field"><label>S</label><input type="number" name="s" min="0" step="1" placeholder="0" class="size-input"></div>' +
         '</div>' +
         '<div class="total-preview-box">' +
           '<span class="total-preview-label">Calculated Outbound Total:</span>' +
@@ -831,15 +1053,36 @@
         '</div>' +
         '<div class="field"><label>Notes / Outbound Details</label><input type="text" name="notes" placeholder="e.g. shipped via Trailer 12345"></div>';
 
-      openModal('Ship Outbound Stock', formHtml, function (fd) {
-        var xl = parseQty(fd.xl), l = parseQty(fd.l), m = parseQty(fd.m), s = parseQty(fd.s);
+      openModal('Ship Outbound (' + unitLabel + 'S)', formHtml, function (fd) {
+        var parseWhole = function (val) {
+          if (!val || val === '') return 0;
+          var n = Number(val);
+          if (isNaN(n) || !Number.isInteger(n) || n < 0) {
+            throw new Error('Quantity counts must be non-negative whole integers (received ' + val + ').');
+          }
+          return n;
+        };
+
+        var xl, l, m, s;
+        try {
+          xl = parseWhole(fd.xl);
+          l = parseWhole(fd.l);
+          m = parseWhole(fd.m);
+          s = parseWhole(fd.s);
+        } catch (e) {
+          toast(e.message);
+          return Promise.reject(e);
+        }
+
         var total = xl + l + m + s;
-        if (total <= 0) { toast('Please enter a quantity for at least one size.'); return; }
+        if (total <= 0) { toast('Please enter a quantity for at least one size.'); return Promise.reject(new Error('Zero quantity')); }
 
         var payload = {
           warehouseId: w.id,
           materialId: fd.materialId,
           type: 'outbound',
+          division: divName,
+          unitType: unitType,
           orderNumber: fd.orderNumber,
           reference: fd.orderNumber,
           containerNumber: fd.containerNumber || undefined,
@@ -849,7 +1092,7 @@
         };
 
         return Api.createInventoryTransaction(payload).then(function () {
-          toast('Outbound shipment recorded and stock reduced.');
+          toast('Outbound shipment recorded (' + num(total) + ' ' + unitLabel + 's) and stock reduced.');
           renderInventory();
         });
       });
@@ -857,7 +1100,7 @@
       $$('.size-input').forEach(function (inp) {
         inp.addEventListener('input', function () {
           var t = 0;
-          $$('.size-input').forEach(function (x) { t += parseQty(x.value); });
+          $$('.size-input').forEach(function (x) { t += Math.floor(Number(x.value) || 0); });
           var totEl = $('#modalAutoTotal');
           if (totEl) totEl.textContent = num(t);
         });
@@ -873,36 +1116,65 @@
       var mats = visibleMaterials(all);
       if (!mats.length) { toast('Please create materials in the catalog first.'); return; }
 
+      var isRec = isRecycling();
+      var unitType = isRec ? 'pallet' : 'box';
+      var unitLabel = isRec ? 'PALLET' : 'BOX';
+      var divName = isRec ? 'recycling' : 'healthcare';
+
       var formHtml =
-        '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
-        '<div class="field"><label>Product / Material</label><select name="materialId" required>' +
+        '<div class="grid g2">' +
+          '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
+          '<div class="field"><label>Division &amp; Packaging</label><div class="division-chip ' + (isRec ? '' : 'healthcare') + '">' + (isRec ? '♻️ Recycling — PALLETS' : '🏥 Healthcare — BOXES') + '</div></div>' +
+        '</div>' +
+        '<div class="field"><label>' + (isRec ? 'Material' : 'Product') + '</label><select name="materialId" required>' +
           mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + ' (' + esc(m.unit) + ')</option>'; }).join('') +
         '</select></div>' +
-        '<div class="field"><label>Reason for Adjustment (Required)</label><input type="text" name="reason" placeholder="e.g. physical recount, adjusted 5 cases to match count" required></div>' +
-        '<label style="font-size:13px;font-weight:600;margin-top:10px;display:block">Adjustment Quantities (can be positive or negative)</label>' +
+        '<div class="field"><label>Reason for Adjustment (Required)</label><input type="text" name="reason" placeholder="e.g. physical recount, adjusted 5 units to match count" required></div>' +
+        '<label style="font-size:13px;font-weight:600;margin-top:10px;display:block">Adjustment Quantities (Whole ' + unitLabel + ' counts only)</label>' +
         '<div class="sizes-grid">' +
-          '<div class="field"><label>XL</label><input type="number" name="xl" step="any" placeholder="0" class="size-input"></div>' +
-          '<div class="field"><label>L</label><input type="number" name="l" step="any" placeholder="0" class="size-input"></div>' +
-          '<div class="field"><label>M</label><input type="number" name="m" step="any" placeholder="0" class="size-input"></div>' +
-          '<div class="field"><label>S</label><input type="number" name="s" step="any" placeholder="0" class="size-input"></div>' +
+          '<div class="field"><label>XL</label><input type="number" name="xl" step="1" placeholder="0" class="size-input"></div>' +
+          '<div class="field"><label>L</label><input type="number" name="l" step="1" placeholder="0" class="size-input"></div>' +
+          '<div class="field"><label>M</label><input type="number" name="m" step="1" placeholder="0" class="size-input"></div>' +
+          '<div class="field"><label>S</label><input type="number" name="s" step="1" placeholder="0" class="size-input"></div>' +
         '</div>' +
         '<div class="total-preview-box">' +
           '<span class="total-preview-label">Net Adjustment Total:</span>' +
           '<span class="total-preview-val text-accent" id="modalAutoTotal">0</span>' +
         '</div>';
 
-      openModal('Adjust Stock Balance', formHtml, function (fd) {
+      openModal('Adjust Stock Balance (' + unitLabel + 'S)', formHtml, function (fd) {
         var reason = (fd.reason || '').trim();
-        if (!reason) { toast('Adjustment reason is required.'); return; }
+        if (!reason) { toast('Adjustment reason is required.'); return Promise.reject(new Error('Reason required')); }
 
-        var xl = parseQty(fd.xl), l = parseQty(fd.l), m = parseQty(fd.m), s = parseQty(fd.s);
+        var parseWholeAdj = function (val) {
+          if (!val || val === '') return 0;
+          var n = Number(val);
+          if (isNaN(n) || !Number.isInteger(n)) {
+            throw new Error('Quantity counts must be whole integers (received ' + val + ').');
+          }
+          return n;
+        };
+
+        var xl, l, m, s;
+        try {
+          xl = parseWholeAdj(fd.xl);
+          l = parseWholeAdj(fd.l);
+          m = parseWholeAdj(fd.m);
+          s = parseWholeAdj(fd.s);
+        } catch (e) {
+          toast(e.message);
+          return Promise.reject(e);
+        }
+
         var total = xl + l + m + s;
-        if (total === 0 && !xl && !l && !m && !s) { toast('Enter adjustment values.'); return; }
+        if (total === 0 && !xl && !l && !m && !s) { toast('Enter adjustment values.'); return Promise.reject(new Error('Zero adjustment')); }
 
         var payload = {
           warehouseId: w.id,
           materialId: fd.materialId,
           type: 'adjustment',
+          division: divName,
+          unitType: unitType,
           reason: reason,
           xl: xl, l: l, m: m, s: s
         };
@@ -916,7 +1188,7 @@
       $$('.size-input').forEach(function (inp) {
         inp.addEventListener('input', function () {
           var t = 0;
-          $$('.size-input').forEach(function (x) { t += parseQty(x.value); });
+          $$('.size-input').forEach(function (x) { t += Math.floor(Number(x.value) || 0); });
           var totEl = $('#modalAutoTotal');
           if (totEl) totEl.textContent = (t >= 0 ? '+' : '') + num(t);
         });
@@ -1473,19 +1745,24 @@
   }
 
   function newDraft() {
-    var w = warehouse(), co = db.company || {}, t = taxFor(w ? w.province : 'BC');
+    var w = warehouse();
+    var t = w ? taxRule(w.province) : { label: 'GST @ 5%', rate: 0.05 };
+    var co = db.company || {};
     return {
       id: null,
-      invoiceNumber: null,
+      invoiceNumber: '',
       customerId: '',
-      billTo: 'gwgc',
-      shipTo: '10828',
+      billTo: 'Fibertech Supply Chain Inc.\n7901 Progress way\nDelta BC V4G 1A3',
+      shipTo: 'Fibertech Supply Chain Inc.\n7901 Progress way\nDelta BC V4G 1A3',
+      shipVia: 'Greenwave Recycling Truck',
+      shipDate: today(),
       reference: '',
       poReference: '',
+      paymentTerms: 'Net 15',
+      termsDays: 15,
       fromLocation: (w && w.name) || 'Maple Ridge, BC',
       warehouseId: w ? w.id : null,
       province: w ? w.province : 'BC',
-      termsDays: 15,
       invoiceDate: today(),
       dueDate: new Date(Date.now() + 15 * 864e5).toISOString().slice(0, 10),
       taxLabel: t.label || 'GST @ 5%',
@@ -1493,7 +1770,7 @@
       companyInfo: {
         name: co.name || 'Greenwave Recycling Inc.',
         bn: co.bn || 'BN 751161951BC0001',
-        gst: co.gst || 'GST/HST Registration No. 751161951RT0001',
+        gst: co.gst || '751161951RT0001',
         line1: co.line1 || '23394 Fisherman Rd,',
         line2: co.line2 || 'Maple Ridge, BC V2W 1B9',
         email: co.email || 'sales@greenwaverecycling.ca',
@@ -1503,13 +1780,33 @@
       notes: '',
       status: 'draft',
       items: [
-        { description: 'sgfs', unit: '10', quantity: 1, unitPrice: 10000, discount: 1.00, isRebate: false }
+        {
+          serviceDate: today(),
+          productService: 'supply',
+          unit: '',
+          description: 'OCC 12 Cardboard (12 Bales)',
+          quantity: 3.658,
+          unitPrice: 140.00,
+          discount: 0,
+          isRebate: false,
+          taxRateLabel: 'GST'
+        }
       ]
     };
   }
 
   function blankLine() {
-    return { description: '', unit: '', quantity: 1, unitPrice: 0, discount: 0, isRebate: false };
+    return {
+      serviceDate: today(),
+      productService: 'supply',
+      unit: '',
+      description: '',
+      quantity: 1,
+      unitPrice: 0,
+      discount: 0,
+      isRebate: false,
+      taxRateLabel: 'GST'
+    };
   }
 
   function invoiceToDraft(inv) {
@@ -1519,12 +1816,15 @@
     }
     var items = (inv.items || []).map(function (it) {
       return {
-        description: it.description || '',
+        serviceDate: it.serviceDate || inv.invoiceDate || today(),
+        productService: it.productService || 'supply',
         unit: it.unit || '',
+        description: it.description || '',
         quantity: Number(it.quantity) || 0,
         unitPrice: Number(it.unitPrice) || 0,
         discount: Number(it.discount) || 0,
-        isRebate: !!it.isRebate
+        isRebate: !!it.isRebate,
+        taxRateLabel: it.taxRateLabel || 'GST'
       };
     });
     if (!items.length) items = [blankLine()];
@@ -1536,6 +1836,9 @@
       customerId: inv.customerId || '',
       billTo: inv.billTo || '',
       shipTo: inv.shipTo || '',
+      shipVia: inv.shipVia || 'Greenwave Recycling Truck',
+      shipDate: inv.shipDate || inv.invoiceDate || today(),
+      paymentTerms: inv.paymentTerms || 'Net 15',
       reference: inv.notes || '',
       poReference: inv.poReference || '',
       fromLocation: (wh && wh.name) || 'Maple Ridge, BC',
@@ -1549,7 +1852,7 @@
       companyInfo: {
         name: co.name || 'Greenwave Recycling Inc.',
         bn: co.bn || 'BN 751161951BC0001',
-        gst: co.gst || 'GST/HST Registration No. 751161951RT0001',
+        gst: co.gst || '751161951RT0001',
         line1: co.line1 || '23394 Fisherman Rd,',
         line2: co.line2 || 'Maple Ridge, BC V2W 1B9',
         email: co.email || 'sales@greenwaverecycling.ca',
@@ -1581,7 +1884,7 @@
       invoiceListCache = list;
       if (!list.length) {
         $('#invoiceList').innerHTML = emptyState('doc', 'No invoices yet',
-          'Create professional invoices with rebate lines, tax calculation, and free text fields matching the Greenwave Ops reference.',
+          'Create professional invoices with rebate lines, tax calculation, and free text fields matching the Invoice 1114 reference.',
           'New invoice', 'newInvoice');
         return;
       }
@@ -1624,7 +1927,7 @@
   }
 
   /* ==========================================================================
-     Authoritative Invoice Editor & Print Layout (Aligned with Greenwave Ops.pdf)
+     Authoritative Invoice Editor & Print Layout (Aligned with Invoice 1114.pdf)
      ========================================================================== */
   function renderEditor() {
     if (!draft) draft = newDraft();
@@ -1635,193 +1938,139 @@
 
     var html =
       '<div class="invoice-doc-container">' +
+        '<div class="invoice-page-1114">' +
 
-        /* PAGE 1: INVOICE HEADER, COMPANY DETAILS, LOGO, BILL TO, SHIP TO, REFERENCE */
-        '<div class="invoice-page invoice-page-1">' +
-          '<div class="inv-doc-top-bar noprint">' +
-            '<span class="inv-page-tag">PAGE 1 / 3 — COMPANY &amp; RECIPIENT</span>' +
-          '</div>' +
-          '<div class="inv-main-heading">INVOICE</div>' +
-
-          '<div class="inv-company-block">' +
-            '<div class="inv-box inv-box-strong"><input type="text" id="edCoName" class="inv-bare-input" value="' + esc(co.name || 'Greenwave Recycling Inc.') + '" placeholder="Company Name"></div>' +
-            '<div class="inv-box"><input type="text" id="edCoBn" class="inv-bare-input" value="' + esc(co.bn || 'BN 751161951BC0001') + '" placeholder="BN Number"></div>' +
-            '<div class="inv-box"><input type="text" id="edCoGst" class="inv-bare-input" value="' + esc(co.gst || 'GST/HST Registration No. 751161951RT0001') + '" placeholder="GST/HST Registration"></div>' +
-            '<div style="height:12px"></div>' +
-            '<div class="inv-box"><input type="text" id="edCoLine1" class="inv-bare-input" value="' + esc(co.line1 || '23394 Fisherman Rd,') + '" placeholder="Address Line 1"></div>' +
-            '<div class="inv-box"><input type="text" id="edCoLine2" class="inv-bare-input" value="' + esc(co.line2 || 'Maple Ridge, BC V2W 1B9') + '" placeholder="City, Province, Postal"></div>' +
-            '<div class="inv-box"><input type="text" id="edCoEmail" class="inv-bare-input" value="' + esc(co.email || 'sales@greenwaverecycling.ca') + '" placeholder="Sales Email"></div>' +
-            '<div class="inv-box"><input type="text" id="edCoPhone" class="inv-bare-input" value="' + esc(co.phone || '6724720423') + '" placeholder="Phone Number"></div>' +
-          '</div>' +
-
-          '<div class="inv-logo-wrap">' +
-            '<img src="assets/logo.png" alt="Greenwave Recycling Inc." class="inv-brand-logo">' +
-          '</div>' +
-
-          '<div class="inv-recipient-section">' +
-            '<div class="inv-field-group">' +
-              '<label class="inv-label">BILL TO</label>' +
-              '<textarea id="edBill" class="inv-textarea-box" rows="4" placeholder="Enter recipient billing name and address">' + esc(draft.billTo) + '</textarea>' +
+          /* 1. TOP HEADER: 3-column layout (Left Title & Registration, Mid Address/Phone, Right Logo) */
+          '<div class="inv-1114-header">' +
+            '<div class="inv-1114-co-left">' +
+              '<h1 class="inv-1114-title">INVOICE</h1>' +
+              '<input type="text" id="edCoName" class="inv-bare-input" style="font-weight:700" value="' + esc(co.name || 'Greenwave Recycling Inc.') + '" placeholder="Company Name">' +
+              '<input type="text" id="edCoBn" class="inv-bare-input" value="' + esc(co.bn || 'BN 751161951BC0001') + '" placeholder="BN Number">' +
+              '<div style="font-size:11.5px;color:#666666;margin-top:3px">GST/HST Registration No.</div>' +
+              '<input type="text" id="edCoGst" class="inv-bare-input" value="' + esc(co.gst || '751161951RT0001') + '" placeholder="GST/HST Registration">' +
             '</div>' +
 
-            '<div class="inv-field-group">' +
-              '<label class="inv-label">SHIP TO</label>' +
-              '<textarea id="edShip" class="inv-textarea-box" rows="4" placeholder="Enter recipient shipping address">' + esc(draft.shipTo) + '</textarea>' +
+            '<div class="inv-1114-co-mid">' +
+              '<div style="height:34px"></div>' +
+              '<input type="text" id="edCoLine1" class="inv-bare-input" value="' + esc(co.line1 || '23394 Fisherman Rd,') + '" placeholder="Address Line 1">' +
+              '<input type="text" id="edCoLine2" class="inv-bare-input" value="' + esc(co.line2 || 'Maple Ridge, BC V2W 1B9') + '" placeholder="City, Province, Postal">' +
+              '<input type="text" id="edCoEmail" class="inv-bare-input" value="' + esc(co.email || 'sales@greenwaverecycling.ca') + '" placeholder="Sales Email">' +
+              '<input type="text" id="edCoPhone" class="inv-bare-input" value="' + esc(co.phone || '6724720423') + '" placeholder="Phone Number">' +
+            '</div>' +
+
+            '<div class="inv-1114-logo-wrap">' +
+              '<img src="assets/logo.png" alt="Greenwave Logo" class="inv-1114-logo-img">' +
+              '<div class="inv-1114-logo-sub">greenwave recycling</div>' +
             '</div>' +
           '</div>' +
 
-          '<div class="inv-dashed-divider"></div>' +
-
-          '<div class="inv-ref-section">' +
-            '<div class="inv-field-group">' +
-              '<label class="inv-label">REFERENCE</label>' +
-              '<input type="text" id="edRef" class="inv-input-box" value="' + esc(draft.reference || '') + '" placeholder="Reference details (e.g. sd)">' +
+          /* 2. BILL TO & SHIP TO SHADED BANNER */
+          '<div class="inv-1114-banner">' +
+            '<div class="inv-1114-banner-col">' +
+              '<label>Bill to</label>' +
+              '<textarea id="edBill" rows="3" placeholder="Customer name and billing address">' + esc(draft.billTo) + '</textarea>' +
             '</div>' +
-            '<div class="inv-field-group">' +
-              '<label class="inv-label">PO REFERENCE</label>' +
-              '<input type="text" id="edPo" class="inv-input-box" value="' + esc(draft.poReference || '') + '" placeholder="PO Number">' +
+            '<div class="inv-1114-banner-col">' +
+              '<label>Ship to</label>' +
+              '<textarea id="edShip" rows="3" placeholder="Customer shipping address">' + esc(draft.shipTo) + '</textarea>' +
             '</div>' +
           '</div>' +
 
-          '<div class="inv-page-footer">' +
-            '<span>https://gwgc.cloud</span>' +
-            '<span>1/3</span>' +
-          '</div>' +
-        '</div>' +
+          /* 3. SHIPPING INFO & INVOICE DETAILS */
+          '<div class="inv-1114-meta-grid">' +
+            '<div class="inv-1114-meta-block">' +
+              '<h4>Shipping info</h4>' +
+              '<div class="inv-1114-meta-row"><label>Ship via:</label><input type="text" id="edShipVia" class="inv-1114-meta-input" value="' + esc(draft.shipVia || 'Greenwave Recycling Truck') + '"></div>' +
+              '<div class="inv-1114-meta-row"><label>Ship date:</label><input type="date" id="edShipDate" class="inv-1114-meta-input" value="' + esc(draft.shipDate || draft.invoiceDate || today()) + '"></div>' +
+            '</div>' +
 
-        /* PAGE 2: FROM, INVOICE DETAILS, LINE ITEMS, WAYS TO PAY, SUBTOTAL */
-        '<div class="invoice-page invoice-page-2">' +
-          '<div class="inv-doc-top-bar noprint">' +
-            '<span class="inv-page-tag">PAGE 2 / 3 — INVOICE DETAILS &amp; LINE ITEMS</span>' +
-          '</div>' +
-
-          '<div class="inv-field-group" style="margin-top:10px">' +
-            '<label class="inv-label">FROM</label>' +
-            '<input type="text" id="edFrom" class="inv-input-box" value="' + esc(draft.fromLocation || 'Maple Ridge, BC') + '" placeholder="Origin facility">' +
-          '</div>' +
-
-          '<div class="inv-sec-title">INVOICE DETAILS</div>' +
-
-          '<div class="inv-field-group">' +
-            '<label class="inv-label">INVOICE NO.</label>' +
-            '<div class="inv-input-box mono" id="edInvNoDisplay" style="background:var(--panel-2);color:var(--ink-2)">' + esc(draft.invoiceNumber || 'assigned on save') + '</div>' +
+            '<div class="inv-1114-meta-block">' +
+              '<h4>Invoice details</h4>' +
+              '<div class="inv-1114-meta-row"><label>Invoice no.:</label><span class="mono" style="font-weight:700">' + esc(draft.invoiceNumber || '1115 (Assigned)') + '</span></div>' +
+              '<div class="inv-1114-meta-row"><label>Terms:</label><input type="text" id="edTerms" class="inv-1114-meta-input" value="' + esc(draft.paymentTerms || 'Net 15') + '"></div>' +
+              '<div class="inv-1114-meta-row"><label>Invoice date:</label><input type="date" id="edDate" class="inv-1114-meta-input" value="' + esc(draft.invoiceDate) + '"></div>' +
+              '<div class="inv-1114-meta-row"><label>Due date:</label><input type="date" id="edDueDate" class="inv-1114-meta-input" value="' + esc(draft.dueDate) + '"></div>' +
+            '</div>' +
           '</div>' +
 
-          '<div class="inv-field-group">' +
-            '<label class="inv-label">INVOICE DATE</label>' +
-            '<input type="date" id="edDate" class="inv-input-box" value="' + esc(draft.invoiceDate) + '">' +
+          /* 4. LINE ITEMS TABLE */
+          '<div class="inv-1114-table-wrap">' +
+            '<table class="inv-1114-table" id="edItemsTable">' +
+              '<thead>' +
+                '<tr>' +
+                  '<th style="width:30px">#</th>' +
+                  '<th style="width:110px">Service Date</th>' +
+                  '<th style="width:120px">Product/service</th>' +
+                  '<th style="width:60px">Unit.</th>' +
+                  '<th>Description</th>' +
+                  '<th class="num" style="width:75px">Qty</th>' +
+                  '<th class="num" style="width:85px">Rate</th>' +
+                  '<th class="num" style="width:90px">Amount</th>' +
+                  '<th style="width:60px">Tax</th>' +
+                  '<th class="noprint" style="width:40px"></th>' +
+                '</tr>' +
+              '</thead>' +
+              '<tbody id="edLinesWrap">' +
+                draft.items.map(function (it, idx) {
+                  var lineAmt = lineAmountDollars(it);
+                  return '<tr data-line="' + idx + '">' +
+                    '<td class="mono" style="font-size:12px;color:#777">' + (idx + 1) + '.</td>' +
+                    '<td><input type="date" class="ed-sdate" value="' + esc(it.serviceDate || draft.invoiceDate || today()) + '"></td>' +
+                    '<td><input type="text" class="ed-pservice" value="' + esc(it.productService || 'supply') + '" placeholder="supply"></td>' +
+                    '<td><input type="text" class="ed-unit" value="' + esc(it.unit || '') + '" placeholder="Unit"></td>' +
+                    '<td><input type="text" class="ed-desc" value="' + esc(it.description || '') + '" placeholder="Description"></td>' +
+                    '<td class="num"><input type="number" step="any" class="ed-qty" style="text-align:right" value="' + (it.quantity != null ? it.quantity : '') + '" placeholder="0"></td>' +
+                    '<td class="num"><input type="number" step="any" class="ed-price" style="text-align:right" value="' + (it.unitPrice != null ? it.unitPrice : '') + '" placeholder="0.00"></td>' +
+                    '<td class="num mono" style="font-weight:700"><span class="ed-line-amount">' + moneyDollars(lineAmt) + '</span></td>' +
+                    '<td><input type="text" class="ed-taxlabel" value="' + esc(it.taxRateLabel || 'GST') + '" style="text-align:center"></td>' +
+                    '<td class="noprint">' + (draft.items.length > 1 ? '<button type="button" class="iconbtn text-crit ed-del-line" title="Delete row"><svg><use href="#i-trash"></use></svg></button>' : '') + '</td>' +
+                  '</tr>';
+                }).join('') +
+              '</tbody>' +
+            '</table>' +
           '</div>' +
 
-          '<div class="inv-field-group">' +
-            '<label class="inv-label">DUE DATE</label>' +
-            '<input type="date" id="edDueDate" class="inv-input-box" value="' + esc(draft.dueDate) + '">' +
-          '</div>' +
-
-          /* LINE ITEMS AREA */
-          '<div class="inv-lines-container" id="edLinesWrap">' +
-            draft.items.map(function (it, idx) {
-              return '<div class="inv-line-card" data-line="' + idx + '">' +
-                '<div class="inv-line-header">' +
-                  '<span class="inv-line-num">#</span>' +
-                  '<span class="inv-line-idx">' + (idx + 1) + '.</span>' +
-                  (draft.items.length > 1 ? '<button type="button" class="btn ghost btn-sm text-crit ed-del-line noprint" title="Remove line item" style="margin-left:auto"><svg><use href="#i-trash"></use></svg> Remove</button>' : '') +
-                '</div>' +
-
-                '<div class="inv-field-group">' +
-                  '<label class="inv-label">DESCRIPTION</label>' +
-                  '<input type="text" class="inv-input-box ed-desc" value="' + esc(it.description) + '" placeholder="Line item description (e.g. sgfs)">' +
-                '</div>' +
-
-                '<div class="grid g2" style="gap:12px">' +
-                  '<div class="inv-field-group">' +
-                    '<label class="inv-label">UNIT</label>' +
-                    '<input type="text" class="inv-input-box ed-unit" value="' + esc(it.unit) + '" placeholder="e.g. 10, kg, cases">' +
-                  '</div>' +
-                  '<div class="inv-field-group">' +
-                    '<label class="inv-label">QTY</label>' +
-                    '<input type="number" step="any" class="inv-input-box ed-qty" value="' + (it.quantity != null ? it.quantity : '') + '" placeholder="0">' +
-                  '</div>' +
-                '</div>' +
-
-                '<div class="grid g2" style="gap:12px">' +
-                  '<div class="inv-field-group">' +
-                    '<label class="inv-label">RATE</label>' +
-                    '<input type="number" step="any" class="inv-input-box ed-price" value="' + (it.unitPrice != null ? it.unitPrice : '') + '" placeholder="0.00">' +
-                  '</div>' +
-                  '<div class="inv-field-group">' +
-                    '<label class="inv-label">DISCOUNT</label>' +
-                    '<input type="number" step="any" class="inv-input-box ed-disc" value="' + (it.discount != null ? it.discount : '') + '" placeholder="0.00">' +
-                  '</div>' +
-                '</div>' +
-
-                '<div class="inv-amount-direction-row">' +
-                  '<div>' +
-                    '<label class="inv-label">AMOUNT</label>' +
-                    '<div class="inv-line-amount-val mono">' + moneyDollars(lineAmountDollars(it)) + '</div>' +
-                  '</div>' +
-                  '<div style="text-align:right">' +
-                    '<label class="inv-label">DIRECTION</label>' +
-                    '<button type="button" class="inv-direction-pill ' + (it.isRebate ? 'pill-rebate' : 'pill-charge') + ' ed-toggle-rebate">' +
-                      (it.isRebate ? 'REBATE' : 'CHARGE') +
-                    '</button>' +
-                  '</div>' +
-                '</div>' +
-              '</div>';
-            }).join('') +
-          '</div>' +
-
-          '<button type="button" class="btn ghost btn-sm noprint" id="edAddLine" style="margin:16px 0">' +
+          '<button type="button" class="btn ghost btn-sm noprint" id="edAddLine" style="margin-bottom:20px">' +
             '<svg><use href="#i-plus"></use></svg> Add Line Item' +
           '</button>' +
 
-          '<div class="inv-field-group" style="margin-top:20px">' +
-            '<label class="inv-label">WAYS TO PAY</label>' +
-            '<textarea id="edWaysToPay" class="inv-textarea-box" rows="2" placeholder="Payment instructions">' + esc(draft.paymentInstructions || 'sales@greenwaverecycling.ca\n6724720423') + '</textarea>' +
-          '</div>' +
-
-          '<div class="inv-subtotal-row">' +
-            '<span class="inv-summary-label">Subtotal</span>' +
-            '<span class="inv-summary-val mono" id="edSubtotalVal">' + moneyDollars(tot.subtotal) + '</span>' +
-          '</div>' +
-
-          '<div class="inv-page-footer">' +
-            '<span>https://gwgc.cloud</span>' +
-            '<span>2/3</span>' +
-          '</div>' +
-        '</div>' +
-
-        /* PAGE 3: TAX CALCULATION (GST @ 5%), GRAND TOTAL */
-        '<div class="invoice-page invoice-page-3">' +
-          '<div class="inv-doc-top-bar noprint">' +
-            '<span class="inv-page-tag">PAGE 3 / 3 — TAX &amp; GRAND TOTAL</span>' +
-          '</div>' +
-
-          '<div class="inv-tax-row">' +
-            '<div class="inv-tax-label-box">' +
-              '<input type="text" id="edTaxLabel" class="inv-bare-input" value="' + esc(draft.taxLabel || 'GST @ 5%') + '" placeholder="Tax Label">' +
+          /* 5. FOOTER: WAYS TO PAY & TOTALS */
+          '<div class="inv-1114-footer-grid">' +
+            '<div class="inv-1114-pay-col">' +
+              '<div class="inv-1114-pay-title">Ways to pay</div>' +
+              '<div class="inv-1114-pay-badges">' +
+                '<span class="pay-badge pay-badge-visa">VISA</span>' +
+                '<span class="pay-badge pay-badge-mc">MasterCard</span>' +
+                '<span class="pay-badge pay-badge-disc">DISCOVER</span>' +
+                '<span class="pay-badge pay-badge-amex">AMEX</span>' +
+                '<span class="pay-badge pay-badge-jcb">JCB</span>' +
+                '<span class="pay-badge pay-badge-bank">BANK</span>' +
+              '</div>' +
+              '<button type="button" class="inv-1114-pay-btn" id="btnViewAndPay">View and pay</button>' +
             '</div>' +
-            '<div class="inv-tax-rate-box">' +
-              '<input type="number" step="any" id="edTaxRate" class="inv-bare-input" value="' + esc(draft.taxRatePct != null ? draft.taxRatePct : 5) + '" style="width:50px;text-align:center"> %' +
+
+            '<div class="inv-1114-totals-block">' +
+              '<div class="inv-1114-total-row">' +
+                '<span>Subtotal</span>' +
+                '<span class="mono" id="edSubtotalVal" style="font-weight:600">' + moneyDollars(tot.subtotal) + '</span>' +
+              '</div>' +
+              '<div class="inv-1114-total-row">' +
+                '<span>' + esc(draft.taxLabel || 'GST @ 5%') + ' on <span id="edTaxBase">' + moneyDollars(tot.subtotal) + '</span></span>' +
+                '<span class="mono" id="edTaxVal" style="font-weight:600">' + moneyDollars(tot.tax) + '</span>' +
+              '</div>' +
+              '<div class="inv-1114-total-row grand">' +
+                '<span>Total</span>' +
+                '<span class="mono" id="edTotalVal">' + moneyDollars(tot.total) + '</span>' +
+              '</div>' +
             '</div>' +
-            '<div class="inv-tax-val mono" id="edTaxVal">' + moneyDollars(tot.tax) + '</div>' +
           '</div>' +
 
-          '<div class="inv-grand-total-row">' +
-            '<span class="inv-grand-label">Total</span>' +
-            '<span class="inv-grand-val mono" id="edTotalVal">' + moneyDollars(tot.total) + '</span>' +
-          '</div>' +
-
-          '<div class="inv-editor-actions noprint" style="margin-top:40px;display:flex;gap:12px;justify-content:flex-end">' +
+          '<div class="inv-editor-actions noprint" style="margin-top:32px;display:flex;gap:12px;justify-content:flex-end">' +
             '<button type="button" class="btn ghost" id="edPrintBottom"><svg><use href="#i-print"></use></svg> Print / PDF</button>' +
             '<button type="button" class="btn btn-primary" id="edSaveBottom"><svg><use href="#i-check"></use></svg> Save Invoice</button>' +
           '</div>' +
 
-          '<div class="inv-page-footer">' +
-            '<span>https://gwgc.cloud</span>' +
-            '<span>3/3</span>' +
-          '</div>' +
         '</div>' +
-
       '</div>';
 
     $('#editorBody').innerHTML = html;
@@ -1830,14 +2079,11 @@
     var syncDraftValues = function () {
       draft.billTo = ($('#edBill') || {}).value || '';
       draft.shipTo = ($('#edShip') || {}).value || '';
-      draft.reference = ($('#edRef') || {}).value || '';
-      draft.poReference = ($('#edPo') || {}).value || '';
-      draft.fromLocation = ($('#edFrom') || {}).value || '';
+      draft.shipVia = ($('#edShipVia') || {}).value || 'Greenwave Recycling Truck';
+      draft.shipDate = ($('#edShipDate') || {}).value || today();
+      draft.paymentTerms = ($('#edTerms') || {}).value || 'Net 15';
       draft.invoiceDate = ($('#edDate') || {}).value || today();
       draft.dueDate = ($('#edDueDate') || {}).value || today();
-      draft.taxLabel = ($('#edTaxLabel') || {}).value || 'GST @ 5%';
-      draft.taxRatePct = parseQty(($('#edTaxRate') || {}).value);
-      draft.paymentInstructions = ($('#edWaysToPay') || {}).value || '';
 
       var coName = ($('#edCoName') || {}).value;
       var coBn = ($('#edCoBn') || {}).value;
@@ -1850,23 +2096,25 @@
       draft.companyInfo = {
         name: coName || 'Greenwave Recycling Inc.',
         bn: coBn || 'BN 751161951BC0001',
-        gst: coGst || 'GST/HST Registration No. 751161951RT0001',
+        gst: coGst || '751161951RT0001',
         line1: coLine1 || '23394 Fisherman Rd,',
         line2: coLine2 || 'Maple Ridge, BC V2W 1B9',
         email: coEmail || 'sales@greenwaverecycling.ca',
         phone: coPhone || '6724720423'
       };
 
-      $$('#edLinesWrap .inv-line-card').forEach(function (card) {
-        var idx = Number(card.dataset.line);
+      $$('#edLinesWrap tr').forEach(function (row) {
+        var idx = Number(row.dataset.line);
         if (draft.items[idx]) {
-          draft.items[idx].description = (card.querySelector('.ed-desc') || {}).value || '';
-          draft.items[idx].unit = (card.querySelector('.ed-unit') || {}).value || '';
-          draft.items[idx].quantity = parseQty((card.querySelector('.ed-qty') || {}).value);
-          draft.items[idx].unitPrice = parseQty((card.querySelector('.ed-price') || {}).value);
-          draft.items[idx].discount = parseQty((card.querySelector('.ed-disc') || {}).value);
+          draft.items[idx].serviceDate = (row.querySelector('.ed-sdate') || {}).value || draft.invoiceDate;
+          draft.items[idx].productService = (row.querySelector('.ed-pservice') || {}).value || 'supply';
+          draft.items[idx].unit = (row.querySelector('.ed-unit') || {}).value || '';
+          draft.items[idx].description = (row.querySelector('.ed-desc') || {}).value || '';
+          draft.items[idx].quantity = parseQty((row.querySelector('.ed-qty') || {}).value);
+          draft.items[idx].unitPrice = parseQty((row.querySelector('.ed-price') || {}).value);
+          draft.items[idx].taxRateLabel = (row.querySelector('.ed-taxlabel') || {}).value || 'GST';
 
-          var amtEl = card.querySelector('.inv-line-amount-val');
+          var amtEl = row.querySelector('.ed-line-amount');
           if (amtEl) amtEl.textContent = moneyDollars(lineAmountDollars(draft.items[idx]));
         }
       });
@@ -1874,6 +2122,8 @@
       var currentTot = totalsLocal(draft);
       var subEl = $('#edSubtotalVal');
       if (subEl) subEl.textContent = moneyDollars(currentTot.subtotal);
+      var taxBaseEl = $('#edTaxBase');
+      if (taxBaseEl) taxBaseEl.textContent = moneyDollars(currentTot.subtotal);
       var taxEl = $('#edTaxVal');
       if (taxEl) taxEl.textContent = moneyDollars(currentTot.tax);
       var totEl = $('#edTotalVal');
@@ -1890,29 +2140,17 @@
     });
 
     $$('.ed-del-line').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        var card = btn.closest('.inv-line-card');
-        var idx = Number(card.dataset.line);
+      btn.addEventListener('click', function () {
+        var row = btn.closest('tr');
+        var idx = Number(row.dataset.line);
         draft.items.splice(idx, 1);
         if (!draft.items.length) draft.items.push(blankLine());
         renderEditor();
       });
     });
 
-    $$('.ed-toggle-rebate').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var card = btn.closest('.inv-line-card');
-        var idx = Number(card.dataset.line);
-        draft.items[idx].isRebate = !draft.items[idx].isRebate;
-        btn.classList.toggle('pill-rebate', draft.items[idx].isRebate);
-        btn.classList.toggle('pill-charge', !draft.items[idx].isRebate);
-        btn.textContent = draft.items[idx].isRebate ? 'REBATE' : 'CHARGE';
-        syncDraftValues();
-      });
-    });
-
     var doPrint = function () { window.print(); };
-    $('#edPrint').onclick = doPrint;
+    if ($('#edPrint')) $('#edPrint').onclick = doPrint;
     var printBottom = $('#edPrintBottom');
     if (printBottom) printBottom.onclick = doPrint;
 
@@ -1925,8 +2163,10 @@
         dueDate: draft.dueDate || today(),
         billTo: draft.billTo || '',
         shipTo: draft.shipTo || '',
+        shipVia: draft.shipVia || 'Greenwave Recycling Truck',
+        shipDate: draft.shipDate || draft.invoiceDate || today(),
+        paymentTerms: draft.paymentTerms || 'Net 15',
         poReference: draft.poReference || '',
-        paymentTerms: String(draft.termsDays || 15) + ' days',
         companyInfo: draft.companyInfo,
         paymentInstructions: draft.paymentInstructions,
         notes: draft.reference || '',
@@ -1934,8 +2174,11 @@
         taxRate: Number(draft.taxRatePct) || 5,
         items: draft.items.map(function (it) {
           return {
+            serviceDate: it.serviceDate || draft.invoiceDate,
+            productService: it.productService || 'supply',
             description: it.description || 'General Service',
             unit: it.unit || '',
+            taxRateLabel: it.taxRateLabel || 'GST',
             quantity: Number(it.quantity) || 1,
             unitPrice: Number(it.unitPrice) || 0,
             discount: Number(it.discount) || 0,

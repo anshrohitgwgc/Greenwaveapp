@@ -1,5 +1,7 @@
 import {
   IsDateString,
+  IsIn,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -47,29 +49,50 @@ export class CreateContainerDto {
   materialId?: string;
 
   @IsOptional()
-  @IsNumber()
+  @IsInt({ message: 'Quantity values must be whole numbers (no decimal fractions)' })
   @Min(0)
   xl?: number;
 
   @IsOptional()
-  @IsNumber()
+  @IsInt({ message: 'Quantity values must be whole numbers (no decimal fractions)' })
   @Min(0)
   l?: number;
 
   @IsOptional()
-  @IsNumber()
+  @IsInt({ message: 'Quantity values must be whole numbers (no decimal fractions)' })
   @Min(0)
   m?: number;
 
   @IsOptional()
-  @IsNumber()
+  @IsInt({ message: 'Quantity values must be whole numbers (no decimal fractions)' })
   @Min(0)
   s?: number;
 
   @IsOptional()
-  @IsNumber()
+  @IsInt({ message: 'Quantity values must be whole numbers (no decimal fractions)' })
   @Min(0)
   total?: number;
+
+  @IsOptional()
+  @IsIn(['pallet', 'box'], { message: 'unitType must be either pallet or box' })
+  unitType?: 'pallet' | 'box';
+
+  @IsOptional()
+  @IsIn(['recycling', 'healthcare'], { message: 'division must be either recycling or healthcare' })
+  division?: 'recycling' | 'healthcare';
+
+  @IsOptional()
+  @IsNumber({}, { message: 'weightValue must be a number' })
+  @Min(0)
+  weightValue?: number;
+
+  @IsOptional()
+  @IsIn(['kg', 'lb'], { message: 'weightUnit must be either kg or lb' })
+  weightUnit?: 'kg' | 'lb';
+
+  @IsOptional()
+  @IsUUID()
+  photoId?: string;
 
   @IsOptional()
   @IsDateString()
