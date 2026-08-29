@@ -23,7 +23,11 @@ export class Timesheet {
   @CreateDateColumn({ name: 'clock_in' })
   clockIn: Date;
 
-  @Column({ name: 'clock_out', type: 'timestamp with time zone', nullable: true })
+  @Column({
+    name: 'clock_out',
+    type: process.env.NODE_ENV === 'test' ? 'datetime' : 'timestamptz',
+    nullable: true,
+  })
   clockOut: Date | null;
 
   @CreateDateColumn({ name: 'created_at' })

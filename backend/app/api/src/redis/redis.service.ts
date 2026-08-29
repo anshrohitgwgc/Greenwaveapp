@@ -9,7 +9,9 @@ export class RedisService implements OnModuleInit {
   constructor(private configService: ConfigService) {}
 
   async onModuleInit() {
+    const password = this.configService.get<string>('REDIS_PASSWORD');
     this.client = createClient({
+      password: password || undefined,
       socket: {
         host: this.configService.get<string>('REDIS_HOST'),
         port: Number(this.configService.get<string>('REDIS_PORT')),

@@ -391,10 +391,8 @@
       }
     }
 
-    var w = warehouse();
-    var prov = (w && w.province) || 'BC';
     var taxNoteEl = $('#taxNote');
-    if (taxNoteEl) taxNoteEl.textContent = w ? prov + ' · ' + taxFor(prov).label : '';
+    if (taxNoteEl) taxNoteEl.textContent = '';
 
     renderTabbar();
     renderShiftChip();
@@ -2086,7 +2084,7 @@
 
   function newDraft() {
     var w = warehouse();
-    var t = w ? taxRule(w.province) : { label: 'GST @ 5%', rate: 0.05 };
+    var t = w ? taxFor(w.province) : { label: 'GST @ 5%', rate: 0.05 };
     var co = db.company || {};
     return {
       id: null,
@@ -2531,18 +2529,25 @@
         })
       };
 
-      var btnTop = $('#edSave'); if (btnTop) btnTop.disabled = true;
-      var btnBottom = $('#edSaveBottom'); if (btnBottom) btnBottom.disabled = true;
+      var btnTop = $('#edSave');
+      var btnBottom = $('#edSaveBottom');
+      if (btnTop) { btnTop.disabled = true; btnTop.textContent = 'Saving…'; }
+      if (btnBottom) { btnBottom.disabled = true; btnBottom.textContent = 'Saving…'; }
+
+      var resetButtons = function () {
+        if (btnTop) { btnTop.disabled = false; btnTop.innerHTML = '<svg><use href="#i-check"></use></svg>Save invoice'; }
+        if (btnBottom) { btnBottom.disabled = false; btnBottom.innerHTML = '<svg><use href="#i-check"></use></svg>Save Invoice'; }
+      };
 
       var req = draft.id ? Api.updateInvoice(draft.id, payload) : Api.createInvoice(payload);
       req.then(function (res) {
-        toast('Invoice saved (#' + res.invoiceNumber + ').');
+        resetButtons();
+        toast('Invoice #' + res.invoiceNumber + ' created successfully.');
         draft = null;
         show('invoices');
       }).catch(function (err) {
-        if (btnTop) btnTop.disabled = false;
-        if (btnBottom) btnBottom.disabled = false;
-        toast(err.message || 'Could not save invoice.');
+        resetButtons();
+        toast(err.message || 'Unable to save invoice. Please check all fields.');
       });
     };
 
@@ -2606,15 +2611,18 @@
       if (!sBody) return;
 
       sBody.innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
-        '<th>Staff Name</th><th>Email</th><th>Role</th><th>Assigned Facilities</th><th>Actions</th></tr></thead><tbody>' +
+        '<th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Facilities</th><th>Created</th><th>Actions</th></tr></thead><tbody>' +
         users.map(function (u) {
           var assignedWhNames = (u.warehouses && u.warehouses.length)
             ? deduplicateWarehouses(u.warehouses).map(function (w) { return esc(w.name); }).join(', ')
             : (u.role === 'admin' ? '<em style="color:var(--muted)">All Facilities (Admin)</em>' : '<span style="color:var(--crit)">None</span>');
+          var createdDate = u.createdAt ? String(u.createdAt).slice(0, 10) : '—';
 
           return '<tr data-user-id="' + esc(u.id) + '"><td><strong>' + esc(u.name || u.fullName) + '</strong></td><td>' + esc(u.email) + '</td>' +
-            '<td><span class="badge ' + (u.role === 'admin' ? 'badge-in' : 'badge-transit') + '">' + esc(u.role) + '</span></td>' +
+            '<td><span class="badge ' + (u.role === 'admin' ? 'badge-in' : (u.role === 'manager' ? 'badge-transit' : 'badge-received')) + '">' + esc(u.role) + '</span></td>' +
+            '<td><span class="badge badge-in">Active</span></td>' +
             '<td>' + assignedWhNames + '</td>' +
+            '<td class="mono" style="font-size:12.5px">' + esc(createdDate) + '</td>' +
             '<td><button type="button" class="btn ghost btn-sm btn-edit-user-access" data-user-id="' + esc(u.id) + '">Edit Facilities</button></td></tr>';
         }).join('') + '</tbody></table></div></div>';
 
@@ -2971,15 +2979,15 @@
           var allWhs = deduplicateWarehouses(whs || []);
           var whCheckboxes = allWhs.map(function (w) {
             return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer">' +
-              '<input type="checkbox" name="wh_' + esc(w.id) + '" value="' + esc(w.id) + '"> ' +
+              '<input type="checkbox" name="wh_' + esc(w.id) + '" class="staff-wh-check" value="' + esc(w.id) + '"> ' +
               '<span><strong>' + esc(w.name) + '</strong> (' + esc(w.code) + ')</span>' +
             '</label>';
           }).join('');
 
-          openModal('Add Staff Member',
-            field('fullName', 'Full Name', { required: true }) +
-            field('email', 'Work Email', { type: 'email', required: true }) +
-            field('password', 'Temporary Password', { type: 'password', required: true, help: 'Min 8 chars' }) +
+          openModal('Create Application User',
+            field('fullName', 'Full Name', { required: true, placeholder: 'e.g. John Smith' }) +
+            field('email', 'Work Email', { type: 'email', required: true, placeholder: 'john@greenwaverecycling.ca' }) +
+            field('password', 'Initial Password', { type: 'password', required: true, help: 'Min 8 chars with uppercase, lowercase, and number' }) +
             field('role', 'Role', {
               type: 'select',
               options: [
@@ -2989,27 +2997,46 @@
                 { value: 'admin', label: 'Administrator (Full Access)' }
               ]
             }) +
-            '<div style="margin-top:10px"><label style="font-size:12px;font-weight:700;color:var(--muted)">ASSIGN INITIAL FACILITIES</label>' +
-            '<div style="background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--r);padding:8px 12px;margin-top:4px">' +
+            '<div style="margin-top:12px"><label style="font-size:12px;font-weight:700;color:var(--muted)">FACILITY ACCESS</label>' +
+            '<div style="background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--r);padding:10px 14px;margin-top:4px">' +
+              '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;margin-bottom:6px;border-bottom:1px solid var(--line-2);cursor:pointer;font-weight:600">' +
+                '<input type="checkbox" id="whAllCheck"> <span>All Facilities</span>' +
+              '</label>' +
               (whCheckboxes || '<em style="color:var(--muted)">No facilities available</em>') +
             '</div></div>',
             function (fd) {
+              if (!fd.fullName || !fd.email || !fd.password) {
+                toast('Please fill in all required user fields.');
+                return Promise.reject(new Error('Required fields missing'));
+              }
+              if (fd.password.length < 8 || !/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(fd.password)) {
+                toast('Password must contain at least 8 characters with 1 uppercase, 1 lowercase, and 1 number.');
+                return Promise.reject(new Error('Password complexity requirements not met'));
+              }
+
               var selectedWhIds = [];
               allWhs.forEach(function (w) {
                 if (fd['wh_' + w.id]) selectedWhIds.push(w.id);
               });
 
               return Api.createUser({
-                fullName: fd.fullName,
-                email: fd.email,
+                fullName: fd.fullName.trim(),
+                email: fd.email.trim(),
                 password: fd.password,
                 role: fd.role,
                 warehouseIds: selectedWhIds
               }).then(function () {
-                toast('Staff account created.');
+                toast('User account created successfully.');
                 renderStaff();
               });
             });
+
+          var allCheck = $('#whAllCheck');
+          if (allCheck) {
+            allCheck.onchange = function () {
+              $$('.staff-wh-check').forEach(function (cb) { cb.checked = allCheck.checked; });
+            };
+          }
         });
       });
     }

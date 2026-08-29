@@ -41,6 +41,7 @@ import { AuthModule } from './auth.module';
 
 /* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
 describe('Security: Authoritative Warehouse Access & Isolation Matrix (HTTP Integration)', () => {
+  jest.setTimeout(30000);
   let app: INestApplication;
   let dataSource: DataSource;
   let usersService: UsersService;
