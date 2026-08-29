@@ -22,6 +22,7 @@ import { UploadPhotoMetadataDto } from './dto/upload-photo-metadata.dto';
 import { PhotosService } from './photos.service';
 
 const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
+const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 @Controller('photos')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -38,6 +39,13 @@ export class PhotosController {
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     if (!file) throw new BadRequestException('file is required');
+    // FileInterceptor enforces size but not content type — this endpoint
+    // otherwise accepted any file (confirmed uploading a .txt during Gate 1
+    // staging testing), which is a real stored-content risk (MinIO would
+    // happily serve back whatever was uploaded, Content-Type and all).
+    if (!ALLOWED_MIME.has(file.mimetype)) {
+      throw new BadRequestException('Only JPEG, PNG or WebP images are accepted');
+    }
     return this.photosService.upload(file, meta, actor);
   }
 
