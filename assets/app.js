@@ -987,7 +987,7 @@
                 '<select name="weightUnit" class="weight-unit-select"><option value="kg" selected>KG</option><option value="lb">LB</option></select>' +
               '</div>' +
             '</div>' +
-            '<div class="field"><label>Pallet Quantity</label><input type="number" name="palletQty" min="1" step="1" placeholder="e.g. 3" required class="pallet-input"></div>' +
+            '<div class="field"><label>Pallet Quantity</label><input type="number" name="palletQty" min="1" step="any" placeholder="e.g. 3" required class="pallet-input"></div>' +
           '</div>' +
           '<div class="grid g2">' +
             '<div class="field"><label>Container Number (e.g. MSMU 6896930)</label><input type="text" name="containerNumber" placeholder="MSMU 6896930"></div>' +
@@ -1035,10 +1035,10 @@
           '</div>' +
           '<label style="font-size:13px;font-weight:600;margin-top:10px;display:block">Quantities by Size (Whole BOX counts only)</label>' +
           '<div class="sizes-grid">' +
-            '<div class="field"><label>XL</label><input type="number" name="xl" min="0" step="1" placeholder="0" class="size-input"></div>' +
-            '<div class="field"><label>L</label><input type="number" name="l" min="0" step="1" placeholder="0" class="size-input"></div>' +
-            '<div class="field"><label>M</label><input type="number" name="m" min="0" step="1" placeholder="0" class="size-input"></div>' +
-            '<div class="field"><label>S</label><input type="number" name="s" min="0" step="1" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>XL</label><input type="number" name="xl" min="0" step="any" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>L</label><input type="number" name="l" min="0" step="any" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>M</label><input type="number" name="m" min="0" step="any" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>S</label><input type="number" name="s" min="0" step="any" placeholder="0" class="size-input"></div>' +
           '</div>' +
           '<div class="total-preview-box">' +
             '<span class="total-preview-label">Total Boxes (XL + L + M + S):</span>' +
@@ -1079,8 +1079,14 @@
         var xl = 0, l = 0, m = 0, s = 0, total = 0, weightVal, weightUnit;
 
         if (isRec) {
-          var pQty = parseWhole(fd.palletQty);
-          if (pQty <= 0) { toast('Please enter a valid Pallet Quantity.'); return Promise.reject(new Error('Zero pallet quantity')); }
+          var pQty = 0;
+          try {
+            pQty = parseWhole(fd.palletQty);
+          } catch (e) {
+            toast(e.message);
+            return Promise.reject(e);
+          }
+          if (pQty <= 0) { toast('Please enter a valid Pallet Quantity.'); return Promise.reject(new Error('Please enter a valid Pallet Quantity.')); }
           total = pQty;
           xl = pQty;
           l = 0; m = 0; s = 0;
@@ -1088,7 +1094,7 @@
           weightVal = fd.weightValue ? Number(fd.weightValue) : undefined;
           if (weightVal !== undefined && (isNaN(weightVal) || weightVal < 0)) {
             toast('Weight value must be a positive number.');
-            return Promise.reject(new Error('Invalid weight'));
+            return Promise.reject(new Error('Weight value must be a positive number.'));
           }
           weightUnit = fd.weightUnit || 'kg';
         } else {
@@ -1102,7 +1108,7 @@
             return Promise.reject(e);
           }
           total = xl + l + m + s;
-          if (total <= 0) { toast('Please enter a box quantity for at least one size.'); return Promise.reject(new Error('Zero quantity')); }
+          if (total <= 0) { toast('Please enter a box quantity for at least one size.'); return Promise.reject(new Error('Please enter a box quantity for at least one size.')); }
           weightVal = undefined;
           weightUnit = undefined;
         }
@@ -1240,7 +1246,7 @@
             mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>'; }).join('') +
           '</select></div>' +
           '<div class="grid g2">' +
-            '<div class="field"><label>Pallet Quantity to Dispatch</label><input type="number" name="palletQty" min="1" step="1" placeholder="e.g. 3" required class="pallet-input"></div>' +
+            '<div class="field"><label>Pallet Quantity to Dispatch</label><input type="number" name="palletQty" min="1" step="any" placeholder="e.g. 3" required class="pallet-input"></div>' +
             '<div class="field"><label>Container / Trailer # (optional)</label><input type="text" name="containerNumber" placeholder="MSMU 6896930 / Trailer"></div>' +
           '</div>' +
           '<div class="field"><label>Seal Number (optional)</label><input type="text" name="sealNumber" placeholder="0336695"></div>' +
@@ -1268,10 +1274,10 @@
           '</div>' +
           '<label style="font-size:13px;font-weight:600;margin-top:10px;display:block">Quantities to Dispatch (Whole BOX counts only)</label>' +
           '<div class="sizes-grid">' +
-            '<div class="field"><label>XL</label><input type="number" name="xl" min="0" step="1" placeholder="0" class="size-input"></div>' +
-            '<div class="field"><label>L</label><input type="number" name="l" min="0" step="1" placeholder="0" class="size-input"></div>' +
-            '<div class="field"><label>M</label><input type="number" name="m" min="0" step="1" placeholder="0" class="size-input"></div>' +
-            '<div class="field"><label>S</label><input type="number" name="s" min="0" step="1" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>XL</label><input type="number" name="xl" min="0" step="any" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>L</label><input type="number" name="l" min="0" step="any" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>M</label><input type="number" name="m" min="0" step="any" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>S</label><input type="number" name="s" min="0" step="any" placeholder="0" class="size-input"></div>' +
           '</div>' +
           '<div class="total-preview-box">' +
             '<span class="total-preview-label">Calculated Outbound Total:</span>' +
@@ -1292,8 +1298,14 @@
 
         var xl = 0, l = 0, m = 0, s = 0, total = 0;
         if (isRec) {
-          var pQty = parseWhole(fd.palletQty);
-          if (pQty <= 0) { toast('Please enter a valid Pallet Quantity.'); return Promise.reject(new Error('Zero quantity')); }
+          var pQty = 0;
+          try {
+            pQty = parseWhole(fd.palletQty);
+          } catch (e) {
+            toast(e.message);
+            return Promise.reject(e);
+          }
+          if (pQty <= 0) { toast('Please enter a valid Pallet Quantity.'); return Promise.reject(new Error('Please enter a valid Pallet Quantity.')); }
           total = pQty;
           xl = pQty;
           l = 0; m = 0; s = 0;
@@ -1308,7 +1320,7 @@
             return Promise.reject(e);
           }
           total = xl + l + m + s;
-          if (total <= 0) { toast('Please enter a box quantity for at least one size.'); return Promise.reject(new Error('Zero quantity')); }
+          if (total <= 0) { toast('Please enter a box quantity for at least one size.'); return Promise.reject(new Error('Please enter a box quantity for at least one size.')); }
         }
 
         var payload = {
@@ -1377,7 +1389,7 @@
             mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>'; }).join('') +
           '</select></div>' +
           '<div class="field"><label>Reason for Adjustment (Required)</label><input type="text" name="reason" placeholder="e.g. physical recount, corrected pallet count" required></div>' +
-          '<div class="field"><label>Pallet Adjustment Quantity (+ / -)</label><input type="number" name="palletQty" step="1" placeholder="e.g. +2 or -1" required class="pallet-input"></div>' +
+          '<div class="field"><label>Pallet Adjustment Quantity (+ / -)</label><input type="number" name="palletQty" step="any" placeholder="e.g. +2 or -1" required class="pallet-input"></div>' +
           '<div class="total-preview-box">' +
             '<span class="total-preview-label">Net Adjustment Total:</span>' +
             '<span class="total-preview-val text-accent" id="modalAutoTotal">0 PALLETS</span>' +
@@ -1394,10 +1406,10 @@
           '<div class="field"><label>Reason for Adjustment (Required)</label><input type="text" name="reason" placeholder="e.g. physical recount, adjusted 5 units to match count" required></div>' +
           '<label style="font-size:13px;font-weight:600;margin-top:10px;display:block">Adjustment Quantities (Whole BOX counts only)</label>' +
           '<div class="sizes-grid">' +
-            '<div class="field"><label>XL</label><input type="number" name="xl" step="1" placeholder="0" class="size-input"></div>' +
-            '<div class="field"><label>L</label><input type="number" name="l" step="1" placeholder="0" class="size-input"></div>' +
-            '<div class="field"><label>M</label><input type="number" name="m" step="1" placeholder="0" class="size-input"></div>' +
-            '<div class="field"><label>S</label><input type="number" name="s" step="1" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>XL</label><input type="number" name="xl" step="any" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>L</label><input type="number" name="l" step="any" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>M</label><input type="number" name="m" step="any" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label>S</label><input type="number" name="s" step="any" placeholder="0" class="size-input"></div>' +
           '</div>' +
           '<div class="total-preview-box">' +
             '<span class="total-preview-label">Net Adjustment Total:</span>' +
@@ -1407,7 +1419,7 @@
 
       openModal('Adjust Stock Balance (' + (isRec ? 'PALLETS' : 'BOXES') + ')', formHtml, function (fd) {
         var reason = (fd.reason || '').trim();
-        if (!reason) { toast('Adjustment reason is required.'); return Promise.reject(new Error('Reason required')); }
+        if (!reason) { toast('Adjustment reason is required.'); return Promise.reject(new Error('Adjustment reason is required.')); }
 
         var parseWholeAdj = function (val) {
           if (!val || val === '') return 0;
@@ -1420,8 +1432,14 @@
 
         var xl = 0, l = 0, m = 0, s = 0, total = 0;
         if (isRec) {
-          var pQty = parseWholeAdj(fd.palletQty);
-          if (pQty === 0) { toast('Please enter a non-zero adjustment quantity.'); return Promise.reject(new Error('Zero adjustment')); }
+          var pQty = 0;
+          try {
+            pQty = parseWholeAdj(fd.palletQty);
+          } catch (e) {
+            toast(e.message);
+            return Promise.reject(e);
+          }
+          if (pQty === 0) { toast('Please enter a non-zero adjustment quantity.'); return Promise.reject(new Error('Please enter a non-zero adjustment quantity.')); }
           total = pQty;
           xl = pQty;
           l = 0; m = 0; s = 0;
@@ -1436,7 +1454,7 @@
             return Promise.reject(e);
           }
           total = xl + l + m + s;
-          if (total === 0 && !xl && !l && !m && !s) { toast('Enter adjustment values.'); return Promise.reject(new Error('Zero adjustment')); }
+          if (total === 0 && !xl && !l && !m && !s) { toast('Please enter an adjustment quantity.'); return Promise.reject(new Error('Please enter an adjustment quantity.')); }
         }
 
         var payload = {
@@ -2043,16 +2061,23 @@
     }).catch(function (err) { apiErrorState('#clockBody', err); });
   }
 
+  var clockInFlight = false;
   function toggleClock() {
+    if (clockInFlight) return;
+    clockInFlight = true;
     var btn = $('#clockBtn'); if (btn) { btn.disabled = true; btn.textContent = 'Processing…'; }
     var open = currentShiftCache;
-    var call = open ? Api.clockOut() : Api.clockIn(warehouseId);
+    var w = warehouse();
+    var wId = w ? w.id : undefined;
+    var call = open ? Api.clockOut() : Api.clockIn(wId);
     call.then(function () {
+      clockInFlight = false;
       toast(open ? 'Clocked out.' : 'Clocked in.');
       refreshShiftChip().then(function () {
         renderTimeclock();
       });
     }).catch(function (err) {
+      clockInFlight = false;
       if (btn) btn.disabled = false;
       toast(err.status === 409 ? 'You are already clocked in.' : (err.message || 'Could not update shift.'));
       renderTimeclock();
@@ -2726,10 +2751,35 @@
         var fd = {};
         new FormData(formEl).forEach(function (v, k) { fd[k] = v; });
         if (typeof onSave === 'function') {
-          var res = onSave(fd);
+          if (okBtn) {
+            okBtn.disabled = true;
+            okBtn.dataset.origText = okBtn.textContent;
+            okBtn.textContent = 'Saving…';
+          }
+          var resetOkBtn = function () {
+            if (okBtn) {
+              okBtn.disabled = false;
+              okBtn.textContent = okBtn.dataset.origText || 'Save';
+            }
+          };
+          var res;
+          try {
+            res = onSave(fd);
+          } catch (err) {
+            resetOkBtn();
+            toast(err.message || 'Action failed.');
+            return;
+          }
           if (res && typeof res.then === 'function') {
-            res.then(close).catch(function (err) { toast(err.message || 'Action failed.'); });
+            res.then(function () {
+              resetOkBtn();
+              close();
+            }).catch(function (err) {
+              resetOkBtn();
+              toast(err.message || 'Action failed.');
+            });
           } else {
+            resetOkBtn();
             close();
           }
         } else {
