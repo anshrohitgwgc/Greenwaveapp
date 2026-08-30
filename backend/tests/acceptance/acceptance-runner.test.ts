@@ -326,8 +326,37 @@ describe('GreenWave V2: Full Acceptance & Security Matrix (All 28 Test Items)', 
       assert.ok(html.includes('id="invoicePaymentKpis"'));
       assert.ok(appJs.includes('renderPublicPaymentPortal'));
       assert.ok(appJs.includes('renderStaff'));
+      assert.ok(appJs.includes('openUserDetailModal'));
       assert.ok(appJs.includes('getPaymentLink'));
       assert.ok(appJs.includes('sendInvoiceEmail'));
+    });
+
+    it('Management Portal UI provides role descriptions and global access warning', () => {
+      const appJs = fs.readFileSync(path.join(__dirname, '../../../assets/app.js'), 'utf8');
+      assert.ok(appJs.includes('Role Permissions Guide'));
+      assert.ok(appJs.includes('ADMIN'));
+      assert.ok(appJs.includes('MANAGER'));
+      assert.ok(appJs.includes('STAFF'));
+      assert.ok(appJs.includes('DRIVER'));
+      assert.ok(appJs.includes('Warning: All Facilities provides unrestricted access'));
+    });
+
+    it('User Detail Panel provides permissions breakdown and facility badges without secrets', () => {
+      const appJs = fs.readFileSync(path.join(__dirname, '../../../assets/app.js'), 'utf8');
+      const css = fs.readFileSync(path.join(__dirname, '../../../assets/app.css'), 'utf8');
+      assert.ok(appJs.includes('Effective Permission Keys'));
+      assert.ok(appJs.includes('perm-chip'));
+      assert.ok(css.includes('.user-detail-grid'));
+      assert.ok(css.includes('.perm-chip'));
+    });
+
+    it('Audit History Explorer formats readable Who, What, When, and Facility badges', () => {
+      const appJs = fs.readFileSync(path.join(__dirname, '../../../assets/app.js'), 'utf8');
+      const css = fs.readFileSync(path.join(__dirname, '../../../assets/app.css'), 'utf8');
+      assert.ok(appJs.includes('audit-card'));
+      assert.ok(appJs.includes('audit-wh-badge'));
+      assert.ok(css.includes('.audit-card'));
+      assert.ok(css.includes('.audit-wh-badge'));
     });
   });
 

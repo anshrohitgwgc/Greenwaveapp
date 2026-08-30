@@ -2768,6 +2768,9 @@
     }
   }
 
+  var staffSearchQuery = '';
+  var staffRoleFilter = '';
+
   function renderStaff() {
     if (!isAdmin()) return;
     loadingState('#staffBody');
@@ -2781,28 +2784,93 @@
       var sBody = $('#staffBody');
       if (!sBody) return;
 
-      sBody.innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
-        '<th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Warehouse Access</th><th>Created</th><th>Last Login</th><th>Actions</th></tr></thead><tbody>' +
-        users.map(function (u) {
-          var assignedWhNames = (u.warehouses && u.warehouses.length)
-            ? deduplicateWarehouses(u.warehouses).map(function (w) { return esc(w.name); }).join(', ')
-            : (u.role === 'admin' ? '<em style="color:var(--muted)">All Facilities (Global Admin)</em>' : '<span style="color:var(--crit)">None</span>');
-          var createdDate = u.createdAt ? String(u.createdAt).slice(0, 10) : '—';
-          var uStatus = (u.status || 'active').toLowerCase();
-          var statusBadgeClass = uStatus === 'active' ? 'badge-active' : (uStatus === 'suspended' ? 'badge-failed' : 'badge-inactive');
-          var statusLabel = uStatus.charAt(0).toUpperCase() + uStatus.slice(1);
-          var lastLoginHtml = formatLastLogin(u.lastLoginAt);
+      var filteredUsers = users.slice();
+      if (staffRoleFilter) {
+        filteredUsers = filteredUsers.filter(function (u) { return (u.role || '').toLowerCase() === staffRoleFilter.toLowerCase(); });
+      }
+      if (staffSearchQuery) {
+        var sq = staffSearchQuery.toLowerCase();
+        filteredUsers = filteredUsers.filter(function (u) {
+          return (u.name || u.fullName || '').toLowerCase().indexOf(sq) >= 0 ||
+                 (u.email || '').toLowerCase().indexOf(sq) >= 0;
+        });
+      }
 
-          return '<tr data-user-id="' + esc(u.id) + '">' +
-            '<td><strong>' + esc(u.name || u.fullName) + '</strong></td>' +
-            '<td>' + esc(u.email) + '</td>' +
-            '<td><span class="badge ' + (u.role === 'admin' ? 'badge-in' : (u.role === 'manager' ? 'badge-transit' : 'badge-received')) + '">' + esc(u.role) + '</span></td>' +
-            '<td><span class="badge ' + statusBadgeClass + '">' + statusLabel + '</span></td>' +
-            '<td>' + assignedWhNames + '</td>' +
-            '<td class="mono" style="font-size:12.5px">' + esc(createdDate) + '</td>' +
-            '<td class="mono" style="font-size:12.5px">' + lastLoginHtml + '</td>' +
-            '<td><button type="button" class="btn ghost btn-sm btn-edit-user" data-user-id="' + esc(u.id) + '">Edit User</button></td></tr>';
-        }).join('') + '</tbody></table></div></div>';
+      var roleCounts = { admin: 0, manager: 0, staff: 0, driver: 0 };
+      users.forEach(function (u) {
+        var r = (u.role || 'staff').toLowerCase();
+        if (roleCounts[r] !== undefined) roleCounts[r]++;
+      });
+
+      var toolbarHtml = '<div class="inven-toolbar" style="margin-bottom:14px">' +
+        '<div class="inven-tabs" id="staffFilterTabs" role="tablist">' +
+          '<button type="button" class="inven-tab ' + (!staffRoleFilter ? 'active' : '') + '" data-staff-filter="" role="tab">All Staff (' + users.length + ')</button>' +
+          '<button type="button" class="inven-tab ' + (staffRoleFilter === 'admin' ? 'active' : '') + '" data-staff-filter="admin" role="tab">Admins (' + roleCounts.admin + ')</button>' +
+          '<button type="button" class="inven-tab ' + (staffRoleFilter === 'manager' ? 'active' : '') + '" data-staff-filter="manager" role="tab">Managers (' + roleCounts.manager + ')</button>' +
+          '<button type="button" class="inven-tab ' + (staffRoleFilter === 'staff' ? 'active' : '') + '" data-staff-filter="staff" role="tab">Staff (' + roleCounts.staff + ')</button>' +
+          '<button type="button" class="inven-tab ' + (staffRoleFilter === 'driver' ? 'active' : '') + '" data-staff-filter="driver" role="tab">Drivers (' + roleCounts.driver + ')</button>' +
+        '</div>' +
+        '<div class="inven-filters">' +
+          '<div class="search-wrap">' +
+            '<svg class="search-ico"><use href="#i-search"></use></svg>' +
+            '<input type="search" id="staffSearchInput" placeholder="Search staff by name or email..." value="' + esc(staffSearchQuery) + '">' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+
+      var rowsHtml = filteredUsers.map(function (u) {
+        var assignedWhNames = (u.warehouses && u.warehouses.length)
+          ? deduplicateWarehouses(u.warehouses).map(function (w) {
+              return '<span class="audit-wh-badge">' + esc(w.name) + '</span>';
+            }).join(' ')
+          : (u.role === 'admin' ? '<span class="perm-chip" style="background:#E0F2FE;color:#0369A1;border-color:#BAE6FD">🌐 All Facilities (Global Admin)</span>' : '<span style="color:var(--crit);font-size:12px;font-weight:600">No Facilities Assigned</span>');
+        var createdDate = u.createdAt ? String(u.createdAt).slice(0, 10) : '—';
+        var uStatus = (u.status || 'active').toLowerCase();
+        var statusBadgeClass = uStatus === 'active' ? 'badge-active' : (uStatus === 'suspended' ? 'badge-failed' : 'badge-inactive');
+        var statusLabel = uStatus.charAt(0).toUpperCase() + uStatus.slice(1);
+        var lastLoginHtml = formatLastLogin(u.lastLoginAt);
+
+        return '<tr data-user-id="' + esc(u.id) + '">' +
+          '<td><strong>' + esc(u.name || u.fullName) + '</strong></td>' +
+          '<td><span class="mono" style="font-size:13px">' + esc(u.email) + '</span></td>' +
+          '<td><span class="badge ' + (u.role === 'admin' ? 'badge-in' : (u.role === 'manager' ? 'badge-transit' : 'badge-received')) + '">' + esc(u.role) + '</span></td>' +
+          '<td><span class="badge ' + statusBadgeClass + '">' + statusLabel + '</span></td>' +
+          '<td><div style="display:flex;flex-wrap:wrap;gap:4px">' + assignedWhNames + '</div></td>' +
+          '<td class="mono" style="font-size:12.5px">' + esc(createdDate) + '</td>' +
+          '<td class="mono" style="font-size:12.5px">' + lastLoginHtml + '</td>' +
+          '<td><div style="display:flex;gap:6px">' +
+            '<button type="button" class="btn ghost btn-sm btn-view-user" data-user-id="' + esc(u.id) + '" title="View user details & permissions">View</button>' +
+            '<button type="button" class="btn ghost btn-sm btn-edit-user" data-user-id="' + esc(u.id) + '" title="Edit user role & facility permissions">Edit</button>' +
+          '</div></td></tr>';
+      }).join('');
+
+      sBody.innerHTML = toolbarHtml + '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
+        '<th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Warehouse Access</th><th>Created</th><th>Last Login</th><th>Actions</th></tr></thead><tbody>' +
+        (rowsHtml || '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:30px">No matching staff accounts found.</td></tr>') +
+        '</tbody></table></div></div>';
+
+      var sInput = $('#staffSearchInput');
+      if (sInput) {
+        sInput.addEventListener('input', function () {
+          staffSearchQuery = sInput.value.trim();
+          renderStaff();
+        });
+      }
+
+      $$('#staffFilterTabs button').forEach(function (tab) {
+        tab.addEventListener('click', function () {
+          staffRoleFilter = tab.dataset.staffFilter || '';
+          renderStaff();
+        });
+      });
+
+      $$('.btn-view-user').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var uid = Number(btn.dataset.userId);
+          var targetUser = users.filter(function (x) { return x.id === uid; })[0];
+          if (targetUser) openUserDetailModal(targetUser, allWhs);
+        });
+      });
 
       $$('.btn-edit-user').forEach(function (btn) {
         btn.addEventListener('click', function () {
@@ -2811,12 +2879,13 @@
           if (!targetUser) return;
 
           var isSelf = me && me.id === uid;
+          var canGrantGlobal = me && (me.role === 'admin' || (me.permissions && me.permissions.indexOf('warehouses:global_access') >= 0));
 
           Api.getUserWarehouses(uid).then(function (userWhs) {
             var currentAssignedIds = (userWhs || []).map(function (w) { return w.id; });
             var checkboxesHtml = allWhs.map(function (w) {
               var isChecked = currentAssignedIds.indexOf(w.id) >= 0;
-              return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer">' +
+              return '<label style="display:flex;align-items:center;gap:8px;padding:5px 0;cursor:pointer">' +
                 '<input type="checkbox" name="wh_' + esc(w.id) + '" class="edit-wh-check" value="' + esc(w.id) + '"' + (isChecked ? ' checked' : '') + '> ' +
                 '<span><strong>' + esc(w.name) + '</strong> (' + esc(w.code) + ')</span>' +
               '</label>';
@@ -2838,6 +2907,13 @@
                   { value: 'admin', label: 'Administrator (Full Access)' }
                 ]
               }) +
+              '<div class="role-desc-box">' +
+                '<strong>Role Permissions Guide:</strong><br>' +
+                '• <b>ADMIN</b>: Full administrative access across all modules & security settings.<br>' +
+                '• <b>MANAGER</b>: Operations, inventory adjustments & invoice management within assigned facilities.<br>' +
+                '• <b>STAFF</b>: Standard warehouse operations (inbound/outbound stock) within assigned facility.<br>' +
+                '• <b>DRIVER</b>: Transit logging and photo capture for assigned delivery routes.' +
+              '</div>' +
               field('status', 'Account Status', {
                 type: 'select',
                 value: targetUser.status || 'active',
@@ -2849,12 +2925,14 @@
                   { value: 'suspended', label: 'Suspended (Locked)' }
                 ]
               }) +
-              '<div style="margin-top:14px"><label style="font-size:12px;font-weight:700;color:var(--muted)">WAREHOUSE FACILITY ACCESS</label>' +
-              '<div style="background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--r);padding:10px 14px;margin-top:4px">' +
-                '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;margin-bottom:6px;border-bottom:1px solid var(--line-2);cursor:pointer;font-weight:600">' +
-                  '<input type="checkbox" id="editWhAllCheck"' + (isAllChecked ? ' checked' : '') + '> <span>All Facilities</span>' +
+              '<div style="margin-top:16px"><label style="font-size:12px;font-weight:700;color:var(--muted)">WAREHOUSE FACILITY ACCESS</label>' +
+              '<div style="background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--r);padding:12px 16px;margin-top:6px">' +
+                '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;margin-bottom:8px;border-bottom:1px solid var(--line-2);cursor:' + (canGrantGlobal ? 'pointer' : 'not-allowed') + ';font-weight:600">' +
+                  '<input type="checkbox" id="editWhAllCheck"' + (isAllChecked ? ' checked' : '') + (canGrantGlobal ? '' : ' disabled') + '> ' +
+                  '<span>All Facilities (Global Access)</span>' +
                 '</label>' +
-                (checkboxesHtml || '<em style="color:var(--muted)">No facilities configured</em>') +
+                (canGrantGlobal ? '<div class="global-access-warning"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg> Warning: All Facilities provides unrestricted access across all existing and future warehouses.</div>' : '<div style="font-size:11.5px;color:var(--muted);margin-bottom:6px">🔒 Requires warehouses:global_access permission to grant All Facilities.</div>') +
+                '<div style="margin-top:8px">' + (checkboxesHtml || '<em style="color:var(--muted)">No facilities configured</em>') + '</div>' +
               '</div></div>',
               function (fd) {
                 if (!fd.fullName) {
@@ -2882,7 +2960,7 @@
             );
 
             var editAllCheck = $('#editWhAllCheck');
-            if (editAllCheck) {
+            if (editAllCheck && canGrantGlobal) {
               editAllCheck.onchange = function () {
                 $$('.edit-wh-check').forEach(function (cb) { cb.checked = editAllCheck.checked; });
               };
@@ -2891,6 +2969,67 @@
         });
       });
     }).catch(function (err) { apiErrorState('#staffBody', err); });
+  }
+
+  function openUserDetailModal(u, allWhs) {
+    var assignedWhNames = (u.warehouses && u.warehouses.length)
+      ? deduplicateWarehouses(u.warehouses).map(function (w) { return esc(w.name) + ' (' + esc(w.code) + ')'; }).join(', ')
+      : (u.role === 'admin' ? 'All Facilities (Global Admin)' : 'None');
+    var createdDate = u.createdAt ? String(u.createdAt).replace('T', ' ').slice(0, 19) : '—';
+    var uStatus = (u.status || 'active').toLowerCase();
+    var statusBadgeClass = uStatus === 'active' ? 'badge-active' : (uStatus === 'suspended' ? 'badge-failed' : 'badge-inactive');
+    var statusLabel = uStatus.charAt(0).toUpperCase() + uStatus.slice(1);
+    var lastLoginText = u.lastLoginAt ? String(u.lastLoginAt).replace('T', ' ').slice(0, 19) : 'Never';
+
+    var roleDesc = '';
+    if (u.role === 'admin') roleDesc = 'Full administrative access across all facilities, staff management, financial records, and system settings.';
+    else if (u.role === 'manager') roleDesc = 'Operational management within assigned facilities, inventory recounts, adjustments, and invoice oversight.';
+    else if (u.role === 'driver') roleDesc = 'Driver operational access, shipment transit logging, and photo capture for assigned delivery routes.';
+    else roleDesc = 'Standard warehouse operational access for inbound and outbound stock recording within assigned facilities.';
+
+    var perms = [];
+    if (u.role === 'admin') {
+      perms = ['warehouses:global_access', 'warehouses:manage', 'invoices:manage', 'payments:manage', 'payments:refund', 'staff:manage', 'inventory:write', 'photos:manage', 'audit:read'];
+    } else if (u.role === 'manager') {
+      perms = ['invoices:manage', 'payments:manage', 'inventory:write', 'photos:upload', 'audit:read'];
+    } else if (u.role === 'driver') {
+      perms = ['inventory:read', 'photos:upload', 'timesheets:write'];
+    } else {
+      perms = ['inventory:write', 'photos:upload', 'timesheets:write'];
+    }
+
+    var permChipsHtml = perms.map(function (p) {
+      return '<span class="perm-chip">' + esc(p) + '</span>';
+    }).join('');
+
+    var contentHtml = '<div class="user-detail-wrap">' +
+      '<div class="user-detail-header">' +
+        '<div>' +
+          '<h3 style="margin:0;font-size:18px">' + esc(u.name || u.fullName) + '</h3>' +
+          '<span class="mono" style="font-size:13px;color:var(--muted)">' + esc(u.email) + '</span>' +
+        '</div>' +
+        '<div style="display:flex;gap:6px">' +
+          '<span class="badge ' + (u.role === 'admin' ? 'badge-in' : (u.role === 'manager' ? 'badge-transit' : 'badge-received')) + '">' + esc(u.role) + '</span>' +
+          '<span class="badge ' + statusBadgeClass + '">' + statusLabel + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="user-detail-grid">' +
+        '<div class="user-detail-field"><span class="user-detail-label">Assigned Facilities</span><span class="user-detail-val">' + esc(assignedWhNames) + '</span></div>' +
+        '<div class="user-detail-field"><span class="user-detail-label">Account Created</span><span class="user-detail-val mono">' + esc(createdDate) + '</span></div>' +
+        '<div class="user-detail-field"><span class="user-detail-label">Last Login</span><span class="user-detail-val mono">' + esc(lastLoginText) + '</span></div>' +
+      '</div>' +
+      '<div class="role-desc-box">' +
+        '<strong>Role Scope:</strong> ' + esc(roleDesc) +
+      '</div>' +
+      '<div>' +
+        '<span class="user-detail-label">Effective Permission Keys</span>' +
+        '<div class="perm-chips-wrap">' + permChipsHtml + '</div>' +
+      '</div>' +
+    '</div>';
+
+    openModal('User Profile & Authorizations', contentHtml, function () { return Promise.resolve(); });
+    var okBtn = $('#modalOk');
+    if (okBtn) okBtn.textContent = 'Close';
   }
 
   function renderHistory() {
@@ -2902,14 +3041,30 @@
         hBody.innerHTML = emptyState('history', 'No audit logs yet', 'Every sign-in, transaction, and update is logged here.');
         return;
       }
-      hBody.innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
-        '<th>Timestamp</th><th>Action</th><th>Summary</th><th>Actor</th></tr></thead><tbody>' +
+
+      hBody.innerHTML = '<div class="audit-list">' +
         logs.map(function (l) {
-          return '<tr><td class="mono" style="font-size:12.5px">' + esc(when(l.occurredAt)) + '</td>' +
-            '<td><span class="badge badge-transit">' + esc(l.action) + '</span></td>' +
-            '<td>' + esc(l.summary) + '</td>' +
-            '<td style="color:var(--muted)">' + esc(userName(l.actorUserId)) + ' (' + esc(l.actorRole || '') + ')</td></tr>';
-        }).join('') + '</tbody></table></div></div>';
+          var formattedTime = when(l.occurredAt);
+          var actorName = userName(l.actorUserId);
+          var roleTag = l.actorRole ? ' (' + l.actorRole + ')' : '';
+          var whName = l.warehouseId ? (warehouseName(l.warehouseId) || 'Facility') : 'Global';
+
+          return '<div class="audit-card">' +
+            '<div class="audit-main">' +
+              '<div class="audit-topline">' +
+                '<span class="audit-who">' + esc(actorName) + '<span style="color:var(--muted);font-weight:400">' + esc(roleTag) + '</span></span>' +
+                '<span class="audit-action-badge">' + esc(l.action) + '</span>' +
+                '<span class="audit-wh-badge">' + esc(whName) + '</span>' +
+              '</div>' +
+              '<div class="audit-summary">' + esc(l.summary) + '</div>' +
+              '<div class="audit-meta">' +
+                '<span>Entity: <strong class="mono">' + esc(l.entityType || 'system') + (l.entityId ? (' #' + esc(String(l.entityId).slice(0, 8))) : '') + '</strong></span>' +
+                '<span>•</span>' +
+                '<span class="mono">' + esc(formattedTime) + '</span>' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+        }).join('') + '</div>';
     }).catch(function (err) { apiErrorState('#historyBody', err); });
   }
 
