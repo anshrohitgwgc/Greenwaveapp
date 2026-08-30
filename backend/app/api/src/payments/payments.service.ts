@@ -8,7 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import * as crypto from 'crypto';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, FindOptionsWhere, Repository } from 'typeorm';
 
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
@@ -422,12 +422,17 @@ export class PaymentsService {
         : String(eventData.amount || invoice.total);
 
       // Find or create payment record
+      const paymentLookup: FindOptionsWhere<Payment>[] = [];
+      if (providerCheckoutId) {
+        paymentLookup.push({ providerCheckoutId });
+      }
+      if (providerPaymentId) {
+        paymentLookup.push({ providerPaymentId });
+      }
+      paymentLookup.push({ invoiceId: invoice.id, status: 'pending' });
+
       let payment = await this.paymentRepository.findOne({
-        where: [
-          { providerCheckoutId },
-          { providerPaymentId },
-          { invoiceId: invoice.id, status: 'pending' },
-        ],
+        where: paymentLookup,
       });
 
       if (payment) {
@@ -505,8 +510,16 @@ export class PaymentsService {
       }
 
       if (providerCheckoutId || providerPaymentId) {
+        const failedPaymentLookup: FindOptionsWhere<Payment>[] = [];
+        if (providerCheckoutId) {
+          failedPaymentLookup.push({ providerCheckoutId });
+        }
+        if (providerPaymentId) {
+          failedPaymentLookup.push({ providerPaymentId });
+        }
+
         const payment = await this.paymentRepository.findOne({
-          where: [{ providerCheckoutId }, { providerPaymentId }],
+          where: failedPaymentLookup,
         });
         if (payment) {
           payment.status = 'failed';
