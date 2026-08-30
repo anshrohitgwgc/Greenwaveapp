@@ -37,7 +37,10 @@ export class PhotosService {
     actor: AuthenticatedUser,
   ) {
     if (meta.warehouseId) {
-      await this.warehousesService.assertWarehouseAccess(actor, meta.warehouseId);
+      await this.warehousesService.assertWarehouseAccess(
+        actor,
+        meta.warehouseId,
+      );
     }
 
     const id = randomUUID();
@@ -89,7 +92,10 @@ export class PhotosService {
     },
   ) {
     if (filters.warehouseId) {
-      await this.warehousesService.assertWarehouseAccess(actor, filters.warehouseId);
+      await this.warehousesService.assertWarehouseAccess(
+        actor,
+        filters.warehouseId,
+      );
     }
 
     const qb = this.photoRepository
@@ -110,13 +116,15 @@ export class PhotosService {
     } else if (
       PRIVILEGED_ROLES.includes(actor.role) &&
       !actor.hasGlobalAccess &&
-      (!actor.permissions || !actor.permissions.includes('warehouses:global_access'))
+      (!actor.permissions ||
+        !actor.permissions.includes('warehouses:global_access'))
     ) {
-      const authorizedIds = await this.warehousesService.getUserAuthorizedWarehouseIds(
-        actor.id,
-        actor.role,
-        actor.permissions,
-      );
+      const authorizedIds =
+        await this.warehousesService.getUserAuthorizedWarehouseIds(
+          actor.id,
+          actor.role,
+          actor.permissions,
+        );
       if (authorizedIds.length === 0) {
         qb.andWhere('photo.warehouseId IS NULL');
       } else {
@@ -156,7 +164,10 @@ export class PhotosService {
     }
 
     if (photo.warehouseId && PRIVILEGED_ROLES.includes(actor.role)) {
-      await this.warehousesService.assertWarehouseAccess(actor, photo.warehouseId);
+      await this.warehousesService.assertWarehouseAccess(
+        actor,
+        photo.warehouseId,
+      );
     }
 
     return this.toDto(photo);
@@ -167,7 +178,10 @@ export class PhotosService {
     if (!photo) throw new NotFoundException('Photo not found');
 
     if (photo.warehouseId) {
-      await this.warehousesService.assertWarehouseAccess(actor, photo.warehouseId);
+      await this.warehousesService.assertWarehouseAccess(
+        actor,
+        photo.warehouseId,
+      );
     }
 
     await this.storageService.delete(photo.objectKey);
@@ -186,7 +200,7 @@ export class PhotosService {
 
   private async toDto(photo: PhotoAsset) {
     const rawUrl = await this.storageService.presignedGetUrl(photo.objectKey);
-    const url = rawUrl.replace(/^https?:\/\/[^\/]+/, '');
+    const url = rawUrl.replace(/^https?:\/\/[^/]+/, '');
     return {
       id: photo.id,
       url,

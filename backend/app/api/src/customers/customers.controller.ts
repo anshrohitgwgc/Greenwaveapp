@@ -57,10 +57,7 @@ export class CustomersController {
 
   @Get(':id')
   @Roles('admin', 'manager')
-  findOne(
-    @Param('id') id: string,
-    @CurrentUser() actor: AuthenticatedUser,
-  ) {
+  findOne(@Param('id') id: string, @CurrentUser() actor: AuthenticatedUser) {
     return this.customersService.findOne(id, actor);
   }
 

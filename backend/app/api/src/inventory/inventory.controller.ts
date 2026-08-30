@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
@@ -28,9 +36,15 @@ export class InventoryController {
   listContainers(
     @CurrentUser() actor: AuthenticatedUser,
     @Query('warehouseId') warehouseId?: string,
+    @Query('division') division?: string,
     @Query('search') search?: string,
   ) {
-    return this.inventoryService.listContainers(actor, warehouseId, search);
+    return this.inventoryService.listContainers(
+      actor,
+      warehouseId,
+      division,
+      search,
+    );
   }
 
   @Post('inventory/transactions')
@@ -47,6 +61,7 @@ export class InventoryController {
   listTransactions(
     @CurrentUser() actor: AuthenticatedUser,
     @Query('warehouseId') warehouseId?: string,
+    @Query('division') division?: string,
     @Query('materialId') materialId?: string,
     @Query('type') type?: string,
     @Query('orderNumber') orderNumber?: string,
@@ -57,6 +72,7 @@ export class InventoryController {
   ) {
     return this.inventoryService.listTransactions(actor, {
       warehouseId,
+      division,
       materialId,
       type,
       orderNumber,
@@ -81,7 +97,8 @@ export class InventoryController {
   getBalances(
     @CurrentUser() actor: AuthenticatedUser,
     @Query('warehouseId') warehouseId?: string,
+    @Query('division') division?: string,
   ) {
-    return this.inventoryService.getBalances(actor, warehouseId);
+    return this.inventoryService.getBalances(actor, warehouseId, division);
   }
 }

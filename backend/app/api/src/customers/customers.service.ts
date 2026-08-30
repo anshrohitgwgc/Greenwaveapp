@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
-import { In, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { WarehousesService } from '../warehouses/warehouses.service';
@@ -19,20 +19,15 @@ export class CustomersService {
 
   async create(dto: CreateCustomerDto, actor: AuthenticatedUser) {
     if (dto.warehouseId) {
-      await this.warehousesService.assertWarehouseAccess(actor, dto.warehouseId);
+      await this.warehousesService.assertWarehouseAccess(
+        actor,
+        dto.warehouseId,
+      );
     }
 
     const customer = this.customerRepository.create({
       id: randomUUID(),
       ...dto,
-      companyInfo: dto.companyInfo ?? null,
-      billTo: dto.billTo ?? null,
-      shipTo: dto.shipTo ?? null,
-      email: dto.email ?? null,
-      phone: dto.phone ?? null,
-      warehouseId: dto.warehouseId ?? null,
-      createdBy: actor.id,
-      updatedBy: actor.id,
     });
     return this.customerRepository.save(customer);
   }
@@ -43,20 +38,21 @@ export class CustomersService {
       return this.customerRepository.find({ where: { warehouseId } });
     }
 
-    if (!actor.hasGlobalAccess && (!actor.permissions || !actor.permissions.includes('warehouses:global_access'))) {
-      const authorizedIds = await this.warehousesService.getUserAuthorizedWarehouseIds(
-        actor.id,
-        actor.role,
-        actor.permissions,
-      );
+    // Non-admins only see customers matching their authorized warehouses (or global ones with null warehouseId)
+    if (actor.role !== 'admin' && actor.role !== 'owner') {
+      const authorizedIds =
+        await this.warehousesService.getUserAuthorizedWarehouseIds(
+          actor.id,
+          actor.role,
+          actor.permissions,
+        );
       if (authorizedIds.length === 0) {
-        return this.customerRepository.find({ where: { warehouseId: null as any } });
+        return this.customerRepository.find({
+          where: { warehouseId: IsNull() },
+        });
       }
       return this.customerRepository.find({
-        where: [
-          { warehouseId: In(authorizedIds) },
-          { warehouseId: null as any },
-        ],
+        where: [{ warehouseId: In(authorizedIds) }, { warehouseId: IsNull() }],
       });
     }
 
@@ -68,17 +64,23 @@ export class CustomersService {
     if (!customer) throw new NotFoundException('Customer not found');
 
     if (customer.warehouseId) {
-      await this.warehousesService.assertWarehouseAccess(actor, customer.warehouseId);
+      await this.warehousesService.assertWarehouseAccess(
+        actor,
+        customer.warehouseId,
+      );
     }
 
     return customer;
   }
 
   async update(id: string, dto: UpdateCustomerDto, actor: AuthenticatedUser) {
-    const customer = await this.findOne(id, actor);
+    await this.findOne(id, actor);
 
     if (dto.warehouseId) {
-      await this.warehousesService.assertWarehouseAccess(actor, dto.warehouseId);
+      await this.warehousesService.assertWarehouseAccess(
+        actor,
+        dto.warehouseId,
+      );
     }
 
     // eslint-disable-next-line @typescript-eslint/no-unsafe-argument

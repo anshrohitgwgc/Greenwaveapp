@@ -59,7 +59,9 @@ export class AuthService {
       summary: `First-run bootstrap created administrator account ${email}`,
     });
 
-    const permissions = await this.rolesService.getPermissionsForRole(user.role);
+    const permissions = await this.rolesService.getPermissionsForRole(
+      user.role,
+    );
     const hasGlobalAccess = permissions.includes('warehouses:global_access');
     const warehouses = await this.warehousesService.getUserAuthorizedWarehouses(
       user.id,
@@ -96,7 +98,9 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const permissions = await this.rolesService.getPermissionsForRole(user.role);
+    const permissions = await this.rolesService.getPermissionsForRole(
+      user.role,
+    );
     const hasGlobalAccess = permissions.includes('warehouses:global_access');
     const warehouses = await this.warehousesService.getUserAuthorizedWarehouses(
       user.id,

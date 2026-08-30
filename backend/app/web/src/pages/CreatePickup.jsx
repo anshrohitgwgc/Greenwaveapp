@@ -79,7 +79,7 @@ export default function CreatePickup() {
       <header className="navbar">
         <div className="navbar-container">
           <div className="navbar-brand">
-            <span className="brand-icon">♻</span>
+            <img src="/assets/logo.png" alt="GreenWave" className="navbar-logo-img" data-testid="navbar-logo" />
             <div className="brand-text-group">
               <Link to="/dashboard" className="navbar-title-link">
                 <span className="navbar-title">GreenWave</span>

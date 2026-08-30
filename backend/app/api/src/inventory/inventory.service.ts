@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
-import { In, Repository } from 'typeorm';
+import { FindOptionsWhere, In, Repository } from 'typeorm';
 
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
@@ -25,6 +25,7 @@ import { InventoryTransaction } from './entities/inventory-transaction.entity';
 
 export interface ListTransactionsFilter {
   warehouseId?: string;
+  division?: string;
   materialId?: string;
   type?: string;
   search?: string;
@@ -56,12 +57,26 @@ export class InventoryService {
     private readonly warehousesService: WarehousesService,
   ) {}
 
-  private validateDivisionAndUnitType(division?: string, unitType?: string) {
-    const div = (division || 'recycling').toLowerCase();
-    const unit = (unitType || (div === 'healthcare' ? 'box' : 'pallet')).toLowerCase();
+  private validateDivisionAndUnitType(
+    division?: string,
+    unitType?: string,
+    hasSizes = false,
+  ) {
+    const div = division
+      ? division.toLowerCase()
+      : hasSizes || unitType === 'box'
+        ? 'healthcare'
+        : 'recycling';
+    const unit = unitType
+      ? unitType.toLowerCase()
+      : div === 'healthcare'
+        ? 'box'
+        : 'pallet';
 
     if (!['recycling', 'healthcare'].includes(div)) {
-      throw new BadRequestException('division must be either recycling or healthcare');
+      throw new BadRequestException(
+        'division must be either recycling or healthcare',
+      );
     }
     if (!['pallet', 'box'].includes(unit)) {
       throw new BadRequestException('unitType must be either pallet or box');
@@ -75,11 +90,15 @@ export class InventoryService {
     return { division: div, unitType: unit };
   }
 
-  private validateQuantities(quantities: { [key: string]: number | undefined }) {
+  private validateQuantities(quantities: {
+    [key: string]: number | undefined;
+  }) {
     for (const [key, val] of Object.entries(quantities)) {
       if (val !== undefined && val !== null) {
         if (!Number.isInteger(Number(val)) || Number(val) < 0) {
-          throw new BadRequestException(`Quantity field ${key} must be a whole number (no decimal fractions)`);
+          throw new BadRequestException(
+            `Quantity field ${key} must be a whole number (no decimal fractions)`,
+          );
         }
       }
     }
@@ -89,7 +108,9 @@ export class InventoryService {
     if (weightValue !== undefined && weightValue !== null) {
       const num = Number(weightValue);
       if (isNaN(num) || num < 0) {
-        throw new BadRequestException('weightValue must be a valid non-negative number');
+        throw new BadRequestException(
+          'weightValue must be a valid non-negative number',
+        );
       }
       if (!weightUnit || !['kg', 'lb'].includes(weightUnit.toLowerCase())) {
         throw new BadRequestException('weightUnit must be either kg or lb');
@@ -113,9 +134,30 @@ export class InventoryService {
 
   async createContainer(dto: CreateContainerDto, actor: AuthenticatedUser) {
     await this.warehousesService.assertWarehouseAccess(actor, dto.warehouseId);
-    this.validateQuantities({ xl: dto.xl, l: dto.l, m: dto.m, s: dto.s, total: dto.total });
-    const { division, unitType } = this.validateDivisionAndUnitType(dto.division, dto.unitType);
-    const { weightValue, weightUnit } = this.validateWeight(dto.weightValue, dto.weightUnit);
+    this.validateQuantities({
+      xl: dto.xl,
+      l: dto.l,
+      m: dto.m,
+      s: dto.s,
+      total: dto.total,
+    });
+    const hasSizes =
+      (dto.l && dto.l > 0) || (dto.m && dto.m > 0) || (dto.s && dto.s > 0);
+    const { division, unitType } = this.validateDivisionAndUnitType(
+      dto.division,
+      dto.unitType,
+      !!hasSizes,
+    );
+    const { weightValue, weightUnit } = this.validateWeight(
+      dto.weightValue,
+      dto.weightUnit,
+    );
+
+    if (dto.division === 'recycling' && hasSizes) {
+      throw new BadRequestException(
+        'Recycling division handles pallets only and does not use size breakdown (XL/L/M/S)',
+      );
+    }
 
     const xl = Math.round(dto.xl ?? 0);
     const l = Math.round(dto.l ?? 0);
@@ -156,7 +198,12 @@ export class InventoryService {
     return this.containerRepository.save(container);
   }
 
-  async listContainers(actor: AuthenticatedUser, warehouseId?: string, search?: string) {
+  async listContainers(
+    actor: AuthenticatedUser,
+    warehouseId?: string,
+    division?: string,
+    search?: string,
+  ) {
     if (warehouseId) {
       await this.warehousesService.assertWarehouseAccess(actor, warehouseId);
     }
@@ -165,14 +212,25 @@ export class InventoryService {
 
     if (warehouseId) {
       qb.andWhere('c.warehouseId = :warehouseId', { warehouseId });
-    } else if (!actor.hasGlobalAccess && (!actor.permissions || !actor.permissions.includes('warehouses:global_access'))) {
-      const authorizedIds = await this.warehousesService.getUserAuthorizedWarehouseIds(
-        actor.id,
-        actor.role,
-        actor.permissions,
-      );
+    } else if (
+      !actor.hasGlobalAccess &&
+      (!actor.permissions ||
+        !actor.permissions.includes('warehouses:global_access'))
+    ) {
+      const authorizedIds =
+        await this.warehousesService.getUserAuthorizedWarehouseIds(
+          actor.id,
+          actor.role,
+          actor.permissions,
+        );
       if (authorizedIds.length === 0) return [];
       qb.andWhere('c.warehouseId IN (:...authorizedIds)', { authorizedIds });
+    }
+
+    if (division) {
+      qb.andWhere('c.division = :division', {
+        division: division.toLowerCase(),
+      });
     }
 
     if (search && search.trim()) {
@@ -186,11 +244,37 @@ export class InventoryService {
     return qb.getMany();
   }
 
-  async createTransaction(dto: CreateInventoryTransactionDto, actor: AuthenticatedUser) {
+  async createTransaction(
+    dto: CreateInventoryTransactionDto,
+    actor: AuthenticatedUser,
+  ) {
     await this.warehousesService.assertWarehouseAccess(actor, dto.warehouseId);
     this.validateQuantities({ xl: dto.xl, l: dto.l, m: dto.m, s: dto.s });
-    const { division, unitType } = this.validateDivisionAndUnitType(dto.division, dto.unitType);
-    const { weightValue, weightUnit } = this.validateWeight(dto.weightValue, dto.weightUnit);
+    const hasSizes =
+      (dto.l && dto.l > 0) || (dto.m && dto.m > 0) || (dto.s && dto.s > 0);
+    const { division, unitType } = this.validateDivisionAndUnitType(
+      dto.division,
+      dto.unitType,
+      !!hasSizes,
+    );
+    const { weightValue, weightUnit } = this.validateWeight(
+      dto.weightValue,
+      dto.weightUnit,
+    );
+
+    if (dto.division === 'healthcare') {
+      if (weightValue !== null || weightUnit !== null) {
+        throw new BadRequestException(
+          'Healthcare division handles boxes only and does not use weight (kg/lb)',
+        );
+      }
+    }
+
+    if (dto.division === 'recycling' && hasSizes) {
+      throw new BadRequestException(
+        'Recycling division handles pallets only and does not use size breakdown (XL/L/M/S)',
+      );
+    }
 
     if (dto.type === 'adjustment') {
       if (!dto.reason || dto.reason.trim().length === 0) {
@@ -317,19 +401,25 @@ export class InventoryService {
       this.warehouseRepository.findOne({ where: { id: tx.warehouseId } }),
       this.materialRepository.findOne({ where: { id: tx.materialId } }),
       this.userRepository.findOne({ where: { id: tx.createdBy } }),
-      tx.containerId ? this.containerRepository.findOne({ where: { id: tx.containerId } }) : null,
+      tx.containerId
+        ? this.containerRepository.findOne({ where: { id: tx.containerId } })
+        : null,
     ]);
 
     // Find associated photos
-    const photoQb = this.photoRepository.createQueryBuilder('p')
+    const photoQb = this.photoRepository
+      .createQueryBuilder('p')
       .where('p.warehouseId = :warehouseId', { warehouseId: tx.warehouseId });
 
     if (tx.photoId) {
-      photoQb.andWhere('(p.id = :photoId OR p.jobReference = :ref OR p.jobReference = :orderNum)', {
-        photoId: tx.photoId,
-        ref: tx.reference || tx.orderNumber || tx.id,
-        orderNum: tx.orderNumber || tx.id,
-      });
+      photoQb.andWhere(
+        '(p.id = :photoId OR p.jobReference = :ref OR p.jobReference = :orderNum)',
+        {
+          photoId: tx.photoId,
+          ref: tx.reference || tx.orderNumber || tx.id,
+          orderNum: tx.orderNumber || tx.id,
+        },
+      );
     } else if (tx.orderNumber || tx.reference) {
       photoQb.andWhere('p.jobReference IN (:...refs)', {
         refs: [tx.orderNumber, tx.reference, tx.id].filter(Boolean),
@@ -371,7 +461,8 @@ export class InventoryService {
       materialUnit: material?.unit || '—',
       containerId: tx.containerId,
       type: tx.type,
-      unitType: tx.unitType || (tx.division === 'healthcare' ? 'box' : 'pallet'),
+      unitType:
+        tx.unitType || (tx.division === 'healthcare' ? 'box' : 'pallet'),
       division: tx.division || 'recycling',
       weightValue: tx.weightValue ? Number(tx.weightValue) : null,
       weightUnit: tx.weightUnit || null,
@@ -399,9 +490,15 @@ export class InventoryService {
     };
   }
 
-  async listTransactions(actor: AuthenticatedUser, filters?: ListTransactionsFilter) {
+  async listTransactions(
+    actor: AuthenticatedUser,
+    filters?: ListTransactionsFilter,
+  ) {
     if (filters?.warehouseId) {
-      await this.warehousesService.assertWarehouseAccess(actor, filters.warehouseId);
+      await this.warehousesService.assertWarehouseAccess(
+        actor,
+        filters.warehouseId,
+      );
     }
 
     const qb = this.transactionRepository.createQueryBuilder('tx');
@@ -410,16 +507,26 @@ export class InventoryService {
       qb.andWhere('tx.warehouseId = :warehouseId', {
         warehouseId: filters.warehouseId,
       });
-    } else if (!actor.hasGlobalAccess && (!actor.permissions || !actor.permissions.includes('warehouses:global_access'))) {
-      const authorizedIds = await this.warehousesService.getUserAuthorizedWarehouseIds(
-        actor.id,
-        actor.role,
-        actor.permissions,
-      );
+    } else if (
+      !actor.hasGlobalAccess &&
+      (!actor.permissions ||
+        !actor.permissions.includes('warehouses:global_access'))
+    ) {
+      const authorizedIds =
+        await this.warehousesService.getUserAuthorizedWarehouseIds(
+          actor.id,
+          actor.role,
+          actor.permissions,
+        );
       if (authorizedIds.length === 0) return [];
       qb.andWhere('tx.warehouseId IN (:...authorizedIds)', { authorizedIds });
     }
 
+    if (filters?.division) {
+      qb.andWhere('tx.division = :division', {
+        division: filters.division.toLowerCase(),
+      });
+    }
     if (filters?.materialId) {
       qb.andWhere('tx.materialId = :materialId', {
         materialId: filters.materialId,
@@ -458,23 +565,39 @@ export class InventoryService {
     return qb.getMany();
   }
 
-  async getBalances(actor: AuthenticatedUser, warehouseId?: string) {
+  async getBalances(
+    actor: AuthenticatedUser,
+    warehouseId?: string,
+    division?: string,
+  ) {
+    const where: FindOptionsWhere<InventoryBalance> = {};
+    if (division) {
+      where.division = division.toLowerCase();
+    }
+
     if (warehouseId) {
       await this.warehousesService.assertWarehouseAccess(actor, warehouseId);
-      return this.balanceRepository.find({ where: { warehouseId } });
+      where.warehouseId = warehouseId;
+      return this.balanceRepository.find({ where });
     }
 
-    if (!actor.hasGlobalAccess && (!actor.permissions || !actor.permissions.includes('warehouses:global_access'))) {
-      const authorizedIds = await this.warehousesService.getUserAuthorizedWarehouseIds(
-        actor.id,
-        actor.role,
-        actor.permissions,
-      );
+    if (
+      !actor.hasGlobalAccess &&
+      (!actor.permissions ||
+        !actor.permissions.includes('warehouses:global_access'))
+    ) {
+      const authorizedIds =
+        await this.warehousesService.getUserAuthorizedWarehouseIds(
+          actor.id,
+          actor.role,
+          actor.permissions,
+        );
       if (authorizedIds.length === 0) return [];
-      return this.balanceRepository.find({ where: { warehouseId: In(authorizedIds) } });
+      where.warehouseId = In(authorizedIds);
+      return this.balanceRepository.find({ where });
     }
 
-    return this.balanceRepository.find();
+    return this.balanceRepository.find({ where });
   }
 
   async findContainer(id: string) {

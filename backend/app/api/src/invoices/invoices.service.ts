@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
-import { DataSource, In, QueryRunner, Repository } from 'typeorm';
+import { DataSource, QueryRunner, Repository } from 'typeorm';
 
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
@@ -91,9 +91,15 @@ export class InvoicesService {
     return String(nextValue);
   }
 
-  async create(dto: CreateInvoiceDto, actor: AuthenticatedUser): Promise<Invoice> {
+  async create(
+    dto: CreateInvoiceDto,
+    actor: AuthenticatedUser,
+  ): Promise<Invoice> {
     if (dto.warehouseId) {
-      await this.warehousesService.assertWarehouseAccess(actor, dto.warehouseId);
+      await this.warehousesService.assertWarehouseAccess(
+        actor,
+        dto.warehouseId,
+      );
     }
 
     const queryRunner = this.dataSource.createQueryRunner();
@@ -160,7 +166,10 @@ export class InvoicesService {
   async duplicate(id: string, actor: AuthenticatedUser): Promise<Invoice> {
     const source = await this.findOneInternal(id);
     if (source.warehouseId) {
-      await this.warehousesService.assertWarehouseAccess(actor, source.warehouseId);
+      await this.warehousesService.assertWarehouseAccess(
+        actor,
+        source.warehouseId,
+      );
     }
 
     const dto: CreateInvoiceDto = {
@@ -214,10 +223,16 @@ export class InvoicesService {
   ): Promise<Invoice> {
     const existing = await this.findOneInternal(id);
     if (existing.warehouseId) {
-      await this.warehousesService.assertWarehouseAccess(actor, existing.warehouseId);
+      await this.warehousesService.assertWarehouseAccess(
+        actor,
+        existing.warehouseId,
+      );
     }
     if (dto.warehouseId) {
-      await this.warehousesService.assertWarehouseAccess(actor, dto.warehouseId);
+      await this.warehousesService.assertWarehouseAccess(
+        actor,
+        dto.warehouseId,
+      );
     }
 
     const items =
@@ -289,7 +304,10 @@ export class InvoicesService {
     },
   ) {
     if (filters.warehouseId) {
-      await this.warehousesService.assertWarehouseAccess(actor, filters.warehouseId);
+      await this.warehousesService.assertWarehouseAccess(
+        actor,
+        filters.warehouseId,
+      );
     }
 
     const qb = this.invoiceRepository
@@ -298,23 +316,35 @@ export class InvoicesService {
       .orderBy('inv.createdAt', 'DESC');
 
     if (filters.customerId) {
-      qb.andWhere('inv.customerId = :customerId', { customerId: filters.customerId });
+      qb.andWhere('inv.customerId = :customerId', {
+        customerId: filters.customerId,
+      });
     }
 
     if (filters.warehouseId) {
-      qb.andWhere('inv.warehouseId = :warehouseId', { warehouseId: filters.warehouseId });
-    } else if (!actor.hasGlobalAccess && (!actor.permissions || !actor.permissions.includes('warehouses:global_access'))) {
-      const authorizedIds = await this.warehousesService.getUserAuthorizedWarehouseIds(
-        actor.id,
-        actor.role,
-        actor.permissions,
-      );
+      qb.andWhere('inv.warehouseId = :warehouseId', {
+        warehouseId: filters.warehouseId,
+      });
+    } else if (
+      !actor.hasGlobalAccess &&
+      (!actor.permissions ||
+        !actor.permissions.includes('warehouses:global_access'))
+    ) {
+      const authorizedIds =
+        await this.warehousesService.getUserAuthorizedWarehouseIds(
+          actor.id,
+          actor.role,
+          actor.permissions,
+        );
       if (authorizedIds.length === 0) {
         qb.andWhere('inv.warehouseId IS NULL');
       } else {
-        qb.andWhere('(inv.warehouseId IN (:...authorizedIds) OR inv.warehouseId IS NULL)', {
-          authorizedIds,
-        });
+        qb.andWhere(
+          '(inv.warehouseId IN (:...authorizedIds) OR inv.warehouseId IS NULL)',
+          {
+            authorizedIds,
+          },
+        );
       }
     }
 
@@ -328,7 +358,10 @@ export class InvoicesService {
   async findOne(id: string, actor: AuthenticatedUser): Promise<Invoice> {
     const invoice = await this.findOneInternal(id);
     if (invoice.warehouseId) {
-      await this.warehousesService.assertWarehouseAccess(actor, invoice.warehouseId);
+      await this.warehousesService.assertWarehouseAccess(
+        actor,
+        invoice.warehouseId,
+      );
     }
     return invoice;
   }

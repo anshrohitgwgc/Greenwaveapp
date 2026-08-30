@@ -39,7 +39,9 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Account no longer exists');
     }
 
-    const permissions = await this.rolesService.getPermissionsForRole(user.role);
+    const permissions = await this.rolesService.getPermissionsForRole(
+      user.role,
+    );
     const hasGlobalAccess = permissions.includes('warehouses:global_access');
     const warehouseIds =
       await this.warehousesService.getUserAuthorizedWarehouseIds(

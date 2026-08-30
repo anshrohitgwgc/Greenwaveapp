@@ -66,15 +66,26 @@ describe('WarehousesService', () => {
       save: jest.fn((data: Record<string, unknown>) =>
         Promise.resolve(Array.isArray(data) ? data : { ...data }),
       ),
-      find: jest.fn().mockResolvedValue([
-        { userId: 3, warehouseId: '22222222-2222-4222-8222-222222222222' },
-      ]),
-      findOne: jest.fn(({ where: { userId, warehouseId } }: { where: { userId: number; warehouseId: string } }) => {
-        if (userId === 3 && warehouseId === '22222222-2222-4222-8222-222222222222') {
-          return Promise.resolve({ userId: 3, warehouseId });
-        }
-        return Promise.resolve(null);
-      }),
+      find: jest
+        .fn()
+        .mockResolvedValue([
+          { userId: 3, warehouseId: '22222222-2222-4222-8222-222222222222' },
+        ]),
+      findOne: jest.fn(
+        ({
+          where: { userId, warehouseId },
+        }: {
+          where: { userId: number; warehouseId: string };
+        }) => {
+          if (
+            userId === 3 &&
+            warehouseId === '22222222-2222-4222-8222-222222222222'
+          ) {
+            return Promise.resolve({ userId: 3, warehouseId });
+          }
+          return Promise.resolve(null);
+        },
+      ),
       delete: jest.fn().mockResolvedValue({ affected: 1 }),
     };
 

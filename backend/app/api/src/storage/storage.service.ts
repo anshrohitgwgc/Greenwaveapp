@@ -63,7 +63,7 @@ export class StorageService implements OnModuleInit {
       objectKey,
       expirySeconds,
     );
-    return raw.replace(/^https?:\/\/[^\/]+/, '');
+    return raw.replace(/^https?:\/\/[^/]+/, '');
   }
 
   async delete(objectKey: string): Promise<void> {

@@ -5,6 +5,10 @@ import Dashboard from "./pages/Dashboard";
 import Pickups from "./pages/Pickups";
 import CreatePickup from "./pages/CreatePickup";
 import PickupDetails from "./pages/PickupDetails";
+import Inventory from "./pages/Inventory";
+import TimeClock from "./pages/TimeClock";
+import Invoices from "./pages/Invoices";
+import InvoiceDetails from "./pages/InvoiceDetails";
 
 export default function App() {
   return (
@@ -16,6 +20,38 @@ export default function App() {
           element={
             <ProtectedRoute>
               <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/inventory"
+          element={
+            <ProtectedRoute>
+              <Inventory />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/timesheets"
+          element={
+            <ProtectedRoute>
+              <TimeClock />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/invoices"
+          element={
+            <ProtectedRoute>
+              <Invoices />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/invoices/:id"
+          element={
+            <ProtectedRoute>
+              <InvoiceDetails />
             </ProtectedRoute>
           }
         />

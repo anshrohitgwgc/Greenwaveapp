@@ -70,7 +70,9 @@ export class RolesService {
   }
 
   async getPermissionsForRole(roleName: string): Promise<string[]> {
-    const role = await this.roleRepository.findOne({ where: { name: roleName } });
+    const role = await this.roleRepository.findOne({
+      where: { name: roleName },
+    });
     if (!role) {
       return ROLE_DEFAULT_PERMISSIONS[roleName] ?? [];
     }
@@ -90,6 +92,8 @@ export class RolesService {
       .map((link) => permissionById.get(link.permissionId))
       .filter((k): k is string => Boolean(k));
 
-    return mapped.length > 0 ? mapped : (ROLE_DEFAULT_PERMISSIONS[roleName] ?? []);
+    return mapped.length > 0
+      ? mapped
+      : (ROLE_DEFAULT_PERMISSIONS[roleName] ?? []);
   }
 }

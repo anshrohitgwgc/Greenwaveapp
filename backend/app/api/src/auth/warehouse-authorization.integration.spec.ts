@@ -38,8 +38,7 @@ import { Warehouse } from '../warehouses/entities/warehouse.entity';
 import { WarehousesModule } from '../warehouses/warehouses.module';
 import { WarehousesService } from '../warehouses/warehouses.service';
 import { AuthModule } from './auth.module';
-
-/* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable */
 describe('Security: Authoritative Warehouse Access & Isolation Matrix (HTTP Integration)', () => {
   jest.setTimeout(30000);
   let app: INestApplication;
@@ -112,7 +111,9 @@ describe('Security: Authoritative Warehouse Access & Isolation Matrix (HTTP Inte
         upload: jest.fn().mockResolvedValue(undefined),
         delete: jest.fn().mockResolvedValue(undefined),
         getBucketName: () => 'test-bucket',
-        presignedGetUrl: jest.fn().mockResolvedValue('https://storage.test/img'),
+        presignedGetUrl: jest
+          .fn()
+          .mockResolvedValue('https://storage.test/img'),
       })
       .compile();
 
@@ -172,24 +173,49 @@ describe('Security: Authoritative Warehouse Access & Isolation Matrix (HTTP Inte
     const permRepo = dataSource.getRepository(Permission);
     const rpRepo = dataSource.getRepository(RolePermission);
 
-    const adminRole = await roleRepo.save({ id: '11111111-0000-0000-0000-000000000001', name: 'admin', description: 'Admin' });
-    const managerRole = await roleRepo.save({ id: '11111111-0000-0000-0000-000000000002', name: 'manager', description: 'Manager' });
-    const staffRole = await roleRepo.save({ id: '11111111-0000-0000-0000-000000000003', name: 'staff', description: 'Staff' });
-    const driverRole = await roleRepo.save({ id: '11111111-0000-0000-0000-000000000004', name: 'driver', description: 'Driver' });
+    const adminRole = await roleRepo.save({
+      id: '11111111-0000-0000-0000-000000000001',
+      name: 'admin',
+      description: 'Admin',
+    });
+    const managerRole = await roleRepo.save({
+      id: '11111111-0000-0000-0000-000000000002',
+      name: 'manager',
+      description: 'Manager',
+    });
+    const staffRole = await roleRepo.save({
+      id: '11111111-0000-0000-0000-000000000003',
+      name: 'staff',
+      description: 'Staff',
+    });
+    const driverRole = await roleRepo.save({
+      id: '11111111-0000-0000-0000-000000000004',
+      name: 'driver',
+      description: 'Driver',
+    });
 
-    const globalPerm = await permRepo.save({ id: '22222222-0000-0000-0000-000000000001', key: 'warehouses:global_access',
+    const globalPerm = await permRepo.save({
+      id: '22222222-0000-0000-0000-000000000001',
+      key: 'warehouses:global_access',
       description: 'Global access',
     });
-    const invWritePerm = await permRepo.save({ id: '22222222-0000-0000-0000-000000000002', key: 'inventory:write',
+    const invWritePerm = await permRepo.save({
+      id: '22222222-0000-0000-0000-000000000002',
+      key: 'inventory:write',
       description: 'Inventory write',
     });
-    const invManagePerm = await permRepo.save({ id: '22222222-0000-0000-0000-000000000003', key: 'invoices:manage',
+    const invManagePerm = await permRepo.save({
+      id: '22222222-0000-0000-0000-000000000003',
+      key: 'invoices:manage',
       description: 'Invoices manage',
     });
 
     // Default admin role gets global access
     await rpRepo.save({ roleId: adminRole.id, permissionId: globalPerm.id });
-    await rpRepo.save({ roleId: managerRole.id, permissionId: invManagePerm.id });
+    await rpRepo.save({
+      roleId: managerRole.id,
+      permissionId: invManagePerm.id,
+    });
     await rpRepo.save({ roleId: staffRole.id, permissionId: invWritePerm.id });
     await rpRepo.save({ roleId: driverRole.id, permissionId: invWritePerm.id });
 

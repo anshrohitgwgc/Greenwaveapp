@@ -49,27 +49,37 @@ export class CreateContainerDto {
   materialId?: string;
 
   @IsOptional()
-  @IsInt({ message: 'Quantity values must be whole numbers (no decimal fractions)' })
+  @IsInt({
+    message: 'Quantity values must be whole numbers (no decimal fractions)',
+  })
   @Min(0)
   xl?: number;
 
   @IsOptional()
-  @IsInt({ message: 'Quantity values must be whole numbers (no decimal fractions)' })
+  @IsInt({
+    message: 'Quantity values must be whole numbers (no decimal fractions)',
+  })
   @Min(0)
   l?: number;
 
   @IsOptional()
-  @IsInt({ message: 'Quantity values must be whole numbers (no decimal fractions)' })
+  @IsInt({
+    message: 'Quantity values must be whole numbers (no decimal fractions)',
+  })
   @Min(0)
   m?: number;
 
   @IsOptional()
-  @IsInt({ message: 'Quantity values must be whole numbers (no decimal fractions)' })
+  @IsInt({
+    message: 'Quantity values must be whole numbers (no decimal fractions)',
+  })
   @Min(0)
   s?: number;
 
   @IsOptional()
-  @IsInt({ message: 'Quantity values must be whole numbers (no decimal fractions)' })
+  @IsInt({
+    message: 'Quantity values must be whole numbers (no decimal fractions)',
+  })
   @Min(0)
   total?: number;
 
@@ -78,7 +88,9 @@ export class CreateContainerDto {
   unitType?: 'pallet' | 'box';
 
   @IsOptional()
-  @IsIn(['recycling', 'healthcare'], { message: 'division must be either recycling or healthcare' })
+  @IsIn(['recycling', 'healthcare'], {
+    message: 'division must be either recycling or healthcare',
+  })
   division?: 'recycling' | 'healthcare';
 
   @IsOptional()

@@ -133,11 +133,21 @@
     <header class="topbar">
       <button type="button" class="menubtn" id="menuBtn" aria-label="Menu"><svg><use href="#i-box"></use></svg></button>
       
-      <!-- Top Multi-Warehouse Selector -->
-      <div class="wh">
-        <label for="wh">FACILITY</label>
-        <div class="wh-select-wrap">
-          <select id="wh" aria-label="Selected Warehouse"></select>
+      <!-- Top Scope Controls (Facility & Division) -->
+      <div class="scope-group">
+        <div class="wh">
+          <label for="wh">FACILITY</label>
+          <div class="wh-select-wrap">
+            <select id="wh" aria-label="Selected Warehouse"></select>
+          </div>
+        </div>
+
+        <div class="top-division-wrap">
+          <label>DIVISION</label>
+          <div class="top-division-toggle" role="group" aria-label="Company Division Selector">
+            <button type="button" class="top-div-btn active" data-entity="recycling" id="topDivRecycling" aria-pressed="true">♻️ Recycling</button>
+            <button type="button" class="top-div-btn" data-entity="healthcare" id="topDivHealthcare" aria-pressed="false">🏥 Healthcare</button>
+          </div>
         </div>
       </div>
 
@@ -153,6 +163,11 @@
         <div class="vhead">
           <div>
             <h1>Inventory Operations</h1>
+            <div class="scope-context-pill" id="scopeContextPill">
+              <span class="scope-facility" id="scopeFacilityName">Calgary, AB</span>
+              <span class="scope-divider">·</span>
+              <span class="scope-division-unit" id="scopeDivisionUnit">Recycling · Pallets</span>
+            </div>
             <p id="invenSub">Live multi-warehouse inventory balances, container tracking, and transaction ledger.</p>
           </div>
           <div class="vactions">

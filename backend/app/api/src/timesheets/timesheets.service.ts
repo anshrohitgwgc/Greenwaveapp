@@ -5,7 +5,15 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
-import { Between, In, IsNull, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
+import {
+  Between,
+  FindOptionsWhere,
+  In,
+  IsNull,
+  LessThanOrEqual,
+  MoreThanOrEqual,
+  Repository,
+} from 'typeorm';
 
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
@@ -24,7 +32,10 @@ export class TimesheetsService {
 
   async clockIn(dto: ClockInDto, actor: AuthenticatedUser) {
     if (dto.warehouseId) {
-      await this.warehousesService.assertWarehouseAccess(actor, dto.warehouseId);
+      await this.warehousesService.assertWarehouseAccess(
+        actor,
+        dto.warehouseId,
+      );
     }
 
     const active = await this.timesheetRepository.findOne({
@@ -87,7 +98,7 @@ export class TimesheetsService {
   }
 
   history(actorId: number, from?: Date, to?: Date) {
-    const where: any = { userId: actorId };
+    const where: FindOptionsWhere<Timesheet> = { userId: actorId };
     if (from && to) {
       where.clockIn = Between(from, to);
     } else if (from) {
@@ -103,12 +114,17 @@ export class TimesheetsService {
 
   /** MANAGER/ADMIN only */
   async teamStatus(actor: AuthenticatedUser) {
-    if (!actor.hasGlobalAccess && (!actor.permissions || !actor.permissions.includes('warehouses:global_access'))) {
-      const authorizedIds = await this.warehousesService.getUserAuthorizedWarehouseIds(
-        actor.id,
-        actor.role,
-        actor.permissions,
-      );
+    if (
+      !actor.hasGlobalAccess &&
+      (!actor.permissions ||
+        !actor.permissions.includes('warehouses:global_access'))
+    ) {
+      const authorizedIds =
+        await this.warehousesService.getUserAuthorizedWarehouseIds(
+          actor.id,
+          actor.role,
+          actor.permissions,
+        );
       if (authorizedIds.length === 0) {
         return this.timesheetRepository.find({
           where: { clockOut: IsNull(), warehouseId: IsNull() },

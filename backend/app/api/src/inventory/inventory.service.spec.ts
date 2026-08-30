@@ -33,7 +33,11 @@ describe('InventoryService', () => {
   let materialRepo: { findOne: jest.Mock };
   let userRepo: { findOne: jest.Mock };
   let warehouseRepo: { findOne: jest.Mock };
-  let photoRepo: { createQueryBuilder: jest.Mock; find: jest.Mock; findOne: jest.Mock };
+  let photoRepo: {
+    createQueryBuilder: jest.Mock;
+    find: jest.Mock;
+    findOne: jest.Mock;
+  };
   let storageService: { presignedGetUrl: jest.Mock };
   let auditService: { record: jest.Mock };
   let warehousesService: {
@@ -98,7 +102,13 @@ describe('InventoryService', () => {
         Promise.resolve({ ...data }),
       ),
       findOne: jest.fn(() =>
-        Promise.resolve({ id: 'c1', containerNumber: 'MSMU6896930', blNumber: 'BL-123', shippingLine: 'Maersk', eta: '2026-09-01' }),
+        Promise.resolve({
+          id: 'c1',
+          containerNumber: 'MSMU6896930',
+          blNumber: 'BL-123',
+          shippingLine: 'Maersk',
+          eta: '2026-09-01',
+        }),
       ),
       createQueryBuilder: jest.fn(() => ({
         andWhere: jest.fn().mockReturnThis(),
@@ -119,13 +129,28 @@ describe('InventoryService', () => {
       }),
     };
     materialRepo = {
-      findOne: jest.fn().mockResolvedValue({ id: 'm1', name: 'OCC Cardboard', category: 'paper', unit: 'kg' }),
+      findOne: jest.fn().mockResolvedValue({
+        id: 'm1',
+        name: 'OCC Cardboard',
+        category: 'paper',
+        unit: 'kg',
+      }),
     };
     userRepo = {
-      findOne: jest.fn().mockResolvedValue({ id: 1, fullName: 'Staff Member', email: 'staff@example.com', role: 'staff' }),
+      findOne: jest.fn().mockResolvedValue({
+        id: 1,
+        fullName: 'Staff Member',
+        email: 'staff@example.com',
+        role: 'staff',
+      }),
     };
     warehouseRepo = {
-      findOne: jest.fn().mockResolvedValue({ id: 'w1', name: 'Maple Ridge', code: 'MR-BC', province: 'BC' }),
+      findOne: jest.fn().mockResolvedValue({
+        id: 'w1',
+        name: 'Maple Ridge',
+        code: 'MR-BC',
+        province: 'BC',
+      }),
     };
     photoRepo = {
       createQueryBuilder: jest.fn(() => ({
@@ -148,7 +173,11 @@ describe('InventoryService', () => {
       findOne: jest.fn().mockResolvedValue(null),
     };
     storageService = {
-      presignedGetUrl: jest.fn().mockResolvedValue('https://storage.gwgc.cloud/photos/w1/photo-1.jpg?signed=true'),
+      presignedGetUrl: jest
+        .fn()
+        .mockResolvedValue(
+          'https://storage.gwgc.cloud/photos/w1/photo-1.jpg?signed=true',
+        ),
     };
     auditService = { record: jest.fn().mockResolvedValue(undefined) };
     warehousesService = {
@@ -281,13 +310,14 @@ describe('InventoryService', () => {
   });
 
   describe('WHOLE NUMBER INVENTORY UNITS', () => {
-    it('rejects decimal fraction quantities (e.g. 0.12)', async () => {
+    it('rejects floating point quantities (e.g. 0.12)', async () => {
       await expect(
         service.createTransaction(
           {
             warehouseId: 'w1',
             materialId: 'm1',
             type: 'inbound',
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
             xl: 0.12 as any,
           },
           staffActor,
@@ -302,6 +332,7 @@ describe('InventoryService', () => {
             warehouseId: 'w1',
             materialId: 'm1',
             type: 'inbound',
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
             l: 1.5 as any,
           },
           staffActor,
@@ -368,6 +399,7 @@ describe('InventoryService', () => {
             type: 'inbound',
             xl: 1,
             weightValue: 100,
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
             weightUnit: 'tons' as any,
           },
           staffActor,

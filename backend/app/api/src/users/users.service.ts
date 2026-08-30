@@ -11,6 +11,7 @@ import { Repository } from 'typeorm';
 import { RolesService } from '../roles/roles.service';
 import { WarehousesService } from '../warehouses/warehouses.service';
 import { User } from './entities/user.entity';
+import { AuditService } from '../audit/audit.service';
 
 const BCRYPT_ROUNDS = 12;
 
@@ -27,6 +28,7 @@ export class UsersService {
     private rolesService: RolesService,
     @Inject(forwardRef(() => WarehousesService))
     private warehousesService: WarehousesService,
+    private readonly auditService: AuditService,
   ) {}
 
   async create(
@@ -101,7 +103,8 @@ export class UsersService {
   ): Promise<User | null> {
     const patch: Partial<User> = {};
     if (updates.fullName !== undefined) patch.fullName = updates.fullName;
-    if (updates.email !== undefined) patch.email = normalizeEmail(updates.email);
+    if (updates.email !== undefined)
+      patch.email = normalizeEmail(updates.email);
     if (updates.role !== undefined) patch.role = updates.role;
 
     if (Object.keys(patch).length > 0) {
@@ -114,6 +117,16 @@ export class UsersService {
         updates.warehouseIds,
         actorId,
       );
+      // Record audit event for warehouse access update
+      await this.auditService.record({
+        actorUserId: actorId ?? null,
+        actorRole: null,
+        action: 'user.warehouse_access_updated',
+        entityType: 'user',
+        entityId: id.toString(),
+        warehouseId: null,
+        summary: `Warehouse access updated for user #${id}`,
+      });
     }
 
     return this.findOne(id);
@@ -123,7 +136,9 @@ export class UsersService {
     const user = await this.findOne(id);
     if (!user) return null;
 
-    const permissions = await this.rolesService.getPermissionsForRole(user.role);
+    const permissions = await this.rolesService.getPermissionsForRole(
+      user.role,
+    );
     const hasGlobalAccess = permissions.includes('warehouses:global_access');
     const warehouses = await this.warehousesService.getUserAuthorizedWarehouses(
       user.id,

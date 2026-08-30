@@ -190,10 +190,16 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; color: var(--ink); }
 }
 .grow { flex: 1; }
 
-/* Multi-Warehouse Selector */
-.wh { display: flex; align-items: center; gap: 10px; }
+/* Scope Controls (Facility & Division) */
+.scope-group {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.wh { display: flex; align-items: center; gap: 8px; }
 .wh label {
-  font-family: var(--f-cond); font-size: 11.5px; font-weight: 700;
+  font-family: var(--f-cond); font-size: 11px; font-weight: 700;
   letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase;
 }
 .wh-select-wrap { position: relative; display: inline-flex; align-items: center; }
@@ -208,6 +214,72 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; color: var(--ink); }
 .wh-select-wrap::after {
   content: '▼'; font-size: 9px; color: var(--muted);
   position: absolute; right: 10px; pointer-events: none;
+}
+
+.top-division-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.top-division-wrap label {
+  font-family: var(--f-cond);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.top-division-toggle {
+  display: inline-flex;
+  background: var(--panel-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  padding: 2px;
+  gap: 2px;
+}
+.top-div-btn {
+  background: transparent;
+  border: 0;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.top-div-btn:hover {
+  color: var(--ink);
+}
+.top-div-btn.active, .top-div-btn[aria-pressed="true"] {
+  background: var(--acc);
+  color: #fff;
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+
+.scope-context-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--line-2);
+  padding: 3px 10px;
+  border-radius: 16px;
+  margin: 6px 0 4px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.scope-facility {
+  color: var(--ink);
+}
+.scope-divider {
+  color: var(--muted);
+}
+.scope-division-unit {
+  color: var(--acc);
+  font-weight: 700;
 }
 
 .onlinechip {

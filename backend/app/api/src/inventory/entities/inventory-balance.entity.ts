@@ -11,6 +11,7 @@ import { Column, ViewEntity } from 'typeorm';
   expression: `
     SELECT
       warehouse_id,
+      division,
       material_id,
       SUM(CASE WHEN type = 'inbound' THEN xl WHEN type = 'outbound' THEN -xl WHEN type = 'adjustment' THEN xl ELSE 0 END) AS xl_balance,
       SUM(CASE WHEN type = 'inbound' THEN l WHEN type = 'outbound' THEN -l WHEN type = 'adjustment' THEN l ELSE 0 END) AS l_balance,
@@ -21,12 +22,15 @@ import { Column, ViewEntity } from 'typeorm';
       SUM(CASE WHEN type = 'outbound' THEN total ELSE 0 END) AS outbound_total,
       SUM(CASE WHEN type = 'adjustment' THEN total ELSE 0 END) AS adjustment_total
     FROM inventory_transactions
-    GROUP BY warehouse_id, material_id
+    GROUP BY warehouse_id, division, material_id
   `,
 })
 export class InventoryBalance {
   @Column({ name: 'warehouse_id', type: 'uuid' })
   warehouseId: string;
+
+  @Column({ type: 'varchar', length: 32, default: 'recycling' })
+  division: string;
 
   @Column({ name: 'material_id', type: 'uuid' })
   materialId: string;

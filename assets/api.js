@@ -137,8 +137,11 @@
     createInventoryTransaction: function (data) {
       return request('POST', '/inventory/transactions', data);
     },
-    getInventoryBalances: function (warehouseId) {
-      return request('GET', '/inventory/balances' + qs({ warehouseId: warehouseId }));
+    getInventoryBalances: function (warehouseId, division) {
+      if (typeof warehouseId === 'object') {
+        return request('GET', '/inventory/balances' + qs(warehouseId));
+      }
+      return request('GET', '/inventory/balances' + qs({ warehouseId: warehouseId, division: division }));
     },
 
     // Global Staff Chat

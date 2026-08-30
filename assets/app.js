@@ -334,6 +334,16 @@
   function syncChrome() {
     document.documentElement.setAttribute('data-entity', entity);
     $$('.entsw button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.entity === entity)); });
+    $$('.top-div-btn').forEach(function (b) {
+      var isAct = (b.dataset.entity || b.dataset.div) === entity;
+      b.classList.toggle('active', isAct);
+      b.setAttribute('aria-pressed', String(isAct));
+    });
+
+    var scopeFac = $('#scopeFacilityName');
+    if (scopeFac) scopeFac.textContent = (warehouse() || {}).name || '—';
+    var scopeDiv = $('#scopeDivisionUnit');
+    if (scopeDiv) scopeDiv.textContent = isRecycling() ? 'Recycling · Pallets' : 'Healthcare · Boxes';
 
     $$('[data-only], [data-role]').forEach(function (el) {
       var okEntity = !el.dataset.only || el.dataset.only === entity;
@@ -385,6 +395,7 @@
           sel.onchange = function (e) {
             warehouseId = e.target.value;
             S.setWarehouse(warehouseId);
+            syncChrome();
             render();
           };
         }
@@ -473,11 +484,12 @@
 
     loadingState('#invenBody');
 
+    var div = isRecycling() ? 'recycling' : 'healthcare';
     Promise.all([
       Api.listMaterials(),
-      Api.getInventoryBalances(w.id),
-      Api.listInventoryTransactions({ warehouseId: w.id }),
-      Api.listContainers({ warehouseId: w.id })
+      Api.getInventoryBalances(w.id, div),
+      Api.listInventoryTransactions({ warehouseId: w.id, division: div }),
+      Api.listContainers({ warehouseId: w.id, division: div })
     ]).then(function (res) {
       var allMaterials = res[0];
       var balances = res[1];
@@ -2869,12 +2881,15 @@
       });
     }
 
-    $$('.entsw button').forEach(function (b) {
+    $$('.entsw button, .top-div-btn').forEach(function (b) {
       b.addEventListener('click', function () {
-        entity = b.dataset.entity;
+        var newEntity = b.dataset.entity || b.dataset.div;
+        if (!newEntity) return;
+        entity = newEntity;
         db.entity = entity;
         S.save(db);
         if (view === 'invoices' && isHealthcare()) view = 'inventory';
+        syncChrome();
         render();
       });
     });

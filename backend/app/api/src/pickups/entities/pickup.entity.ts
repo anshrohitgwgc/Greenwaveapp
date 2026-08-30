@@ -3,39 +3,49 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  UpdateDateColumn,
 } from 'typeorm';
 
-@Entity()
+@Entity({ name: 'pickup' })
 export class Pickup {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
-  customerName: string;
+  @Column({ name: 'userId', type: 'int', default: 1 })
+  userId: number;
 
-  @Column()
+  @Column({ name: 'address', type: 'text' })
   address: string;
 
-  @Column()
-  materialType: string;
-
   @Column({
-    type: 'float',
-    nullable: true,
+    name: 'wasteType',
+    type: 'varchar',
+    length: 100,
+    default: 'electronics',
   })
-  estimatedWeight: number;
+  wasteType: string;
 
-  @Column({
-    type: 'text',
-    nullable: true,
-  })
-  notes: string;
+  @Column({ name: 'estimatedWeightKg', type: 'numeric', nullable: true })
+  estimatedWeightKg: number | null;
 
-  @Column({
-    default: 'pending',
-  })
+  @Column({ name: 'actualWeightKg', type: 'numeric', nullable: true })
+  actualWeightKg: number | null;
+
+  @Column({ name: 'priceTotal', type: 'numeric', nullable: true })
+  priceTotal: number | null;
+
+  @Column({ name: 'assignedDriverId', type: 'int', nullable: true })
+  assignedDriverId: number | null;
+
+  @Column({ name: 'notes', type: 'text', nullable: true })
+  notes: string | null;
+
+  @Column({ name: 'status', type: 'varchar', default: 'pending' })
   status: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ name: 'createdAt' })
   createdAt: Date;
+
+  @UpdateDateColumn({ name: 'updatedAt' })
+  updatedAt: Date;
 }

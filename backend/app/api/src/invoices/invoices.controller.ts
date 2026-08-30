@@ -44,7 +44,11 @@ export class InvoicesController {
     @Query('warehouseId') warehouseId?: string,
     @Query('status') status?: string,
   ) {
-    return this.invoicesService.findAll(actor, { customerId, warehouseId, status });
+    return this.invoicesService.findAll(actor, {
+      customerId,
+      warehouseId,
+      status,
+    });
   }
 
   @Get(':id')

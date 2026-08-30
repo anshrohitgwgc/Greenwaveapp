@@ -86,7 +86,10 @@ export class AuditService {
     },
   ): Promise<{ items: AuditEvent[]; total: number }> {
     if (filters.warehouseId) {
-      await this.warehousesService.assertWarehouseAccess(actor, filters.warehouseId);
+      await this.warehousesService.assertWarehouseAccess(
+        actor,
+        filters.warehouseId,
+      );
     }
 
     const qb = this.auditRepository
@@ -101,13 +104,15 @@ export class AuditService {
       });
     } else if (
       !actor.hasGlobalAccess &&
-      (!actor.permissions || !actor.permissions.includes('warehouses:global_access'))
+      (!actor.permissions ||
+        !actor.permissions.includes('warehouses:global_access'))
     ) {
-      const authorizedIds = await this.warehousesService.getUserAuthorizedWarehouseIds(
-        actor.id,
-        actor.role,
-        actor.permissions,
-      );
+      const authorizedIds =
+        await this.warehousesService.getUserAuthorizedWarehouseIds(
+          actor.id,
+          actor.role,
+          actor.permissions,
+        );
       if (authorizedIds.length === 0) {
         qb.andWhere('event.warehouseId IS NULL');
       } else {

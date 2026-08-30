@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { clearAuth, getUser } from "../auth/authStorage";
+import FacilitySelector from "../components/FacilitySelector";
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
+  const [warehouseId, setWarehouseId] = useState("");
 
   useEffect(() => {
     const storedUser = getUser();
@@ -28,7 +30,7 @@ export default function Dashboard() {
       <header className="navbar">
         <div className="navbar-container">
           <div className="navbar-brand">
-            <span className="brand-icon">♻</span>
+            <img src="/assets/logo.png" alt="GreenWave" className="navbar-logo-img" data-testid="navbar-logo" />
             <div className="brand-text-group">
               <span className="navbar-title">GreenWave</span>
               <span className="navbar-badge">Operations Portal</span>
@@ -36,6 +38,19 @@ export default function Dashboard() {
           </div>
 
           <div className="navbar-actions">
+            <FacilitySelector
+              selectedWarehouseId={warehouseId}
+              onSelectWarehouse={setWarehouseId}
+            />
+            <Link to="/inventory" className="btn btn-outline btn-sm">
+              Inventory
+            </Link>
+            <Link to="/timesheets" className="btn btn-outline btn-sm">
+              Time Clock
+            </Link>
+            <Link to="/invoices" className="btn btn-outline btn-sm">
+              Invoices
+            </Link>
             <Link to="/pickups" className="btn btn-outline btn-sm">
               Pickups
             </Link>

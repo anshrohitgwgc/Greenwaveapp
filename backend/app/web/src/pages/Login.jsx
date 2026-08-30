@@ -60,8 +60,13 @@ export default function Login() {
         {/* Brand Header */}
         <div className="brand-header">
           <div className="brand-logo">
-            <span className="brand-icon">♻</span>
-            <span className="brand-name">GreenWave</span>
+            <img
+              src="/assets/logo.png"
+              alt="GreenWave Recycling"
+              className="brand-logo-img"
+              data-testid="brand-logo"
+            />
+            <span className="brand-name" style={{ display: "none" }}>GreenWave</span>
           </div>
           <p className="brand-subtitle">RECYCLING OPERATIONS PORTAL</p>
         </div>
