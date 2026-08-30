@@ -27,7 +27,7 @@
         email: 'sales@greenwaverecycling.ca',
         phone: '6724720423',
         bn: 'BN 751161951BC0001',
-        gst: 'GST/HST Registration No. 751161951RT0001'
+        gst: '751161951RT0001'
       },
       session: null,    // 'server' once signed in against the real API, else null
       serverUser: null, // { id, email, name, role } from the last successful /auth/login

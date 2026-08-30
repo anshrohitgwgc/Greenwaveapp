@@ -53,6 +53,22 @@
     return Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: dp || 0, maximumFractionDigits: dp === undefined ? 3 : dp });
   }
   function today() { return new Date().toISOString().slice(0, 10); }
+  function ddmmyyyy(input) {
+    if (!input) return '';
+    var d = (input instanceof Date) ? input : new Date(input);
+    if (isNaN(d.getTime())) return '';
+    var dd = String(d.getDate()).padStart(2, '0');
+    var mm = String(d.getMonth() + 1).padStart(2, '0');
+    return dd + '/' + mm + '/' + d.getFullYear();
+  }
+  function paymentStatusMeta(status) {
+    var s = String(status || 'unpaid').toLowerCase();
+    if (s === 'paid') return { label: 'PAID', cls: 'badge-paid' };
+    if (s === 'pending') return { label: 'PAYMENT PENDING', cls: 'badge-pending' };
+    if (s === 'failed') return { label: 'PAYMENT FAILED', cls: 'badge-failed' };
+    if (s === 'refunded') return { label: 'REFUNDED', cls: 'badge-refunded' };
+    return { label: 'PAYMENT DUE', cls: 'badge-unpaid' };
+  }
   function initials(name) {
     var p = String(name || '?').trim().split(/\s+/);
     return ((p[0] || '?')[0] + (p.length > 1 ? p[p.length - 1][0] : '')).toUpperCase();
@@ -176,6 +192,7 @@
   var currentShiftCache = null;
   var clockTimer = null;
   var draft = null;
+  var editorViewMode = false;
   var invoiceListCache = [];
 
   var chatMessages = [];
@@ -2129,6 +2146,8 @@
       paymentInstructions: 'sales@greenwaverecycling.ca\n6724720423',
       notes: '',
       status: 'draft',
+      paymentStatus: null,
+      paidAt: null,
       items: [
         {
           serviceDate: today(),
@@ -2211,6 +2230,8 @@
       paymentInstructions: inv.paymentInstructions || 'sales@greenwaverecycling.ca\n6724720423',
       notes: inv.notes || '',
       status: inv.status || 'draft',
+      paymentStatus: inv.paymentStatus || 'unpaid',
+      paidAt: inv.paidAt || null,
       items: items
     };
   }
@@ -2243,6 +2264,53 @@
       var penEl = $('#kpiPendingCount');
       if (penEl) penEl.textContent = String(metrics.pendingCount || 0);
     }).catch(function () {});
+  }
+
+  function showPaymentLinkModal(invId) {
+    Api.getPaymentLink(invId).then(function (linkRes) {
+      var fullUrl = window.location.origin + linkRes.paymentUrl;
+      openModal('Secure Customer Payment Link: #' + linkRes.invoiceNumber,
+        '<p style="color:var(--ink-2);margin-bottom:12px">Share this secure payment link with the customer to collect payment online:</p>' +
+        '<div style="margin-bottom:16px">' +
+          '<input type="text" id="modalPayUrl" class="inv-bare-input" readonly value="' + esc(fullUrl) + '" style="background:var(--panel-2);padding:10px 12px;border:1px solid var(--line-2);border-radius:var(--r);font-family:var(--f-mono);font-size:13px;width:100%">' +
+        '</div>' +
+        '<div style="display:flex;gap:10px;justify-content:flex-end">' +
+          '<button type="button" class="btn btn-secondary btn-sm" id="btnCopyPayLink">Copy Payment Link</button>' +
+          '<a href="' + esc(linkRes.paymentUrl) + '" target="_blank" class="btn btn-primary btn-sm" style="text-decoration:none">Open Checkout Page</a>' +
+        '</div>',
+        function () { return Promise.resolve(); }
+      );
+
+      var copyBtn = $('#btnCopyPayLink');
+      if (copyBtn) {
+        copyBtn.onclick = function () {
+          navigator.clipboard.writeText(fullUrl).then(function () {
+            toast('Payment link copied to clipboard!');
+          }).catch(function () {
+            toast('Link copied: ' + fullUrl);
+          });
+        };
+      }
+    }).catch(function (err) { toast(err.message || 'Could not generate payment link.'); });
+  }
+
+  function showSendInvoiceModal(inv) {
+    if (!inv) return;
+    openModal('Send Invoice #' + inv.invoiceNumber + ' to Customer',
+      '<p style="color:var(--ink-2);margin-bottom:12px">Send the invoice summary with the secure payment link directly to customer email:</p>' +
+      field('recipientEmail', 'Customer Email', { type: 'email', required: true, value: (inv.companyInfo && inv.companyInfo.email) || '' }) +
+      field('customMessage', 'Custom Message (Optional)', { type: 'textarea', placeholder: 'Thank you for your business. Please review and pay online.' }),
+      function (fd) {
+        if (!fd.recipientEmail) {
+          toast('Please enter a customer recipient email.');
+          return Promise.reject(new Error('Recipient email required'));
+        }
+        return Api.sendInvoiceEmail(inv.id, fd.recipientEmail, fd.customMessage).then(function (res) {
+          toast('Invoice #' + inv.invoiceNumber + ' dispatched to ' + res.recipient);
+          updateInvoiceMetrics();
+        });
+      }
+    );
   }
 
   function renderInvoiceList() {
@@ -2319,6 +2387,7 @@
           var inv = invoiceListCache.filter(function (x) { return x.id === btn.dataset.viewInv; })[0];
           if (inv) {
             draft = invoiceToDraft(inv);
+            editorViewMode = true;
             show('editor');
           }
         });
@@ -2327,32 +2396,7 @@
       $$('.btn-pay-link').forEach(function (btn) {
         btn.addEventListener('click', function (e) {
           e.stopPropagation();
-          var invId = btn.dataset.payLink;
-          Api.getPaymentLink(invId).then(function (linkRes) {
-            var fullUrl = window.location.origin + linkRes.paymentUrl;
-            openModal('Secure Customer Payment Link: #' + linkRes.invoiceNumber,
-              '<p style="color:var(--ink-2);margin-bottom:12px">Share this secure payment link with the customer to collect payment online:</p>' +
-              '<div style="margin-bottom:16px">' +
-                '<input type="text" id="modalPayUrl" class="inv-bare-input" readonly value="' + esc(fullUrl) + '" style="background:var(--panel-2);padding:10px 12px;border:1px solid var(--line-2);border-radius:var(--r);font-family:var(--f-mono);font-size:13px;width:100%">' +
-              '</div>' +
-              '<div style="display:flex;gap:10px;justify-content:flex-end">' +
-                '<button type="button" class="btn btn-secondary btn-sm" id="btnCopyPayLink">Copy Payment Link</button>' +
-                '<a href="' + esc(linkRes.paymentUrl) + '" target="_blank" class="btn btn-primary btn-sm" style="text-decoration:none">Open Checkout Page</a>' +
-              '</div>',
-              function () { return Promise.resolve(); }
-            );
-
-            var copyBtn = $('#btnCopyPayLink');
-            if (copyBtn) {
-              copyBtn.onclick = function () {
-                navigator.clipboard.writeText(fullUrl).then(function () {
-                  toast('Payment link copied to clipboard!');
-                }).catch(function () {
-                  toast('Link copied: ' + fullUrl);
-                });
-              };
-            }
-          }).catch(function (err) { toast(err.message || 'Could not generate payment link.'); });
+          showPaymentLinkModal(btn.dataset.payLink);
         });
       });
 
@@ -2360,23 +2404,7 @@
         btn.addEventListener('click', function (e) {
           e.stopPropagation();
           var inv = invoiceListCache.filter(function (x) { return x.id === btn.dataset.sendInv; })[0];
-          if (!inv) return;
-
-          openModal('Send Invoice #' + inv.invoiceNumber + ' to Customer',
-            '<p style="color:var(--ink-2);margin-bottom:12px">Send the invoice summary with the secure payment link directly to customer email:</p>' +
-            field('recipientEmail', 'Customer Email', { type: 'email', required: true, value: (inv.companyInfo && inv.companyInfo.email) || '' }) +
-            field('customMessage', 'Custom Message (Optional)', { type: 'textarea', placeholder: 'Thank you for your business. Please review and pay online.' }),
-            function (fd) {
-              if (!fd.recipientEmail) {
-                toast('Please enter a customer recipient email.');
-                return Promise.reject(new Error('Recipient email required'));
-              }
-              return Api.sendInvoiceEmail(inv.id, fd.recipientEmail, fd.customMessage).then(function (res) {
-                toast('Invoice #' + inv.invoiceNumber + ' dispatched to ' + res.recipient);
-                updateInvoiceMetrics();
-              });
-            }
-          );
+          showSendInvoiceModal(inv);
         });
       });
 
@@ -2385,6 +2413,7 @@
           e.stopPropagation();
           Api.duplicateInvoice(b.dataset.dupe).then(function (saved) {
             draft = invoiceToDraft(saved);
+            editorViewMode = false;
             toast('Duplicated as invoice ' + saved.invoiceNumber + '.');
             show('editor');
           }).catch(function (err) { toast(err.message || 'Could not duplicate invoice.'); });
@@ -2419,14 +2448,200 @@
 
   /* ==========================================================================
      Authoritative Invoice Editor & Print Layout (Aligned with Invoice 1114.pdf)
+
+     Two rendering modes share one draft object:
+       - Document mode (editorViewMode=true) — read-only, print-ready
+         invoice for a saved record opened via "View".
+       - Editor mode (editorViewMode=false) — the input/textarea form
+         used to create a new invoice or amend an existing one.
      ========================================================================== */
   function renderEditor() {
     if (!draft) draft = newDraft();
     var edTitle = $('#edTitle');
-    if (edTitle) edTitle.textContent = draft.invoiceNumber ? 'Invoice ' + draft.invoiceNumber : 'New Invoice';
+    if (edTitle) {
+      edTitle.textContent = editorViewMode
+        ? 'Invoice #' + (draft.invoiceNumber || '')
+        : (draft.invoiceNumber ? 'Edit Invoice #' + draft.invoiceNumber : 'New Invoice');
+    }
 
+    var edPrint = $('#edPrint');
+    if (edPrint) edPrint.onclick = function () { window.print(); };
+
+    var canShowInvoiceActions = editorViewMode && !!draft.id;
+    var edPayLink = $('#edPayLink');
+    if (edPayLink) {
+      edPayLink.hidden = !canShowInvoiceActions;
+      edPayLink.onclick = function () { showPaymentLinkModal(draft.id); };
+    }
+    var edSendInv = $('#edSendInv');
+    if (edSendInv) {
+      edSendInv.hidden = !canShowInvoiceActions;
+      edSendInv.onclick = function () { showSendInvoiceModal(draft); };
+    }
+
+    var edSave = $('#edSave');
+    if (editorViewMode) {
+      if (edSave) {
+        edSave.disabled = false;
+        edSave.innerHTML = '<svg><use href="#i-edit"></use></svg>Edit Invoice';
+        edSave.onclick = function () { editorViewMode = false; renderEditor(); };
+      }
+      renderInvoiceDocumentView();
+    } else {
+      if (edSave) {
+        edSave.disabled = false;
+        edSave.innerHTML = '<svg><use href="#i-check"></use></svg>Save Invoice';
+      }
+      renderInvoiceEditorForm();
+    }
+  }
+
+  /* Read-only, professional invoice document — used for the "View" flow
+     and for print/PDF output. No inputs, textareas, or edit affordances. */
+  function renderInvoiceDocumentView() {
     var co = draft.companyInfo || {};
     var tot = totalsLocal(draft);
+    var pStatus = paymentStatusMeta(draft.paymentStatus);
+
+    var itemsHtml = draft.items.map(function (it, idx) {
+      var lineAmt = lineAmountDollars(it);
+      return '<tr>' +
+        '<td class="mono" style="font-size:12px;color:var(--muted)">' + (idx + 1) + '</td>' +
+        '<td class="mono">' + esc(it.serviceDate || draft.invoiceDate) + '</td>' +
+        '<td>' + esc(it.productService || '—') + '</td>' +
+        '<td>' + esc(it.unit || '—') + '</td>' +
+        '<td>' + esc(it.description || '—') + '</td>' +
+        '<td class="num mono">' + num(it.quantity, 3) + '</td>' +
+        '<td class="num mono">' + moneyDollars(it.unitPrice) + '</td>' +
+        '<td class="num mono" style="font-weight:600">' + moneyDollars(lineAmt) + '</td>' +
+        '<td class="inv-doc-tax">' + esc(it.taxRateLabel || 'GST') + '</td>' +
+      '</tr>';
+    }).join('');
+
+    var html =
+      '<div class="invoice-doc-container">' +
+        '<div class="invoice-page-1114 invoice-doc-readonly">' +
+
+          '<div class="inv-1114-header">' +
+            '<div class="inv-1114-co-left">' +
+              '<h1 class="inv-1114-title">INVOICE</h1>' +
+              '<div class="inv-doc-text" style="font-weight:700">' + esc(co.name || 'Greenwave Recycling Inc.') + '</div>' +
+              '<div class="inv-doc-text">' + esc(co.bn || '') + '</div>' +
+              '<div style="font-size:11.5px;color:#666666;margin-top:3px">GST/HST Registration No.</div>' +
+              '<div class="inv-doc-text">' + esc(co.gst || '') + '</div>' +
+            '</div>' +
+
+            '<div class="inv-1114-co-mid">' +
+              '<div style="height:34px"></div>' +
+              '<div class="inv-doc-text">' + esc(co.line1 || '') + '</div>' +
+              '<div class="inv-doc-text">' + esc(co.line2 || '') + '</div>' +
+              '<div class="inv-doc-text">' + esc(co.email || '') + '</div>' +
+              '<div class="inv-doc-text">' + esc(co.phone || '') + '</div>' +
+            '</div>' +
+
+            '<div class="inv-1114-logo-wrap">' +
+              '<img src="assets/logo.png" alt="Greenwave Logo" class="inv-1114-logo-img">' +
+              '<div class="inv-1114-logo-sub">greenwave recycling</div>' +
+            '</div>' +
+          '</div>' +
+
+          '<div class="inv-1114-banner">' +
+            '<div class="inv-1114-banner-col">' +
+              '<label>Bill to</label>' +
+              '<div class="inv-doc-address">' + (draft.billTo ? esc(draft.billTo) : '<span class="inv-doc-muted">—</span>') + '</div>' +
+            '</div>' +
+            '<div class="inv-1114-banner-col">' +
+              '<label>Ship to</label>' +
+              '<div class="inv-doc-address">' + (draft.shipTo ? esc(draft.shipTo) : '<span class="inv-doc-muted">—</span>') + '</div>' +
+            '</div>' +
+          '</div>' +
+
+          '<div class="inv-1114-meta-grid">' +
+            '<div class="inv-1114-meta-block">' +
+              '<h4>Shipping info</h4>' +
+              '<div class="inv-1114-meta-row"><label>Ship via:</label><span>' + esc(draft.shipVia || '—') + '</span></div>' +
+              '<div class="inv-1114-meta-row"><label>Ship date:</label><span>' + esc(draft.shipDate || '—') + '</span></div>' +
+            '</div>' +
+
+            '<div class="inv-1114-meta-block">' +
+              '<h4>Invoice details</h4>' +
+              '<div class="inv-1114-meta-row"><label>Invoice no.:</label><span class="mono" style="font-weight:700">' + esc(draft.invoiceNumber || '—') + '</span></div>' +
+              '<div class="inv-1114-meta-row"><label>Terms:</label><span>' + esc(draft.paymentTerms || '—') + '</span></div>' +
+              '<div class="inv-1114-meta-row"><label>Invoice date:</label><span>' + esc(draft.invoiceDate || '—') + '</span></div>' +
+              '<div class="inv-1114-meta-row"><label>Due date:</label><span>' + esc(draft.dueDate || '—') + '</span></div>' +
+              (draft.id ? (
+                '<div class="inv-1114-meta-row"><label>Status:</label><span class="badge ' + pStatus.cls + '">' + pStatus.label + '</span></div>' +
+                (draft.paymentStatus === 'paid' && draft.paidAt ? '<div class="inv-1114-meta-row"><label></label><span class="inv-doc-paid-date">Paid on: ' + ddmmyyyy(draft.paidAt) + '</span></div>' : '')
+              ) : '') +
+            '</div>' +
+          '</div>' +
+
+          '<div class="inv-1114-table-wrap">' +
+            '<table class="inv-1114-table">' +
+              '<thead>' +
+                '<tr>' +
+                  '<th style="width:30px">#</th>' +
+                  '<th style="width:110px">Service Date</th>' +
+                  '<th style="width:120px">Product/service</th>' +
+                  '<th style="width:60px">Unit</th>' +
+                  '<th>Description</th>' +
+                  '<th class="num" style="width:65px">Qty</th>' +
+                  '<th class="num" style="width:85px">Rate ($)</th>' +
+                  '<th class="num" style="width:90px">Amount ($)</th>' +
+                  '<th style="width:60px">Tax</th>' +
+                '</tr>' +
+              '</thead>' +
+              '<tbody>' + (itemsHtml || '<tr><td colspan="9" style="text-align:center;color:var(--muted)">No line items</td></tr>') + '</tbody>' +
+            '</table>' +
+          '</div>' +
+
+          '<div class="inv-1114-bottom-grid">' +
+            '<div class="inv-1114-instructions-col">' +
+              '<h4>Payment instructions</h4>' +
+              '<div class="inv-doc-text-block">' + (draft.paymentInstructions ? esc(draft.paymentInstructions) : '<span class="inv-doc-muted">—</span>') + '</div>' +
+              '<h4 style="margin-top:18px">Additional notes / memo</h4>' +
+              '<div class="inv-doc-text-block">' + (draft.notes ? esc(draft.notes) : '<span class="inv-doc-muted">—</span>') + '</div>' +
+            '</div>' +
+
+            '<div class="inv-1114-totals-col">' +
+              '<div class="inv-1114-totals-row">' +
+                '<span>Subtotal</span>' +
+                '<span class="mono">' + moneyDollars(tot.subtotal) + '</span>' +
+              '</div>' +
+              '<div class="inv-1114-totals-row">' +
+                '<span>' + esc(draft.taxLabel || 'GST @ 5%') + '</span>' +
+                '<span class="mono">' + moneyDollars(tot.tax) + '</span>' +
+              '</div>' +
+              '<div class="inv-1114-totals-row inv-1114-total-due-row">' +
+                '<span>TOTAL</span>' +
+                '<span class="mono">' + moneyDollars(tot.total) + '</span>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
+
+          '<div class="inv-1114-footer">' +
+            '<div class="inv-1114-footer-name">' + esc(co.name || 'Greenwave Recycling Inc.') + '</div>' +
+            '<div class="inv-1114-footer-contact">' +
+              esc(co.line1 || '') + (co.line2 ? ', ' + esc(co.line2) : '') +
+              (co.email ? ' &middot; ' + esc(co.email) : '') +
+              (co.phone ? ' &middot; ' + esc(co.phone) : '') +
+            '</div>' +
+          '</div>' +
+
+        '</div>' +
+      '</div>';
+
+    var edBody = $('#editorBody');
+    if (!edBody) return;
+    edBody.innerHTML = html;
+  }
+
+  /* Editable invoice form — inputs/textareas live here only, never in the
+     read-only document view above. */
+  function renderInvoiceEditorForm() {
+    var co = draft.companyInfo || {};
+    var tot = totalsLocal(draft);
+    var pStatus = paymentStatusMeta(draft.paymentStatus);
 
     var html =
       '<div class="invoice-doc-container">' +
@@ -2482,6 +2697,7 @@
               '<div class="inv-1114-meta-row"><label>Terms:</label><input type="text" id="edTerms" class="inv-1114-meta-input" value="' + esc(draft.paymentTerms || 'Net 15') + '"></div>' +
               '<div class="inv-1114-meta-row"><label>Invoice date:</label><input type="date" id="edDate" class="inv-1114-meta-input" value="' + esc(draft.invoiceDate) + '"></div>' +
               '<div class="inv-1114-meta-row"><label>Due date:</label><input type="date" id="edDueDate" class="inv-1114-meta-input" value="' + esc(draft.dueDate) + '"></div>' +
+              (draft.id ? '<div class="inv-1114-meta-row"><label>Status:</label><span class="badge ' + pStatus.cls + '">' + pStatus.label + '</span></div>' : '') +
             '</div>' +
           '</div>' +
 
@@ -2493,7 +2709,7 @@
                   '<th style="width:30px">#</th>' +
                   '<th style="width:110px">Service Date</th>' +
                   '<th style="width:120px">Product/service</th>' +
-                  '<th style="width:60px">Unit.</th>' +
+                  '<th style="width:60px">Unit</th>' +
                   '<th>Description</th>' +
                   '<th class="num" style="width:65px">Qty</th>' +
                   '<th class="num" style="width:85px">Rate ($)</th>' +
@@ -2549,12 +2765,6 @@
                 '<span class="mono" id="edTotalVal" style="font-weight:700;font-size:16px">' + moneyDollars(tot.total) + '</span>' +
               '</div>' +
             '</div>' +
-          '</div>' +
-
-          /* 6. BOTTOM ACTIONS (Save, Print, Back) */
-          '<div class="inv-1114-actions-bar noprint">' +
-            '<button type="button" class="btn ghost" id="edPrintBottom"><svg><use href="#i-print"></use></svg>Print / Save PDF</button>' +
-            '<button type="button" class="btn btn-primary" id="edSaveBottom"><svg><use href="#i-check"></use></svg>Save Invoice</button>' +
           '</div>' +
 
         '</div>' +
@@ -2642,11 +2852,6 @@
       });
     });
 
-    var doPrint = function () { window.print(); };
-    var edPrint = $('#edPrint'); if (edPrint) edPrint.onclick = doPrint;
-    var printBottom = $('#edPrintBottom');
-    if (printBottom) printBottom.onclick = doPrint;
-
     var doSave = function () {
       syncDraftValues();
 
@@ -2680,31 +2885,26 @@
         })
       };
 
-      var btnTop = $('#edSave');
-      var btnBottom = $('#edSaveBottom');
-      if (btnTop) { btnTop.disabled = true; btnTop.textContent = 'Saving…'; }
-      if (btnBottom) { btnBottom.disabled = true; btnBottom.textContent = 'Saving…'; }
+      var btnSave = $('#edSave');
+      if (btnSave) { btnSave.disabled = true; btnSave.textContent = 'Saving…'; }
 
-      var resetButtons = function () {
-        if (btnTop) { btnTop.disabled = false; btnTop.innerHTML = '<svg><use href="#i-check"></use></svg>Save invoice'; }
-        if (btnBottom) { btnBottom.disabled = false; btnBottom.innerHTML = '<svg><use href="#i-check"></use></svg>Save Invoice'; }
+      var resetButton = function () {
+        if (btnSave) { btnSave.disabled = false; btnSave.innerHTML = '<svg><use href="#i-check"></use></svg>Save Invoice'; }
       };
 
       var req = draft.id ? Api.updateInvoice(draft.id, payload) : Api.createInvoice(payload);
       req.then(function (res) {
-        resetButtons();
+        resetButton();
         toast('Invoice #' + res.invoiceNumber + ' created successfully.');
         draft = null;
         show('invoices');
       }).catch(function (err) {
-        resetButtons();
+        resetButton();
         toast(err.message || 'Unable to save invoice. Please check all fields.');
       });
     };
 
     var edSave = $('#edSave'); if (edSave) edSave.onclick = doSave;
-    var saveBottom = $('#edSaveBottom');
-    if (saveBottom) saveBottom.onclick = doSave;
   }
 
   function renderCustomers() {
@@ -3326,7 +3526,7 @@
     if (lbCloseBtn) lbCloseBtn.addEventListener('click', function () { var lb = $('#lightbox'); if (lb) lb.hidden = true; });
 
     var newInvoiceBtn = $('#newInvoice');
-    if (newInvoiceBtn) newInvoiceBtn.addEventListener('click', function () { draft = newDraft(); show('editor'); });
+    if (newInvoiceBtn) newInvoiceBtn.addEventListener('click', function () { draft = newDraft(); editorViewMode = false; show('editor'); });
     var newCustomerBtn = $('#newCustomer');
     if (newCustomerBtn) {
       newCustomerBtn.addEventListener('click', function () {
