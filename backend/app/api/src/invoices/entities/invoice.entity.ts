@@ -108,6 +108,49 @@ export class Invoice {
   @Column({ type: 'varchar', length: 16, default: 'draft' })
   status: string;
 
+  @Column({
+    name: 'payment_status',
+    type: 'varchar',
+    length: 32,
+    default: 'unpaid',
+  })
+  paymentStatus: string;
+
+  @Column({
+    name: 'payment_token',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+    unique: true,
+  })
+  paymentToken: string | null;
+
+  @Column({ type: 'varchar', length: 8, default: 'CAD' })
+  currency: string;
+
+  @Column({
+    name: 'paid_at',
+    type: process.env.NODE_ENV === 'test' ? 'datetime' : 'timestamptz',
+    nullable: true,
+  })
+  paidAt: Date | null;
+
+  @Column({
+    name: 'payment_provider',
+    type: 'varchar',
+    length: 32,
+    nullable: true,
+  })
+  paymentProvider: string | null;
+
+  @Column({
+    name: 'payment_reference',
+    type: 'varchar',
+    length: 128,
+    nullable: true,
+  })
+  paymentReference: string | null;
+
   @Column({ name: 'warehouse_id', type: 'uuid', nullable: true })
   warehouseId: string | null;
 

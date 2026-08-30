@@ -84,8 +84,16 @@ export class CreateInvoiceDto {
   warehouseId?: string;
 
   @IsOptional()
-  @IsIn(['draft', 'final'])
+  @IsIn(['draft', 'final', 'paid'])
   status?: string;
+
+  @IsOptional()
+  @IsIn(['CAD', 'USD'])
+  currency?: string;
+
+  @IsOptional()
+  @IsIn(['unpaid', 'pending', 'paid', 'failed', 'cancelled', 'refunded'])
+  paymentStatus?: string;
 
   @IsArray()
   @ValidateNested({ each: true })

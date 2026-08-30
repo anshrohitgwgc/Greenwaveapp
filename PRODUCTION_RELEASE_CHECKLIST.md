@@ -1,10 +1,10 @@
 # PRODUCTION RELEASE CHECKLIST — GREENWAVE V2
 
 **Branch:** `greenwave-v2`  
-**Baseline Commit:** `51af5b332f2d704c6554e4d46de94bec73d74740`  
-**Timestamp:** `2026-08-29T21:48:00-07:00`  
+**Baseline Commit:** `25f3d57f935b558ebe74af2112ba320a99018a06`  
+**Timestamp:** `2026-08-29T21:56:00-07:00`  
 **Deployment Target:** `https://gwgc.cloud` (Frontend) / `https://api.gwgc.cloud` (API)  
-**Release State:** **RELEASE CANDIDATE (DO NOT DEPLOY WITHOUT APPROVAL)**
+**Release State:** **RELEASE CANDIDATE VERIFIED**
 
 ---
 
@@ -12,7 +12,7 @@
 
 | Test Category | Expected | Actual Result | Status |
 |---|---|---|---|
-| **Playwright E2E Suite** | 27 / 27 passing | `27 passed, 0 failed, 0 skipped` (Duration: 1.1m) | **PASS** |
+| **Playwright E2E Suite** | 29 / 29 passing | `29 passed, 0 failed, 0 skipped` (Duration: 32.8s) | **PASS** |
 | **Backend Unit Tests (Jest)** | 104 / 104 passing | `104 passed, 0 failed` (20 suites) | **PASS** |
 | **Backend Lint (ESLint)** | 0 errors | `0 errors, 0 warnings` | **PASS** |
 | **Backend Build (NestJS)** | Exit code 0 | `dist/main.js` built successfully | **PASS** |
@@ -26,13 +26,13 @@
 
 | Component | Target Environment | Verified State | Status |
 |---|---|---|---|
-| **Branding Logo** | Frontend App Header & Invoices | High-resolution user-supplied asset is **unavailable**; fallback Unicode glyph (`♻ GreenWave`) active | **BLOCKED (SOURCE UNAVAILABLE)** |
+| **Branding Logo** | Frontend App Header & Invoices | High-resolution user-supplied asset (`860x311`, `SHA256: 42909d88...`) integrated across Login, Navbar, and Invoices | **PASS** |
 | **PostgreSQL Database** | Port `5432` / `greenwave_prod` | 19 tables verified, 13 SQL migrations complete, `inventory_balances` dynamic view active, `synchronize: false` | **PASS** |
 | **API Server (NestJS)** | `https://api.gwgc.cloud` (Nodes 1-3) | Multi-node stateless cluster, JWT Bearer guard, 2D warehouse/division RBAC, rate-limiting active | **PASS** |
 | **Frontend SPA (Vite)** | `https://gwgc.cloud` (VM101 / Nginx) | React 19 SPA, Responsive 5-viewport verified, Lightbox modal, Live timer ticker, Invoice print/PDF | **PASS** |
 | **Redis Cache & Queue** | Port `6379` | Session tokens, fixed-window login rate limiting (10 attempts/min) | **PASS** |
 | **MinIO S3 Storage** | Port `9000` / Bucket `greenwave-photos` | S3 object storage for multi-facility evidence photos with presigned URLs | **PASS** |
-| **Service Worker & Cache** | `sw.js` | Versioned offline cache (`greenwave-v14`), API paths bypassed, claim on activate | **PASS** |
+| **Service Worker & Cache** | `sw.js` | Versioned offline cache (`greenwave-v15`), API paths bypassed, claim on activate | **PASS** |
 
 ---
 

@@ -37,6 +37,7 @@ export class UsersService {
       email: string;
       password: string;
       role?: string;
+      status?: string;
       warehouseIds?: string[];
     },
     creatorId?: number,
@@ -57,6 +58,7 @@ export class UsersService {
       email,
       password,
       role: userData.role ?? 'staff',
+      status: userData.status ?? 'active',
     });
 
     const saved = await this.usersRepository.save(user);
@@ -72,12 +74,38 @@ export class UsersService {
     return saved;
   }
 
+  async recordLogin(userId: number): Promise<void> {
+    await this.usersRepository.update(userId, {
+      lastLoginAt: new Date(),
+    });
+  }
+
   async count(): Promise<number> {
     return this.usersRepository.count();
   }
 
   async findAll(): Promise<User[]> {
     return this.usersRepository.find({ order: { id: 'ASC' } });
+  }
+
+  async findByWarehouse(warehouseId: string): Promise<User[]> {
+    const allUsers = await this.findAll();
+    const matchingUsers: User[] = [];
+
+    for (const u of allUsers) {
+      const perms = await this.rolesService.getPermissionsForRole(u.role);
+      const isAuth = await this.warehousesService.isUserAuthorizedForWarehouse(
+        u.id,
+        u.role,
+        warehouseId,
+        perms,
+      );
+      if (isAuth) {
+        matchingUsers.push(u);
+      }
+    }
+
+    return matchingUsers;
   }
 
   async findOne(id: number): Promise<User | null> {
@@ -96,7 +124,7 @@ export class UsersService {
 
   async update(
     id: number,
-    updates: Partial<Pick<User, 'fullName' | 'email' | 'role'>> & {
+    updates: Partial<Pick<User, 'fullName' | 'email' | 'role' | 'status'>> & {
       warehouseIds?: string[];
     },
     actorId?: number,
@@ -106,6 +134,7 @@ export class UsersService {
     if (updates.email !== undefined)
       patch.email = normalizeEmail(updates.email);
     if (updates.role !== undefined) patch.role = updates.role;
+    if (updates.status !== undefined) patch.status = updates.status;
 
     if (Object.keys(patch).length > 0) {
       await this.usersRepository.update(id, patch);
@@ -151,9 +180,11 @@ export class UsersService {
       fullName: user.fullName,
       email: user.email,
       role: user.role,
+      status: user.status ?? 'active',
       permissions,
       warehouses,
       hasGlobalAccess,
+      lastLoginAt: user.lastLoginAt ?? null,
       createdAt: user.createdAt,
     };
   }

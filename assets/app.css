@@ -1212,3 +1212,256 @@ th.num { text-align: right; }
 .wh-pin {
   font-size: 14px;
 }
+
+/* ==========================================================================
+   Customer Public Payment Portal Styles
+   ========================================================================== */
+.payportal-wrap {
+  min-height: 100vh;
+  background: #F0F4F3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  box-sizing: border-box;
+}
+.payportal-card {
+  width: 100%;
+  max-width: 780px;
+  background: #FFFFFF;
+  border: 1px solid #D4DFDC;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(12, 22, 19, 0.12), 0 8px 10px -6px rgba(12, 22, 19, 0.08);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.payportal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 24px 28px;
+  border-bottom: 1px solid #E2E8F0;
+  background: #F8FAFC;
+  gap: 16px;
+}
+.payportal-logo-wrap {
+  flex: none;
+}
+.payportal-logo {
+  height: 44px;
+  width: auto;
+  max-width: 220px;
+  object-fit: contain;
+}
+.payportal-co-details {
+  text-align: right;
+  font-size: 12.5px;
+  color: #475569;
+  line-height: 1.4;
+}
+.payportal-co-name {
+  font-weight: 700;
+  color: #0F172A;
+  font-size: 14px;
+}
+.payportal-body {
+  padding: 28px;
+}
+.payportal-title-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.payportal-inv-num {
+  font-size: 22px;
+  font-weight: 700;
+  color: #0F172A;
+  font-family: var(--f-ui);
+}
+.payportal-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 6px;
+  padding: 14px 18px;
+  margin-bottom: 24px;
+}
+.payportal-meta-item label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #64748B;
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
+}
+.payportal-meta-item span {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #0F172A;
+}
+.payportal-table-wrap {
+  overflow-x: auto;
+  margin-bottom: 24px;
+  border: 1px solid #E2E8F0;
+  border-radius: 6px;
+}
+.payportal-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+.payportal-table th {
+  background: #F1F5F9;
+  color: #475569;
+  font-weight: 600;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid #CBD5E1;
+}
+.payportal-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #E2E8F0;
+  color: #1E293B;
+}
+.payportal-table tr:last-child td {
+  border-bottom: none;
+}
+.payportal-totals-box {
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 6px;
+  padding: 16px 20px;
+  margin-left: auto;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.payportal-total-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13.5px;
+  color: #475569;
+}
+.payportal-grand-total {
+  font-size: 18px;
+  font-weight: 700;
+  color: #0F7A4C;
+  border-top: 1px solid #CBD5E1;
+  padding-top: 8px;
+  margin-top: 4px;
+}
+.payportal-actions {
+  margin-top: 28px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.payportal-pay-btn {
+  background: #0F7A4C;
+  color: #FFFFFF;
+  border: none;
+  font-size: 16px;
+  font-weight: 700;
+  padding: 14px 36px;
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: 0 4px 6px -1px rgba(15, 122, 76, 0.2), 0 2px 4px -2px rgba(15, 122, 76, 0.1);
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.payportal-pay-btn:hover {
+  background: #0C653F;
+  box-shadow: 0 6px 10px -1px rgba(15, 122, 76, 0.3);
+  transform: translateY(-1px);
+}
+.payportal-paid-banner {
+  background: #E3F3EC;
+  border: 1px solid #A3D9C3;
+  color: #0F7A4C;
+  padding: 16px 24px;
+  border-radius: 6px;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 15px;
+}
+.payportal-footer {
+  background: #F8FAFC;
+  border-top: 1px solid #E2E8F0;
+  padding: 16px 24px;
+  text-align: center;
+  font-size: 11.5px;
+  color: #64748B;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Payment Status Badges */
+.badge-unpaid {
+  background: #FEF3C7;
+  color: #92400E;
+  border: 1px solid #FDE68A;
+}
+.badge-paid {
+  background: #DCFCE7;
+  color: #166534;
+  border: 1px solid #BBF7D0;
+}
+.badge-pending {
+  background: #E0F2FE;
+  color: #075985;
+  border: 1px solid #BAE6FD;
+}
+.badge-failed {
+  background: #FEE2E2;
+  color: #991B1B;
+  border: 1px solid #FECACA;
+}
+.badge-refunded {
+  background: #EDE9FE;
+  color: #5B21B6;
+  border: 1px solid #DDD6FE;
+}
+.badge-active {
+  background: #DCFCE7;
+  color: #166534;
+  border: 1px solid #BBF7D0;
+}
+.badge-inactive {
+  background: #F1F5F9;
+  color: #475569;
+  border: 1px solid #CBD5E1;
+}
+
+@media (max-width: 600px) {
+  .payportal-header {
+    flex-direction: column;
+    text-align: left;
+  }
+  .payportal-co-details {
+    text-align: left;
+  }
+  .payportal-totals-box {
+    max-width: 100%;
+  }
+}

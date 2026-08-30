@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 
 import { AuditService } from '../audit/audit.service';
+import { WarehousesService } from '../warehouses/warehouses.service';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 
@@ -26,6 +27,13 @@ describe('UsersController', () => {
         {
           provide: AuditService,
           useValue: { record: jest.fn() },
+        },
+        {
+          provide: WarehousesService,
+          useValue: {
+            assertWarehouseAccess: jest.fn().mockResolvedValue(undefined),
+            getUserAuthorizedWarehouseIds: jest.fn().mockResolvedValue([]),
+          },
         },
       ],
     }).compile();

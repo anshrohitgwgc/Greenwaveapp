@@ -39,6 +39,10 @@ export class CreateUserDto {
   role?: (typeof ASSIGNABLE_ROLES)[number];
 
   @IsOptional()
+  @IsIn(['active', 'inactive', 'suspended'])
+  status?: string;
+
+  @IsOptional()
   @IsArray()
   @IsUUID('4', { each: true })
   warehouseIds?: string[];

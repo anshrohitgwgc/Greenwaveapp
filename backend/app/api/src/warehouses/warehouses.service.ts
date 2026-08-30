@@ -120,6 +120,21 @@ export class WarehousesService {
     });
   }
 
+  async resolveWarehouseId(idOrCode: string): Promise<string> {
+    if (!idOrCode) return idOrCode;
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (uuidRegex.test(idOrCode)) {
+      return idOrCode;
+    }
+    const found = await this.warehouseRepository
+      .createQueryBuilder('w')
+      .where('LOWER(w.code) = LOWER(:code)', { code: idOrCode })
+      .orWhere('LOWER(w.name) LIKE LOWER(:name)', { name: `%${idOrCode}%` })
+      .getOne();
+    return found ? found.id : idOrCode;
+  }
+
   async assertWarehouseAccess(
     actor: AuthenticatedUser,
     warehouseId?: string | null,
@@ -128,10 +143,11 @@ export class WarehousesService {
       return;
     }
 
+    const resolvedId = await this.resolveWarehouseId(warehouseId);
     const authorized = await this.isUserAuthorizedForWarehouse(
       actor.id,
       actor.role,
-      warehouseId,
+      resolvedId,
       actor.permissions,
     );
 
@@ -140,6 +156,17 @@ export class WarehousesService {
         'You are not authorized to access this warehouse',
       );
     }
+  }
+
+  async getWarehouseUsers(warehouseId: string): Promise<any[]> {
+    const resolvedId = await this.resolveWarehouseId(warehouseId);
+    const memberships = await this.userWarehouseRepository.find({
+      where: { warehouseId: resolvedId },
+    });
+    return memberships.map((m) => ({
+      userId: m.userId,
+      warehouseId: m.warehouseId,
+    }));
   }
 
   async getUserWarehouseAccess(userId: number): Promise<Warehouse[]> {

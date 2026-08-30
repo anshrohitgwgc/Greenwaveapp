@@ -25,6 +25,18 @@ export class User {
   })
   role: string;
 
+  @Column({
+    default: 'active',
+  })
+  status: string;
+
+  @Column({
+    name: 'last_login_at',
+    type: process.env.NODE_ENV === 'test' ? 'datetime' : 'timestamptz',
+    nullable: true,
+  })
+  lastLoginAt: Date | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

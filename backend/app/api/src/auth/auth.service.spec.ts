@@ -25,6 +25,7 @@ describe('AuthService', () => {
       findByEmail: jest.fn(),
       create: jest.fn(),
       count: jest.fn(),
+      recordLogin: jest.fn().mockResolvedValue(undefined),
     };
     auditService = { record: jest.fn() };
     rolesService = {

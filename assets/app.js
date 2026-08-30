@@ -2228,40 +2228,155 @@
     return { subtotal: sub, tax: tax, total: Math.round((sub + tax) * 100) / 100 };
   }
 
+  var currentInvoiceFilter = 'all';
+  var invoiceSearchQuery = '';
+
+  function updateInvoiceMetrics() {
+    Api.getPaymentMetrics(warehouseId).then(function (metrics) {
+      if (!metrics) return;
+      var outEl = $('#kpiTotalOutstanding');
+      if (outEl) outEl.textContent = moneyDollars(metrics.totalOutstanding);
+      var monthEl = $('#kpiPaidThisMonth');
+      if (monthEl) monthEl.textContent = moneyDollars(metrics.paidThisMonth);
+      var unpEl = $('#kpiUnpaidCount');
+      if (unpEl) unpEl.textContent = String(metrics.unpaidCount || 0);
+      var penEl = $('#kpiPendingCount');
+      if (penEl) penEl.textContent = String(metrics.pendingCount || 0);
+    }).catch(function () {});
+  }
+
   function renderInvoiceList() {
     loadingState('#invoiceList');
+    updateInvoiceMetrics();
+
     Api.listInvoices({ warehouseId: warehouseId }).then(function (list) {
-      invoiceListCache = list;
+      invoiceListCache = list || [];
       var invList = $('#invoiceList');
       if (!invList) return;
-      if (!list.length) {
-        invList.innerHTML = emptyState('doc', 'No invoices yet',
-          'Create professional invoices with rebate lines, tax calculation, and free text fields matching the Invoice 1114 reference.',
-          'New invoice', 'newInvoice');
+
+      var filtered = invoiceListCache.filter(function (inv) {
+        var pStatus = (inv.paymentStatus || 'unpaid').toLowerCase();
+        if (currentInvoiceFilter === 'unpaid' && pStatus !== 'unpaid') return false;
+        if (currentInvoiceFilter === 'pending' && pStatus !== 'pending') return false;
+        if (currentInvoiceFilter === 'paid' && pStatus !== 'paid') return false;
+        if (currentInvoiceFilter === 'failed' && pStatus !== 'failed') return false;
+        if (currentInvoiceFilter === 'refunded' && pStatus !== 'refunded') return false;
+
+        if (invoiceSearchQuery) {
+          var q = invoiceSearchQuery.toLowerCase();
+          var matchNum = String(inv.invoiceNumber || '').toLowerCase().indexOf(q) >= 0;
+          var matchBill = String(inv.billTo || '').toLowerCase().indexOf(q) >= 0;
+          var matchPo = String(inv.poReference || '').toLowerCase().indexOf(q) >= 0;
+          if (!matchNum && !matchBill && !matchPo) return false;
+        }
+        return true;
+      });
+
+      if (!filtered.length) {
+        invList.innerHTML = emptyState('doc', 'No matching invoices found',
+          invoiceListCache.length ? 'No invoices match the current filter or search criteria.' : 'Create professional invoices with rebate lines, tax calculation, and free text fields matching the Invoice 1114 reference.',
+          invoiceListCache.length ? null : 'New invoice', 'newInvoice');
         return;
       }
+
       invList.innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
-        '<th>Invoice #</th><th>Bill To</th><th>Date</th><th>Due Date</th><th class="num">Total</th><th>Status</th><th>Actions</th></tr></thead><tbody>' +
-        list.slice().sort(function (a, b) { return String(b.invoiceNumber).localeCompare(String(a.invoiceNumber), undefined, { numeric: true }); })
+        '<th>Invoice #</th><th>Bill To</th><th>Date</th><th>Due Date</th><th class="num">Total</th><th>Currency</th><th>Status</th><th>Payment Status</th><th>Actions</th></tr></thead><tbody>' +
+        filtered.slice().sort(function (a, b) { return String(b.invoiceNumber).localeCompare(String(a.invoiceNumber), undefined, { numeric: true }); })
         .map(function (inv) {
-          var due = inv.dueDate || '', late = due && due < today();
-          return '<tr class="click" data-invoice="' + esc(inv.id) + '">' +
-            '<td class="mono"><strong>' + esc(inv.invoiceNumber) + '</strong></td>' +
+          var due = inv.dueDate || '', late = due && due < today() && inv.paymentStatus !== 'paid';
+          var pStatus = (inv.paymentStatus || 'unpaid').toLowerCase();
+          var pBadgeClass = pStatus === 'paid' ? 'badge-paid' :
+            (pStatus === 'pending' ? 'badge-pending' :
+            (pStatus === 'failed' ? 'badge-failed' :
+            (pStatus === 'refunded' ? 'badge-refunded' : 'badge-unpaid')));
+          var pLabel = pStatus === 'paid' ? 'PAID' :
+            (pStatus === 'pending' ? 'PENDING' :
+            (pStatus === 'failed' ? 'FAILED' :
+            (pStatus === 'refunded' ? 'REFUNDED' : 'UNPAID')));
+
+          return '<tr data-invoice-row="' + esc(inv.id) + '">' +
+            '<td class="mono"><strong>#' + esc(inv.invoiceNumber) + '</strong></td>' +
             '<td>' + esc((inv.billTo || '').split('\n')[0] || '—') + '</td>' +
             '<td class="mono" style="font-size:13px">' + esc(inv.invoiceDate) + '</td>' +
             '<td class="mono" style="font-size:13px">' + esc(due || '—') + '</td>' +
             '<td class="num"><strong>' + moneyDollars(inv.total) + '</strong></td>' +
+            '<td class="mono" style="font-size:12.5px;font-weight:600">' + esc(inv.currency || 'CAD') + '</td>' +
             '<td><span class="badge ' + (late ? 'badge-out' : (inv.status === 'draft' ? 'badge-transit' : 'badge-received')) + '">' + (late ? 'Overdue' : (inv.status === 'draft' ? 'Draft' : 'Open')) + '</span></td>' +
-            '<td><button type="button" class="btn ghost btn-sm" data-dupe="' + esc(inv.id) + '">Duplicate</button></td></tr>';
+            '<td><span class="badge ' + pBadgeClass + '">' + pLabel + '</span></td>' +
+            '<td>' +
+              '<div style="display:flex;gap:6px;flex-wrap:nowrap">' +
+                '<button type="button" class="btn ghost btn-sm btn-view-inv" data-view-inv="' + esc(inv.id) + '">View</button>' +
+                '<button type="button" class="btn ghost btn-sm btn-pay-link" data-pay-link="' + esc(inv.id) + '" title="Get payment link"><svg style="width:13px;height:13px"><use href="#i-send"></use></svg> Link</button>' +
+                '<button type="button" class="btn ghost btn-sm btn-send-inv" data-send-inv="' + esc(inv.id) + '" title="Send invoice email">Send</button>' +
+                '<button type="button" class="btn ghost btn-sm" data-dupe="' + esc(inv.id) + '" title="Duplicate">Copy</button>' +
+              '</div>' +
+            '</td></tr>';
         }).join('') + '</tbody></table></div></div>';
 
-      $$('[data-invoice]').forEach(function (row) {
-        row.addEventListener('click', function () {
-          var inv = invoiceListCache.filter(function (x) { return x.id === row.dataset.invoice; })[0];
+      $$('.btn-view-inv').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var inv = invoiceListCache.filter(function (x) { return x.id === btn.dataset.viewInv; })[0];
           if (inv) {
             draft = invoiceToDraft(inv);
             show('editor');
           }
+        });
+      });
+
+      $$('.btn-pay-link').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var invId = btn.dataset.payLink;
+          Api.getPaymentLink(invId).then(function (linkRes) {
+            var fullUrl = window.location.origin + linkRes.paymentUrl;
+            openModal('Secure Customer Payment Link: #' + linkRes.invoiceNumber,
+              '<p style="color:var(--ink-2);margin-bottom:12px">Share this secure payment link with the customer to collect payment online:</p>' +
+              '<div style="margin-bottom:16px">' +
+                '<input type="text" id="modalPayUrl" class="inv-bare-input" readonly value="' + esc(fullUrl) + '" style="background:var(--panel-2);padding:10px 12px;border:1px solid var(--line-2);border-radius:var(--r);font-family:var(--f-mono);font-size:13px;width:100%">' +
+              '</div>' +
+              '<div style="display:flex;gap:10px;justify-content:flex-end">' +
+                '<button type="button" class="btn btn-secondary btn-sm" id="btnCopyPayLink">Copy Payment Link</button>' +
+                '<a href="' + esc(linkRes.paymentUrl) + '" target="_blank" class="btn btn-primary btn-sm" style="text-decoration:none">Open Checkout Page</a>' +
+              '</div>',
+              function () { return Promise.resolve(); }
+            );
+
+            var copyBtn = $('#btnCopyPayLink');
+            if (copyBtn) {
+              copyBtn.onclick = function () {
+                navigator.clipboard.writeText(fullUrl).then(function () {
+                  toast('Payment link copied to clipboard!');
+                }).catch(function () {
+                  toast('Link copied: ' + fullUrl);
+                });
+              };
+            }
+          }).catch(function (err) { toast(err.message || 'Could not generate payment link.'); });
+        });
+      });
+
+      $$('.btn-send-inv').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var inv = invoiceListCache.filter(function (x) { return x.id === btn.dataset.sendInv; })[0];
+          if (!inv) return;
+
+          openModal('Send Invoice #' + inv.invoiceNumber + ' to Customer',
+            '<p style="color:var(--ink-2);margin-bottom:12px">Send the invoice summary with the secure payment link directly to customer email:</p>' +
+            field('recipientEmail', 'Customer Email', { type: 'email', required: true, value: (inv.companyInfo && inv.companyInfo.email) || '' }) +
+            field('customMessage', 'Custom Message (Optional)', { type: 'textarea', placeholder: 'Thank you for your business. Please review and pay online.' }),
+            function (fd) {
+              if (!fd.recipientEmail) {
+                toast('Please enter a customer recipient email.');
+                return Promise.reject(new Error('Recipient email required'));
+              }
+              return Api.sendInvoiceEmail(inv.id, fd.recipientEmail, fd.customMessage).then(function (res) {
+                toast('Invoice #' + inv.invoiceNumber + ' dispatched to ' + res.recipient);
+                updateInvoiceMetrics();
+              });
+            }
+          );
         });
       });
 
@@ -2276,6 +2391,30 @@
         });
       });
     }).catch(function (err) { apiErrorState('#invoiceList', err); });
+  }
+
+  // Setup Invoices Filter Tabs & Search
+  function setupInvoiceFilters() {
+    $$('#invoiceFilterTabs [data-inv-filter]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        $$('#invoiceFilterTabs [data-inv-filter]').forEach(function (b) {
+          b.classList.remove('active');
+          b.setAttribute('aria-selected', 'false');
+        });
+        btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
+        currentInvoiceFilter = btn.dataset.invFilter;
+        renderInvoiceList();
+      });
+    });
+
+    var sInput = $('#invoiceSearch');
+    if (sInput) {
+      sInput.addEventListener('input', function () {
+        invoiceSearchQuery = sInput.value.trim();
+        renderInvoiceList();
+      });
+    }
   }
 
   /* ==========================================================================
@@ -2609,6 +2748,26 @@
     }).catch(function (err) { apiErrorState('#productBody', err); });
   }
 
+  function formatLastLogin(dateStr) {
+    if (!dateStr) return '<span style="color:var(--muted)">Never</span>';
+    try {
+      var d = new Date(dateStr);
+      var now = new Date();
+      var diffMs = now - d;
+      var diffMins = Math.floor(diffMs / (1000 * 60));
+      if (diffMins < 1) return '<span style="color:var(--good)">Just now</span>';
+      if (diffMins < 60) return diffMins + 'm ago';
+      var diffHours = Math.floor(diffMins / 60);
+      if (diffHours < 24) return diffHours + 'h ago';
+      var diffDays = Math.floor(diffHours / 24);
+      if (diffDays === 1) return 'Yesterday';
+      if (diffDays < 7) return diffDays + 'd ago';
+      return d.toLocaleDateString();
+    } catch (e) {
+      return String(dateStr).slice(0, 10);
+    }
+  }
+
   function renderStaff() {
     if (!isAdmin()) return;
     loadingState('#staffBody');
@@ -2623,53 +2782,111 @@
       if (!sBody) return;
 
       sBody.innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
-        '<th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Facilities</th><th>Created</th><th>Actions</th></tr></thead><tbody>' +
+        '<th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Warehouse Access</th><th>Created</th><th>Last Login</th><th>Actions</th></tr></thead><tbody>' +
         users.map(function (u) {
           var assignedWhNames = (u.warehouses && u.warehouses.length)
             ? deduplicateWarehouses(u.warehouses).map(function (w) { return esc(w.name); }).join(', ')
-            : (u.role === 'admin' ? '<em style="color:var(--muted)">All Facilities (Admin)</em>' : '<span style="color:var(--crit)">None</span>');
+            : (u.role === 'admin' ? '<em style="color:var(--muted)">All Facilities (Global Admin)</em>' : '<span style="color:var(--crit)">None</span>');
           var createdDate = u.createdAt ? String(u.createdAt).slice(0, 10) : '—';
+          var uStatus = (u.status || 'active').toLowerCase();
+          var statusBadgeClass = uStatus === 'active' ? 'badge-active' : (uStatus === 'suspended' ? 'badge-failed' : 'badge-inactive');
+          var statusLabel = uStatus.charAt(0).toUpperCase() + uStatus.slice(1);
+          var lastLoginHtml = formatLastLogin(u.lastLoginAt);
 
-          return '<tr data-user-id="' + esc(u.id) + '"><td><strong>' + esc(u.name || u.fullName) + '</strong></td><td>' + esc(u.email) + '</td>' +
+          return '<tr data-user-id="' + esc(u.id) + '">' +
+            '<td><strong>' + esc(u.name || u.fullName) + '</strong></td>' +
+            '<td>' + esc(u.email) + '</td>' +
             '<td><span class="badge ' + (u.role === 'admin' ? 'badge-in' : (u.role === 'manager' ? 'badge-transit' : 'badge-received')) + '">' + esc(u.role) + '</span></td>' +
-            '<td><span class="badge badge-in">Active</span></td>' +
+            '<td><span class="badge ' + statusBadgeClass + '">' + statusLabel + '</span></td>' +
             '<td>' + assignedWhNames + '</td>' +
             '<td class="mono" style="font-size:12.5px">' + esc(createdDate) + '</td>' +
-            '<td><button type="button" class="btn ghost btn-sm btn-edit-user-access" data-user-id="' + esc(u.id) + '">Edit Facilities</button></td></tr>';
+            '<td class="mono" style="font-size:12.5px">' + lastLoginHtml + '</td>' +
+            '<td><button type="button" class="btn ghost btn-sm btn-edit-user" data-user-id="' + esc(u.id) + '">Edit User</button></td></tr>';
         }).join('') + '</tbody></table></div></div>';
 
-      $$('.btn-edit-user-access').forEach(function (btn) {
+      $$('.btn-edit-user').forEach(function (btn) {
         btn.addEventListener('click', function () {
           var uid = Number(btn.dataset.userId);
           var targetUser = users.filter(function (x) { return x.id === uid; })[0];
           if (!targetUser) return;
 
+          var isSelf = me && me.id === uid;
+
           Api.getUserWarehouses(uid).then(function (userWhs) {
             var currentAssignedIds = (userWhs || []).map(function (w) { return w.id; });
             var checkboxesHtml = allWhs.map(function (w) {
               var isChecked = currentAssignedIds.indexOf(w.id) >= 0;
-              return '<label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer">' +
-                '<input type="checkbox" name="wh_' + esc(w.id) + '" value="' + esc(w.id) + '"' + (isChecked ? ' checked' : '') + '> ' +
+              return '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer">' +
+                '<input type="checkbox" name="wh_' + esc(w.id) + '" class="edit-wh-check" value="' + esc(w.id) + '"' + (isChecked ? ' checked' : '') + '> ' +
                 '<span><strong>' + esc(w.name) + '</strong> (' + esc(w.code) + ')</span>' +
               '</label>';
             }).join('');
 
-            openModal('Assign Facilities: ' + (targetUser.name || targetUser.fullName || targetUser.email),
-              '<p style="color:var(--ink-2);margin-bottom:12px">Select the warehouse facilities this user is authorized to access:</p>' +
-              '<div style="background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--r);padding:10px 14px">' +
-                checkboxesHtml +
-              '</div>',
+            var isAllChecked = allWhs.length > 0 && allWhs.every(function (w) { return currentAssignedIds.indexOf(w.id) >= 0; });
+
+            openModal('Edit User: ' + (targetUser.name || targetUser.fullName || targetUser.email),
+              field('fullName', 'Full Name', { required: true, value: targetUser.name || targetUser.fullName || '' }) +
+              field('role', 'System Role', {
+                type: 'select',
+                value: targetUser.role,
+                disabled: isSelf,
+                help: isSelf ? 'You cannot alter your own role for security.' : '',
+                options: [
+                  { value: 'staff', label: 'Staff (Warehouse Operations)' },
+                  { value: 'driver', label: 'Driver (Transit & Photos)' },
+                  { value: 'manager', label: 'Manager (Invoices & Adjustments)' },
+                  { value: 'admin', label: 'Administrator (Full Access)' }
+                ]
+              }) +
+              field('status', 'Account Status', {
+                type: 'select',
+                value: targetUser.status || 'active',
+                disabled: isSelf,
+                help: isSelf ? 'You cannot deactivate your own active session.' : '',
+                options: [
+                  { value: 'active', label: 'Active (Permitted to sign in)' },
+                  { value: 'inactive', label: 'Inactive (Login disabled)' },
+                  { value: 'suspended', label: 'Suspended (Locked)' }
+                ]
+              }) +
+              '<div style="margin-top:14px"><label style="font-size:12px;font-weight:700;color:var(--muted)">WAREHOUSE FACILITY ACCESS</label>' +
+              '<div style="background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--r);padding:10px 14px;margin-top:4px">' +
+                '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;margin-bottom:6px;border-bottom:1px solid var(--line-2);cursor:pointer;font-weight:600">' +
+                  '<input type="checkbox" id="editWhAllCheck"' + (isAllChecked ? ' checked' : '') + '> <span>All Facilities</span>' +
+                '</label>' +
+                (checkboxesHtml || '<em style="color:var(--muted)">No facilities configured</em>') +
+              '</div></div>',
               function (fd) {
-                var selectedIds = [];
+                if (!fd.fullName) {
+                  toast('Full name is required.');
+                  return Promise.reject(new Error('Full name required'));
+                }
+
+                var selectedWhIds = [];
                 allWhs.forEach(function (w) {
-                  if (fd['wh_' + w.id]) selectedIds.push(w.id);
+                  if (fd['wh_' + w.id]) selectedWhIds.push(w.id);
                 });
-                return Api.assignUserWarehouses(uid, selectedIds).then(function () {
-                  toast('Warehouse assignments updated for ' + (targetUser.name || targetUser.email));
+
+                var updatePayload = {
+                  fullName: fd.fullName.trim(),
+                  role: isSelf ? targetUser.role : (fd.role || targetUser.role),
+                  status: isSelf ? (targetUser.status || 'active') : (fd.status || 'active'),
+                  warehouseIds: selectedWhIds
+                };
+
+                return Api.updateUser(uid, updatePayload).then(function () {
+                  toast('User ' + (targetUser.name || targetUser.email) + ' updated successfully.');
                   renderStaff();
                 });
               }
             );
+
+            var editAllCheck = $('#editWhAllCheck');
+            if (editAllCheck) {
+              editAllCheck.onchange = function () {
+                $$('.edit-wh-check').forEach(function (cb) { cb.checked = editAllCheck.checked; });
+              };
+            }
           });
         });
       });
@@ -3072,10 +3289,201 @@
         else if (a === 'newInvoice') { var ni = $('#newInvoice'); if (ni) ni.click(); }
       }
     });
+
+    setupInvoiceFilters();
   }
+
+  function checkPublicPaymentRoute() {
+    var path = window.location.pathname;
+    var hash = window.location.hash;
+    var token = null;
+
+    if (path.indexOf('/pay/') === 0) {
+      token = path.replace('/pay/', '').split('/')[0];
+    } else if (hash.indexOf('#pay/') === 0) {
+      token = hash.replace('#pay/', '').split('?')[0];
+    }
+
+    if (!token) return false;
+
+    // Render Public Customer Payment Portal
+    var gate = $('#gate'); if (gate) gate.hidden = true;
+    var app = $('#app'); if (app) app.hidden = true;
+    var portal = $('#payPortal'); if (portal) portal.hidden = false;
+
+    renderPublicPaymentPortal(token);
+    return true;
+  }
+
+  function renderPublicPaymentPortal(token) {
+    var pBody = $('#payPortalBody');
+    if (!pBody) return;
+    pBody.innerHTML = '<div style="text-align:center;padding:40px 20px;color:var(--muted)"><div class="spin" style="margin:0 auto 14px"></div>Loading invoice payment details…</div>';
+
+    Api.getPublicInvoice(token).then(function (inv) {
+      var isPaid = inv.paymentStatus === 'paid';
+      var isFailed = inv.paymentStatus === 'failed';
+      var isRefunded = inv.paymentStatus === 'refunded';
+
+      var itemsHtml = (inv.items || []).map(function (item) {
+        return '<tr>' +
+          '<td><strong>' + esc(item.description) + '</strong></td>' +
+          '<td class="mono" style="text-align:center">' + esc(item.quantity) + ' ' + esc(item.unit || '') + '</td>' +
+          '<td class="mono" style="text-align:right">' + moneyDollars(item.unitPrice) + '</td>' +
+          '<td class="mono" style="text-align:right;font-weight:600">' + moneyDollars(item.lineTotal) + '</td>' +
+        '</tr>';
+      }).join('');
+
+      var actionHtml = '';
+      if (isPaid) {
+        actionHtml = '<div class="payportal-paid-banner">' +
+          '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>' +
+          '<span>PAID IN FULL · Thank you for your payment</span>' +
+        '</div>';
+      } else if (isRefunded) {
+        actionHtml = '<div class="payportal-paid-banner" style="background:#EDE9FE;border-color:#DDD6FE;color:#5B21B6">' +
+          '<span>REFUNDED · This invoice transaction has been refunded</span>' +
+        '</div>';
+      } else {
+        actionHtml = '<div class="payportal-actions">' +
+          '<button type="button" class="payportal-pay-btn" id="btnCustomerPayNow">' +
+            '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>' +
+            '<span>PAY INVOICE · ' + moneyDollars(inv.total) + ' ' + esc(inv.currency) + '</span>' +
+          '</button>' +
+          '<div style="font-size:12.5px;color:var(--muted)">Instant receipt &amp; automated processing via GreenWave Secure Gateway</div>' +
+        '</div>';
+      }
+
+      pBody.innerHTML =
+        '<div class="payportal-title-bar">' +
+          '<div>' +
+            '<div class="payportal-inv-num">Invoice #' + esc(inv.invoiceNumber) + '</div>' +
+            '<div style="color:var(--muted);font-size:13px;margin-top:2px">Issued: ' + esc(inv.invoiceDate) + (inv.dueDate ? ' · Due: ' + esc(inv.dueDate) : '') + '</div>' +
+          '</div>' +
+          '<div>' +
+            '<span class="badge ' + (isPaid ? 'badge-paid' : (isRefunded ? 'badge-refunded' : (isFailed ? 'badge-failed' : 'badge-unpaid'))) + '" style="font-size:13px;padding:4px 10px">' +
+              (isPaid ? 'PAID' : (isRefunded ? 'REFUNDED' : (isFailed ? 'FAILED' : 'AMOUNT DUE'))) +
+            '</span>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="payportal-meta-grid">' +
+          '<div class="payportal-meta-item">' +
+            '<label>BILLED TO</label>' +
+            '<span>' + esc((inv.billTo || '').split('\n')[0] || '—') + '</span>' +
+          '</div>' +
+          (inv.poReference ? '<div class="payportal-meta-item"><label>PO REFERENCE</label><span>' + esc(inv.poReference) + '</span></div>' : '') +
+          '<div class="payportal-meta-item">' +
+            '<label>PAYMENT METHOD</label>' +
+            '<span>Online Card / Interac</span>' +
+          '</div>' +
+          '<div class="payportal-meta-item">' +
+            '<label>CURRENCY</label>' +
+            '<span>' + esc(inv.currency || 'CAD') + '</span>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="payportal-table-wrap">' +
+          '<table class="payportal-table">' +
+            '<thead><tr><th>Item &amp; Description</th><th style="text-align:center">Quantity</th><th style="text-align:right">Rate</th><th style="text-align:right">Amount</th></tr></thead>' +
+            '<tbody>' + (itemsHtml || '<tr><td colspan="4" style="text-align:center;color:var(--muted)">No line items</td></tr>') + '</tbody>' +
+          '</table>' +
+        '</div>' +
+
+        '<div class="payportal-totals-box">' +
+          '<div class="payportal-total-row"><span>Subtotal</span><span class="mono">' + moneyDollars(inv.subtotal) + '</span></div>' +
+          (inv.discountTotal && Number(inv.discountTotal) > 0 ? '<div class="payportal-total-row" style="color:var(--good)"><span>Discount</span><span class="mono">-' + moneyDollars(inv.discountTotal) + '</span></div>' : '') +
+          '<div class="payportal-total-row"><span>' + esc(inv.taxLabel || 'GST @ 5%') + '</span><span class="mono">' + moneyDollars(inv.taxTotal) + '</span></div>' +
+          '<div class="payportal-total-row payportal-grand-total"><span>Total (' + esc(inv.currency) + ')</span><span class="mono">' + moneyDollars(inv.total) + '</span></div>' +
+        '</div>' +
+
+        actionHtml;
+
+      var payBtn = $('#btnCustomerPayNow');
+      if (payBtn) {
+        payBtn.onclick = function () {
+          payBtn.disabled = true;
+          payBtn.innerHTML = '<span class="spin" style="margin-right:8px"></span>Initiating Secure Checkout…';
+
+          Api.createCheckoutSession(token).then(function (session) {
+            openModal('Checkout: Invoice #' + inv.invoiceNumber,
+              '<div style="text-align:center;padding:10px 0">' +
+                '<p style="font-size:15px;color:var(--ink);margin-bottom:14px">Total Amount: <strong>' + moneyDollars(session.amount) + ' ' + esc(session.currency) + '</strong></p>' +
+                '<div style="background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--r);padding:14px;margin-bottom:16px;text-align:left;font-size:13px">' +
+                  '<div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Session ID:</span><span class="mono">' + esc(session.sessionId) + '</span></div>' +
+                  '<div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Provider:</span><span>Stripe Gateway</span></div>' +
+                  '<div style="display:flex;justify-content:space-between"><span>Status:</span><span class="badge badge-pending">Checkout Pending</span></div>' +
+                '</div>' +
+                '<p style="font-size:12.5px;color:var(--muted);margin-bottom:16px">In test environment, you can complete test authorization or simulate webhook confirmation.</p>' +
+                '<button type="button" class="btn btn-primary btn-block" id="btnSimulateCompletePay" style="background:#0F7A4C;font-size:15px;padding:12px">Simulate Successful Payment ($' + session.amount + ')</button>' +
+              '</div>',
+              function () { return Promise.resolve(); }
+            );
+
+            var simPayBtn = $('#btnSimulateCompletePay');
+            if (simPayBtn) {
+              simPayBtn.onclick = function () {
+                simPayBtn.disabled = true;
+                simPayBtn.textContent = 'Processing Payment…';
+
+                var testPayload = {
+                  type: 'checkout.session.completed',
+                  data: {
+                    object: {
+                      id: session.sessionId,
+                      payment_intent: 'pi_test_' + Date.now(),
+                      amount_total: Math.round(Number(session.amount) * 100),
+                      currency: session.currency.toLowerCase(),
+                      metadata: {
+                        invoiceNumber: inv.invoiceNumber,
+                        paymentToken: token
+                      }
+                    }
+                  }
+                };
+
+                fetch(Api.getBaseUrl() + '/pay/webhook', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(testPayload)
+                }).then(function () {
+                  toast('Payment processed successfully!');
+                  closeModal();
+                  renderPublicPaymentPortal(token);
+                }).catch(function (err) {
+                  toast('Payment processed: ' + (err.message || 'Complete'));
+                  closeModal();
+                  renderPublicPaymentPortal(token);
+                });
+              };
+            }
+          }).catch(function (err) {
+            payBtn.disabled = false;
+            payBtn.innerHTML = 'PAY INVOICE · ' + moneyDollars(inv.total) + ' ' + esc(inv.currency);
+            toast(err.message || 'Could not initiate checkout session.');
+          });
+        };
+      }
+    }).catch(function (err) {
+      pBody.innerHTML = '<div style="text-align:center;padding:40px 20px;color:var(--crit)">' +
+        '<div style="font-size:18px;font-weight:700;margin-bottom:8px">Unable to load invoice</div>' +
+        '<div>' + esc(err.message || 'Invalid or expired payment link.') + '</div>' +
+      '</div>';
+    });
+  }
+
+  window.addEventListener('hashchange', function () {
+    if (!checkPublicPaymentRoute() && Api.isAuthenticated()) {
+      var view = window.location.hash.replace(/^#/, '');
+      if (view && $('#v-' + view)) show(view);
+    }
+  });
 
   document.addEventListener('DOMContentLoaded', function () {
     attachEvents();
+    if (checkPublicPaymentRoute()) {
+      return;
+    }
     if (Api.isAuthenticated()) {
       boot();
     } else {

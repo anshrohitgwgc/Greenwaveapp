@@ -98,6 +98,14 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    if (user.status && user.status !== 'active') {
+      throw new UnauthorizedException('Account is not active');
+    }
+
+    if (typeof this.usersService.recordLogin === 'function') {
+      await this.usersService.recordLogin(user.id);
+    }
+
     const permissions = await this.rolesService.getPermissionsForRole(
       user.role,
     );
@@ -130,6 +138,7 @@ export class AuthService {
         fullName: user.fullName,
         email: user.email,
         role: user.role,
+        status: user.status ?? 'active',
         permissions,
         warehouses,
         hasGlobalAccess,

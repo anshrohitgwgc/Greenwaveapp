@@ -94,7 +94,9 @@
     me: function () { return request('GET', '/auth/me'); },
 
     // Staff / Users
-    listUsers: function () { return request('GET', '/users'); },
+    listUsers: function (warehouseId) {
+      return request('GET', '/users' + qs({ warehouseId: warehouseId }));
+    },
     getUser: function (id) { return request('GET', '/users/' + id); },
     createUser: function (data) { return request('POST', '/users', data); },
     updateUser: function (id, data) { return request('PATCH', '/users/' + id, data); },
@@ -158,12 +160,31 @@
       return baseUrl() + '/chat/stream?token=' + encodeURIComponent(getToken() || '');
     },
 
-    // Invoices
+    // Invoices & Payments
     listInvoices: function (params) { return request('GET', '/invoices' + qs(params)); },
     getInvoice: function (id) { return request('GET', '/invoices/' + id); },
     createInvoice: function (data) { return request('POST', '/invoices', data); },
     updateInvoice: function (id, data) { return request('PATCH', '/invoices/' + id, data); },
     duplicateInvoice: function (id) { return request('POST', '/invoices/' + id + '/duplicate'); },
+    getPaymentLink: function (invoiceId) { return request('POST', '/payments/invoices/' + invoiceId + '/link'); },
+    sendInvoiceEmail: function (invoiceId, recipientEmail, customMessage) {
+      return request('POST', '/payments/invoices/' + invoiceId + '/send', {
+        recipientEmail: recipientEmail,
+        customMessage: customMessage
+      });
+    },
+    getPaymentMetrics: function (warehouseId) {
+      return request('GET', '/payments/metrics' + qs({ warehouseId: warehouseId }));
+    },
+    refundPayment: function (paymentId, reason) {
+      return request('POST', '/payments/refund/' + paymentId, { reason: reason });
+    },
+    getPublicInvoice: function (token) {
+      return request('GET', '/pay/' + token);
+    },
+    createCheckoutSession: function (token) {
+      return request('POST', '/pay/' + token + '/checkout');
+    },
 
     // Time clock
     clockIn: function (warehouseId) { return request('POST', '/timesheets/clock-in', { warehouseId: warehouseId }); },

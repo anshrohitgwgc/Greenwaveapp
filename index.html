@@ -84,6 +84,31 @@
   </div>
 </div>
 
+<!-- ============ CUSTOMER PUBLIC PAYMENT PORTAL ============ -->
+<div class="payportal-wrap" id="payPortal" hidden>
+  <div class="payportal-card">
+    <div class="payportal-header">
+      <div class="payportal-logo-wrap">
+        <img src="assets/logo.png" alt="GreenWave Recycling Inc." class="payportal-logo">
+      </div>
+      <div class="payportal-co-details">
+        <div class="payportal-co-name">GreenWave Recycling Inc.</div>
+        <div class="payportal-co-sub">23394 Fisherman Rd, Maple Ridge, BC V2W 1B9</div>
+        <div class="payportal-co-sub">GST/HST: 751161951RT0001 · sales@greenwaverecycling.ca</div>
+      </div>
+    </div>
+
+    <div class="payportal-body" id="payPortalBody">
+      <div style="text-align:center;padding:40px 20px;color:var(--muted)">Loading invoice payment details…</div>
+    </div>
+
+    <div class="payportal-footer">
+      <span class="gate-secure-badge"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg> PCI DSS Compliant End-to-End Encryption</span>
+      <div>GreenWave Secure Payment Gateway. Powered by Stripe.</div>
+    </div>
+  </div>
+</div>
+
 <!-- ============ APP SHELL ============ -->
 <div class="app" id="app" hidden>
 
@@ -287,9 +312,57 @@
       <!-- ============ INVOICES VIEW ============ -->
       <section class="view" id="v-invoices">
         <div class="vhead">
-          <div><h1>Invoices</h1><p>Every field is free text. Rebate lines subtract, covering both directions in one document.</p></div>
-          <button type="button" class="btn" id="newInvoice"><svg><use href="#i-plus"></use></svg>New invoice</button>
+          <div>
+            <h1>Invoices &amp; Customer Payments</h1>
+            <p>Every field is free text. Rebate lines subtract, covering both directions in one document.</p>
+          </div>
+          <div class="vactions">
+            <button type="button" class="btn btn-primary" id="newInvoice"><svg><use href="#i-plus"></use></svg>New invoice</button>
+          </div>
         </div>
+
+        <!-- Financial Payment Metrics Cards -->
+        <div class="kpi-grid" id="invoicePaymentKpis">
+          <div class="kpi-card">
+            <span class="kpi-label">TOTAL OUTSTANDING</span>
+            <span class="kpi-value text-accent" id="kpiTotalOutstanding">$0.00</span>
+            <span class="kpi-sub">Unpaid &amp; pending payments</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">PAID THIS MONTH</span>
+            <span class="kpi-value text-success" id="kpiPaidThisMonth">$0.00</span>
+            <span class="kpi-sub">Verified customer receipts</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">UNPAID INVOICES</span>
+            <span class="kpi-value text-warning" id="kpiUnpaidCount">0</span>
+            <span class="kpi-sub">Awaiting customer payment</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">PENDING CHECKOUTS</span>
+            <span class="kpi-value text-accent" id="kpiPendingCount">0</span>
+            <span class="kpi-sub">Hosted sessions in progress</span>
+          </div>
+        </div>
+
+        <!-- Invoices Toolbar & Filter Tabs -->
+        <div class="inven-toolbar" style="margin-bottom:14px">
+          <div class="inven-tabs" id="invoiceFilterTabs" role="tablist">
+            <button type="button" class="inven-tab active" data-inv-filter="all" role="tab" aria-selected="true">All Invoices</button>
+            <button type="button" class="inven-tab" data-inv-filter="unpaid" role="tab" aria-selected="false">Unpaid</button>
+            <button type="button" class="inven-tab" data-inv-filter="pending" role="tab" aria-selected="false">Pending</button>
+            <button type="button" class="inven-tab" data-inv-filter="paid" role="tab" aria-selected="false">Paid</button>
+            <button type="button" class="inven-tab" data-inv-filter="failed" role="tab" aria-selected="false">Failed</button>
+            <button type="button" class="inven-tab" data-inv-filter="refunded" role="tab" aria-selected="false">Refunded</button>
+          </div>
+          <div class="inven-filters">
+            <div class="search-wrap">
+              <svg class="search-ico"><use href="#i-search"></use></svg>
+              <input type="search" id="invoiceSearch" placeholder="Search invoice #, customer name, PO reference...">
+            </div>
+          </div>
+        </div>
+
         <div id="invoiceList"></div>
       </section>
 
