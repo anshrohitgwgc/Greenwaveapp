@@ -186,7 +186,7 @@
       <span class="shiftchip" id="shiftChip" hidden></span>
     </header>
 
-    <div class="scroll" id="scroll">
+    <div class="scroll" id="scroll" tabindex="0" role="region" aria-label="Main content">
 
       <!-- ============ DASHBOARD VIEW ============ -->
       <section class="view" id="v-dashboard">
@@ -291,7 +291,7 @@
               <svg class="search-ico"><use href="#i-search"></use></svg>
               <input type="search" id="invenSearch" placeholder="Search order #, container #, seal #, product...">
             </div>
-            <select id="invenProductFilter">
+            <select id="invenProductFilter" aria-label="Filter by product or material">
               <option value="">All Products / Materials</option>
             </select>
           </div>
@@ -313,7 +313,7 @@
             </div>
           </div>
 
-          <div class="chat-body" id="chatMessagesWrap">
+          <div class="chat-body" id="chatMessagesWrap" tabindex="0" role="region" aria-label="Chat messages">
             <div class="chat-older-wrap" id="chatOlderWrap" hidden>
               <button type="button" class="btn ghost btn-sm" id="btnLoadOlderChat">Load older messages</button>
             </div>
@@ -468,24 +468,24 @@
               <svg class="search-ico"><use href="#i-search"></use></svg>
               <input type="search" id="histSearch" placeholder="Search order #, container #, seal #, product...">
             </div>
-            <select id="histFacilityFilter">
+            <select id="histFacilityFilter" aria-label="Filter by facility">
               <option value="">All Facilities</option>
             </select>
-            <select id="histDivisionFilter">
+            <select id="histDivisionFilter" aria-label="Filter by division">
               <option value="">All Divisions</option>
               <option value="recycling">Recycling</option>
               <option value="healthcare">Healthcare</option>
             </select>
-            <select id="histTypeFilter">
+            <select id="histTypeFilter" aria-label="Filter by transaction type">
               <option value="">All Transaction Types</option>
               <option value="inbound">Inbound (IN)</option>
               <option value="outbound">Outbound (OUT)</option>
               <option value="adjustment">Adjustment (ADJ)</option>
             </select>
-            <select id="histProductFilter">
+            <select id="histProductFilter" aria-label="Filter by product or material">
               <option value="">All Products / Materials</option>
             </select>
-            <select id="histRecordedByFilter">
+            <select id="histRecordedByFilter" aria-label="Filter by staff member">
               <option value="">All Staff</option>
             </select>
             <input type="date" id="histStartDate" title="From date">
@@ -527,7 +527,7 @@
 </div>
 
 <!-- Photo Lightbox -->
-<div class="lightbox" id="lightbox" hidden>
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Photo viewer" hidden>
   <button type="button" class="lbclose" id="lbClose" aria-label="Close"><svg><use href="#i-x"></use></svg></button>
   <img id="lbImg" alt="">
   <div class="lbmeta" id="lbMeta"></div>

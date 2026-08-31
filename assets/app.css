@@ -18,7 +18,7 @@
   --rail-hi:   #152621;
   --ink:       #0C1613;
   --ink-2:     #344A44;
-  --muted:     #668078;
+  --muted:     #5A7069;
   --line:      #D4DFDC;
   --line-2:    #BACBC7;
 
@@ -27,7 +27,7 @@
   --acc-soft:  #E3F3EC;
   --acc-hover: #0C653F;
 
-  --teal:      #2490A8;
+  --teal:      #146A80;
   --teal-soft: #E2F3F7;
 
   --warn:      #B45309;
@@ -48,9 +48,9 @@
 }
 
 [data-entity="healthcare"] {
-  --acc:       #2490A8;
+  --acc:       #146A80;
   --acc-soft:  #E2F3F7;
-  --acc-hover: #1D768A;
+  --acc-hover: #0F5566;
 }
 
 [hidden] { display: none !important; }
@@ -100,7 +100,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 600; color: var(--ink); }
 .navlabel {
   font-family: var(--f-cond); font-size: 11px; font-weight: 700;
   letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--rail-ink); opacity: 0.75;
+  color: var(--rail-ink);
   padding: 12px 10px 4px;
 }
 .navitem {
@@ -477,7 +477,7 @@ th.num { text-align: right; }
   flex: none;
 }
 .chat-avatar.role-admin { background: #0F7A4C; }
-.chat-avatar.role-manager { background: #2490A8; }
+.chat-avatar.role-manager { background: #146A80; }
 .chat-avatar.role-staff { background: #526E65; }
 
 .chat-content { flex: 1; min-width: 0; }
@@ -652,6 +652,10 @@ th.num { text-align: right; }
 .lbmeta {
   margin-top: 14px; color: rgba(255,255,255,0.85); font-size: 13.5px; text-align: center;
 }
+.lbmeta .btn.ghost {
+  color: #fff; border-color: rgba(255,255,255,0.4); background: rgba(255,255,255,0.08);
+}
+.lbmeta .btn.ghost:hover { background: rgba(255,255,255,0.18); }
 
 /* Empty States */
 .empty {
@@ -791,7 +795,7 @@ th.num { text-align: right; }
 .inv-1114-logo-sub {
   font-size: 15px;
   font-weight: 700;
-  color: #2490A8;
+  color: var(--teal);
   margin-top: 4px;
   letter-spacing: -0.2px;
 }

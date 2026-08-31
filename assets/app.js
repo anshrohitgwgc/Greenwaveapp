@@ -167,19 +167,20 @@
   function field(name, label, o) {
     o = o || {};
     var v = o.value == null ? '' : o.value, input;
+    var id = 'f-' + name;
     if (o.type === 'select') {
-      input = '<select name="' + name + '"' + (o.required ? ' required' : '') + (o.disabled ? ' disabled' : '') + '>' + o.options.map(function (x) {
+      input = '<select id="' + id + '" name="' + name + '"' + (o.required ? ' required' : '') + (o.disabled ? ' disabled' : '') + '>' + o.options.map(function (x) {
         return '<option value="' + esc(x.value) + '"' + (String(x.value) === String(v) ? ' selected' : '') + '>' + esc(x.label) + '</option>';
       }).join('') + '</select>';
     } else if (o.type === 'textarea') {
-      input = '<textarea name="' + name + '" rows="' + (o.rows || 3) + '"' + (o.required ? ' required' : '') + ' placeholder="' + esc(o.placeholder || '') + '">' + esc(v) + '</textarea>';
+      input = '<textarea id="' + id + '" name="' + name + '" rows="' + (o.rows || 3) + '"' + (o.required ? ' required' : '') + ' placeholder="' + esc(o.placeholder || '') + '">' + esc(v) + '</textarea>';
     } else {
-      input = '<input type="' + (o.type || 'text') + '" name="' + name + '" value="' + esc(v) + '"' +
+      input = '<input id="' + id + '" type="' + (o.type || 'text') + '" name="' + name + '" value="' + esc(v) + '"' +
         (o.required ? ' required' : '') + (o.step ? ' step="' + o.step + '"' : '') +
         (o.min != null ? ' min="' + o.min + '"' : '') + (o.placeholder ? ' placeholder="' + esc(o.placeholder) + '"' : '') +
         (o.autocomplete ? ' autocomplete="' + esc(o.autocomplete) + '"' : '') + (o.readonly ? ' readonly' : '') + '>';
     }
-    return '<div class="field"><label>' + esc(label) + (o.help ? ' <span style="font-weight:400;color:var(--muted)">(' + esc(o.help) + ')</span>' : '') + '</label>' + input + '</div>';
+    return '<div class="field"><label for="' + id + '">' + esc(label) + (o.help ? ' <span style="font-weight:400;color:var(--muted)">(' + esc(o.help) + ')</span>' : '') + '</label>' + input + '</div>';
   }
 
   var db = S.get();
@@ -265,7 +266,7 @@
 
   function gateError(msgEl, text) {
     if (!msgEl) return;
-    msgEl.innerHTML = '<div class="gateerr"><svg><use href="#i-alert"></use></svg><div>' + text + '</div></div>';
+    msgEl.innerHTML = '<div class="gateerr" role="alert"><svg><use href="#i-alert"></use></svg><div>' + text + '</div></div>';
   }
 
   function setupSignIn() {
@@ -567,7 +568,7 @@
           activityHost.innerHTML = emptyState('history', 'No activity recorded yet',
             'Inbound, outbound, and adjustment transactions for this facility will appear here as they happen.');
         } else {
-          activityHost.innerHTML = '<div class="tablewrap"><table class="table"><thead><tr>' +
+          activityHost.innerHTML = '<div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table class="table"><thead><tr>' +
             '<th>When</th><th>Type</th><th>Product</th><th class="num">Qty</th><th>Recorded by</th></tr></thead><tbody>' +
             recent.map(function (t) {
               var typeLabel = t.type === 'inbound' ? 'Inbound' : (t.type === 'outbound' ? 'Outbound' : 'Adjustment');
@@ -813,7 +814,7 @@
 
     var colSpan = isRec ? 7 : 11;
     invBody.innerHTML = '<div class="card">' +
-      '<div class="tablewrap"><table class="table">' +
+      '<div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table class="table">' +
       '<thead>' + head + '</thead>' +
       '<tbody>' + (body || '<tr><td colspan="' + colSpan + '" style="text-align:center;color:var(--muted);padding:30px">No matching stock balances found.</td></tr>') + '</tbody>' +
       foot +
@@ -897,7 +898,7 @@
     var histBody = $('#historyBody');
     if (histBody) {
       histBody.innerHTML = '<div class="card">' +
-        '<div class="tablewrap"><table class="table">' +
+        '<div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table class="table">' +
         '<thead>' + head + '</thead>' +
         '<tbody>' + (body || '<tr><td colspan="12" style="text-align:center;color:var(--muted);padding:30px">No matching transactions found.</td></tr>') + '</tbody>' +
         '</table></div></div>';
@@ -1046,7 +1047,7 @@
     var invBody = $('#invenBody');
     if (invBody) {
       invBody.innerHTML = '<div class="card">' +
-        '<div class="tablewrap"><table class="table">' +
+        '<div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table class="table">' +
         '<thead>' + head + '</thead>' +
         '<tbody>' + (body || '<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:30px">No container records found.</td></tr>') + '</tbody>' +
         '</table></div></div>';
@@ -1071,21 +1072,21 @@
         // RECYCLING: PALLET-BASED INVENTORY (WEIGHT REQUIRED / NO XL/L/M/S)
         formHtml =
           '<div class="grid g2">' +
-            '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
+            '<div class="field"><label for="modalWhLocation">Warehouse Location</label><input id="modalWhLocation" type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
             '<div class="field"><label>Division &amp; Packaging</label><div class="division-chip">♻️ Recycling — PALLETS</div></div>' +
           '</div>' +
           '<div class="grid g2">' +
-            '<div class="field"><label>Date</label><input type="date" name="date" value="' + today() + '" required></div>' +
+            '<div class="field"><label for="modalTxDate">Date</label><input id="modalTxDate" type="date" name="date" value="' + today() + '" required></div>' +
             '<div class="field"><label>Order Number (e.g. Jul20-DIVESTPC-AB38A)</label><input type="text" name="orderNumber" placeholder="Order / PO #" required></div>' +
           '</div>' +
-          '<div class="field"><label>Material</label><select name="materialId" required>' +
+          '<div class="field"><label for="modalMaterialSelect">Material</label><select id="modalMaterialSelect" name="materialId" required>' +
             mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>'; }).join('') +
           '</select></div>' +
           '<div class="grid g2">' +
             '<div class="field"><label>Dedicated Weight</label>' +
               '<div class="weight-input-group">' +
                 '<input type="number" name="weightValue" step="any" min="0" placeholder="e.g. 3658" required>' +
-                '<select name="weightUnit" class="weight-unit-select"><option value="kg" selected>KG</option><option value="lb">LB</option></select>' +
+                '<select name="weightUnit" class="weight-unit-select" aria-label="Weight unit"><option value="kg" selected>KG</option><option value="lb">LB</option></select>' +
               '</div>' +
             '</div>' +
             '<div class="field"><label>Pallet Quantity</label><input type="number" name="palletQty" min="1" step="any" placeholder="e.g. 3" required class="pallet-input"></div>' +
@@ -1120,14 +1121,14 @@
         // HEALTHCARE: BOX-BASED INVENTORY ONLY (NO WEIGHT)
         formHtml =
           '<div class="grid g2">' +
-            '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
+            '<div class="field"><label for="modalWhLocation">Warehouse Location</label><input id="modalWhLocation" type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
             '<div class="field"><label>Division &amp; Packaging</label><div class="division-chip healthcare">🏥 Healthcare — BOXES</div></div>' +
           '</div>' +
           '<div class="grid g2">' +
-            '<div class="field"><label>Date</label><input type="date" name="date" value="' + today() + '" required></div>' +
+            '<div class="field"><label for="modalTxDate">Date</label><input id="modalTxDate" type="date" name="date" value="' + today() + '" required></div>' +
             '<div class="field"><label>Order Number (e.g. Jul20-DIVESTPC-AB38A)</label><input type="text" name="orderNumber" placeholder="Order / PO #" required></div>' +
           '</div>' +
-          '<div class="field"><label>Product</label><select name="materialId" required>' +
+          '<div class="field"><label for="modalMaterialSelect">Product</label><select id="modalMaterialSelect" name="materialId" required>' +
             mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>'; }).join('') +
           '</select></div>' +
           '<div class="grid g2">' +
@@ -1336,14 +1337,14 @@
       if (isRec) {
         formHtml =
           '<div class="grid g2">' +
-            '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
+            '<div class="field"><label for="modalWhLocation">Warehouse Location</label><input id="modalWhLocation" type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
             '<div class="field"><label>Division &amp; Packaging</label><div class="division-chip">♻️ Recycling — PALLETS</div></div>' +
           '</div>' +
           '<div class="grid g2">' +
-            '<div class="field"><label>Date</label><input type="date" name="date" value="' + today() + '" required></div>' +
+            '<div class="field"><label for="modalTxDate">Date</label><input id="modalTxDate" type="date" name="date" value="' + today() + '" required></div>' +
             '<div class="field"><label>Order / Reference #</label><input type="text" name="orderNumber" placeholder="Order / BOL #" required></div>' +
           '</div>' +
-          '<div class="field"><label>Material</label><select name="materialId" required>' +
+          '<div class="field"><label for="modalMaterialSelect">Material</label><select id="modalMaterialSelect" name="materialId" required>' +
             mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>'; }).join('') +
           '</select></div>' +
           '<div class="grid g2">' +
@@ -1359,14 +1360,14 @@
       } else {
         formHtml =
           '<div class="grid g2">' +
-            '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
+            '<div class="field"><label for="modalWhLocation">Warehouse Location</label><input id="modalWhLocation" type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
             '<div class="field"><label>Division &amp; Packaging</label><div class="division-chip healthcare">🏥 Healthcare — BOXES</div></div>' +
           '</div>' +
           '<div class="grid g2">' +
-            '<div class="field"><label>Date</label><input type="date" name="date" value="' + today() + '" required></div>' +
+            '<div class="field"><label for="modalTxDate">Date</label><input id="modalTxDate" type="date" name="date" value="' + today() + '" required></div>' +
             '<div class="field"><label>Order / Reference #</label><input type="text" name="orderNumber" placeholder="Order / BOL #" required></div>' +
           '</div>' +
-          '<div class="field"><label>Product</label><select name="materialId" required>' +
+          '<div class="field"><label for="modalMaterialSelect">Product</label><select id="modalMaterialSelect" name="materialId" required>' +
             mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>'; }).join('') +
           '</select></div>' +
           '<div class="grid g2">' +
@@ -1483,10 +1484,10 @@
       if (isRec) {
         formHtml =
           '<div class="grid g2">' +
-            '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
+            '<div class="field"><label for="modalWhLocation">Warehouse Location</label><input id="modalWhLocation" type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
             '<div class="field"><label>Division &amp; Packaging</label><div class="division-chip">♻️ Recycling — PALLETS</div></div>' +
           '</div>' +
-          '<div class="field"><label>Material</label><select name="materialId" required>' +
+          '<div class="field"><label for="modalMaterialSelect">Material</label><select id="modalMaterialSelect" name="materialId" required>' +
             mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>'; }).join('') +
           '</select></div>' +
           '<div class="field"><label>Reason for Adjustment (Required)</label><input type="text" name="reason" placeholder="e.g. physical recount, corrected pallet count" required></div>' +
@@ -1498,10 +1499,10 @@
       } else {
         formHtml =
           '<div class="grid g2">' +
-            '<div class="field"><label>Warehouse Location</label><input type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
+            '<div class="field"><label for="modalWhLocation">Warehouse Location</label><input id="modalWhLocation" type="text" value="' + esc(w.name) + '" readonly style="background:var(--panel-2)"></div>' +
             '<div class="field"><label>Division &amp; Packaging</label><div class="division-chip healthcare">🏥 Healthcare — BOXES</div></div>' +
           '</div>' +
-          '<div class="field"><label>Product</label><select name="materialId" required>' +
+          '<div class="field"><label for="modalMaterialSelect">Product</label><select id="modalMaterialSelect" name="materialId" required>' +
             mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>'; }).join('') +
           '</select></div>' +
           '<div class="field"><label>Reason for Adjustment (Required)</label><input type="text" name="reason" placeholder="e.g. physical recount, adjusted 5 units to match count" required></div>' +
@@ -1961,7 +1962,7 @@
       var byId = {}; intakeMaterials.forEach(function (m) { byId[m.id] = m; });
 
       host.innerHTML = '<div class="card"><div class="cardhead pad"><h3>Recent transactions here</h3></div>' +
-        '<div class="tablewrap"><table class="table"><thead><tr><th>Date</th><th>Item</th><th>Reference</th><th>By</th><th>Type</th><th class="num">Qty</th></tr></thead><tbody>' +
+        '<div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table class="table"><thead><tr><th>Date</th><th>Item</th><th>Reference</th><th>By</th><th>Type</th><th class="num">Qty</th></tr></thead><tbody>' +
         mine.map(function (t) {
           var m = byId[t.materialId] || { name: '—', unit: '' };
           var q = num(t.total) + ' ' + m.unit;
@@ -2021,8 +2022,17 @@
     }).catch(function (err) { apiErrorState('#photoBody', err); });
   }
 
+  function closeLightbox() {
+    var lb = $('#lightbox');
+    if (!lb || lb.hidden) return;
+    lb.hidden = true;
+    if (dialogOpenerEl && document.contains(dialogOpenerEl)) dialogOpenerEl.focus();
+    dialogOpenerEl = null;
+  }
+
   function openLightbox(i) {
     var p = photoCache[i]; if (!p) return;
+    dialogOpenerEl = document.activeElement;
     var lbImg = $('#lbImg'); if (lbImg) lbImg.src = p.url;
     var lbMeta = $('#lbMeta');
     if (lbMeta) {
@@ -2034,12 +2044,14 @@
     }
     var lb = $('#lightbox');
     if (lb) lb.hidden = false;
+    var lbCloseBtn = $('#lbClose');
+    if (lbCloseBtn) lbCloseBtn.focus();
 
     var del = $('#lbDel');
     if (del) del.addEventListener('click', function () {
       if (!confirm('Delete this photo permanently?')) return;
       Api.deletePhoto(p.id).then(function () {
-        if (lb) lb.hidden = true;
+        closeLightbox();
         renderPhotos();
         toast('Photo deleted.');
       }).catch(function (err) { toast(err.message || 'Could not delete photo.'); });
@@ -2097,7 +2109,7 @@
           '</div></div>' +
 
           ((mine && mine.length) ? '<div class="card"><div class="pad"><h3>Your shift history</h3></div>' +
-            '<div class="tablewrap"><table class="table"><thead><tr><th>Started</th><th>Ended</th><th class="num">Duration</th></tr></thead><tbody>' +
+            '<div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table class="table"><thead><tr><th>Started</th><th>Ended</th><th class="num">Duration</th></tr></thead><tbody>' +
             mine.slice(0, 30).map(function (s) {
               var st = new Date(s.clockIn).getTime();
               var end = s.clockOut ? new Date(s.clockOut).getTime() : null;
@@ -2117,7 +2129,7 @@
           var host = $('#teamClockCard'); if (!host) return;
           if (!rows || !rows.length) { host.innerHTML = ''; return; }
           host.innerHTML = '<div class="card"><div class="pad"><h3>Team members on shift right now</h3></div>' +
-            '<div class="tablewrap"><table class="table"><thead><tr><th>Staff Name</th><th>Warehouse</th><th class="num">Clock In Time</th></tr></thead><tbody>' +
+            '<div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table class="table"><thead><tr><th>Staff Name</th><th>Warehouse</th><th class="num">Clock In Time</th></tr></thead><tbody>' +
             rows.map(function (s) {
               return '<tr><td><strong>' + esc(userName(s.userId)) + '</strong></td>' +
                 '<td style="color:var(--muted)">' + esc(warehouseName(s.warehouseId)) + '</td>' +
@@ -2329,7 +2341,7 @@
       openModal('Secure Customer Payment Link: #' + linkRes.invoiceNumber,
         '<p style="color:var(--ink-2);margin-bottom:12px">Share this secure payment link with the customer to collect payment online:</p>' +
         '<div style="margin-bottom:16px">' +
-          '<input type="text" id="modalPayUrl" class="inv-bare-input" readonly value="' + esc(shareUrl) + '" style="background:var(--panel-2);padding:10px 12px;border:1px solid var(--line-2);border-radius:var(--r);font-family:var(--f-mono);font-size:13px;width:100%">' +
+          '<input type="text" id="modalPayUrl" aria-label="Payment link URL" class="inv-bare-input" readonly value="' + esc(shareUrl) + '" style="background:var(--panel-2);padding:10px 12px;border:1px solid var(--line-2);border-radius:var(--r);font-family:var(--f-mono);font-size:13px;width:100%">' +
         '</div>' +
         '<div style="display:flex;gap:10px;justify-content:flex-end">' +
           '<button type="button" class="btn btn-secondary btn-sm" id="btnCopyPayLink">Copy Payment Link</button>' +
@@ -2404,7 +2416,7 @@
         return;
       }
 
-      invList.innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
+      invList.innerHTML = '<div class="card"><div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table class="table"><thead><tr>' +
         '<th>Invoice #</th><th>Bill To</th><th>Date</th><th>Due Date</th><th class="num">Total</th><th>Currency</th><th>Status</th><th>Payment Status</th><th>Actions</th></tr></thead><tbody>' +
         filtered.slice().sort(function (a, b) { return String(b.invoiceNumber).localeCompare(String(a.invoiceNumber), undefined, { numeric: true }); })
         .map(function (inv) {
@@ -2974,7 +2986,7 @@
           'Save customer addresses and billing information.', 'Add customer', 'newCustomer');
         return;
       }
-      cBody.innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
+      cBody.innerHTML = '<div class="card"><div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table class="table"><thead><tr>' +
         '<th>Customer Name</th><th>Bill To</th><th>Ship To</th><th>Email</th></tr></thead><tbody>' +
         list.map(function (c) {
           return '<tr><td><strong>' + esc(c.name) + '</strong></td><td>' + esc((c.billTo || '').split('\n')[0] || '—') + '</td>' +
@@ -3035,7 +3047,7 @@
           'Add materials or products to track inventory.', 'Add material', 'newProduct');
         return;
       }
-      pBody.innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
+      pBody.innerHTML = '<div class="card"><div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table class="table"><thead><tr>' +
         '<th>Product / Material</th><th>Category</th><th>Description</th><th>Division</th><th>Status</th><th>Actions</th></tr></thead><tbody>' +
         list.map(function (m) {
           var divLabel = m.division === 'healthcare' ? 'Healthcare' : 'Recycling';
@@ -3153,7 +3165,7 @@
           '</div></td></tr>';
       }).join('');
 
-      sBody.innerHTML = toolbarHtml + '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
+      sBody.innerHTML = toolbarHtml + '<div class="card"><div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table class="table"><thead><tr>' +
         '<th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Warehouse Access</th><th>Created</th><th>Last Login</th><th>Actions</th></tr></thead><tbody>' +
         (rowsHtml || '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:30px">No matching staff accounts found.</td></tr>') +
         '</tbody></table></div></div>';
@@ -3478,9 +3490,32 @@
     }
   }
 
+  var dialogOpenerEl = null;
+
+  function getFocusable(container) {
+    if (!container) return [];
+    return $$('button, [href], input, select, textarea, [tabindex]', container).filter(function (el) {
+      return !el.disabled && el.tabIndex !== -1 && el.offsetParent !== null;
+    });
+  }
+
+  // Keeps Tab/Shift+Tab cycling inside an open dialog instead of leaking
+  // focus to the (still-present, non-inert) page content behind it.
+  function trapFocus(container, e) {
+    var items = getFocusable(container);
+    if (!items.length) return;
+    var first = items[0], last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault(); last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault(); first.focus();
+    }
+  }
+
   function openModal(title, bodyHtml, onSave) {
     var wrap = $('#modalWrap');
     if (!wrap) return;
+    dialogOpenerEl = document.activeElement;
     var titleEl = $('#modalTitle');
     if (titleEl) titleEl.textContent = title;
     var formEl = $('#modalForm');
@@ -3493,7 +3528,12 @@
     var close = function () {
       wrap.hidden = true;
       if (formEl) formEl.innerHTML = '';
+      if (dialogOpenerEl && document.contains(dialogOpenerEl)) dialogOpenerEl.focus();
+      dialogOpenerEl = null;
     };
+
+    var firstField = formEl ? $('input, select, textarea', formEl) : null;
+    (firstField || $('#modalClose')).focus();
 
     var closeBtn = $('#modalClose');
     if (closeBtn) closeBtn.onclick = close;
@@ -3717,14 +3757,23 @@
     var photoFileEl = $('#photoFile');
     if (photoFileEl) photoFileEl.addEventListener('change', function (e) { addPhotos(e.target.files); });
     var lbCloseBtn = $('#lbClose');
-    if (lbCloseBtn) lbCloseBtn.addEventListener('click', function () { var lb = $('#lightbox'); if (lb) lb.hidden = true; });
+    if (lbCloseBtn) lbCloseBtn.addEventListener('click', closeLightbox);
 
     document.addEventListener('keydown', function (e) {
-      if (e.key !== 'Escape') return;
       var lb = $('#lightbox');
-      if (lb && !lb.hidden) { lb.hidden = true; return; }
       var modalWrap = $('#modalWrap');
-      if (modalWrap && !modalWrap.hidden) { var modalCloseBtn = $('#modalClose'); if (modalCloseBtn) modalCloseBtn.click(); }
+      var lbOpen = lb && !lb.hidden;
+      var modalOpen = modalWrap && !modalWrap.hidden;
+      if (!lbOpen && !modalOpen) return;
+
+      if (e.key === 'Escape') {
+        if (lbOpen) { closeLightbox(); return; }
+        var modalCloseBtn = $('#modalClose'); if (modalCloseBtn) modalCloseBtn.click();
+        return;
+      }
+      if (e.key === 'Tab') {
+        trapFocus(lbOpen ? lb : modalWrap, e);
+      }
     });
 
     var newInvoiceBtn = $('#newInvoice');
