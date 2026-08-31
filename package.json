@@ -1,0 +1,14 @@
+{
+  "name": "greenwave-ops",
+  "private": true,
+  "description": "GreenWave Operations Platform — repo-root orchestration for the legacy operations frontend, the NestJS API, and the React web app under backend/.",
+  "scripts": {
+    "test": "npm --prefix backend test",
+    "lint": "npm --prefix backend run lint",
+    "build": "npm --prefix backend run build",
+    "test:e2e": "playwright test --config=tests/e2e-legacy/playwright.config.js && npm --prefix backend run test:e2e"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
+  }
+}
