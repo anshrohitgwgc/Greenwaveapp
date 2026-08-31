@@ -44,4 +44,20 @@ test.describe('Materials Catalog — SKU removal + division isolation', () => {
       expect(headerText).not.toContain('UNIT PRICE');
     }
   });
+
+  test('Add Product modal shows Facility + Division, never asks for a SKU', async ({ page }) => {
+    await loginAs(page, 'admin@greenwave.local');
+    await page.click('.navitem[data-view="products"]');
+    await page.waitForSelector('#productBody .table, #productBody .empty');
+
+    await page.click('#newProduct');
+    await page.waitForSelector('#modalWrap:not([hidden])');
+
+    const modal = page.locator('#modalForm');
+    await expect(modal.locator('input[name="name"]')).toHaveCount(1);
+    await expect(modal.locator('input[name="facilityDisplay"]')).toHaveCount(1);
+    await expect(modal.locator('select[name="division"]')).toHaveCount(1);
+    await expect(modal.locator('input[name="sku"]')).toHaveCount(0);
+    await expect(page.locator('#modalWrap')).not.toContainText('SKU');
+  });
 });
