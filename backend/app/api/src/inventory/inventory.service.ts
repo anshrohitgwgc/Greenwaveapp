@@ -442,7 +442,9 @@ export class InventoryService {
           url: presignedUrl,
           originalFilename: p.originalFilename,
           mimeType: p.mimeType,
-          sizeBytes: p.sizeBytes,
+          // bigint column comes back from pg as a string — see the same
+          // note in photos.service.ts#toDto.
+          sizeBytes: Number(p.sizeBytes),
           photoType: p.photoType,
           takenBy: p.takenBy,
           takenAt: p.takenAt,

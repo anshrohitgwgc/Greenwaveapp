@@ -53,17 +53,26 @@ export class StorageService implements OnModuleInit {
     });
   }
 
-  /** Never expose MinIO credentials to the browser — only short-lived signed URLs. */
+  /**
+   * Never expose MinIO credentials to the browser — only short-lived signed
+   * URLs. Must be returned absolute (scheme + MINIO_ENDPOINT host + port):
+   * the signature MinIO validates on GET covers the `host` header
+   * (X-Amz-SignedHeaders=host), so stripping or rewriting the host after
+   * signing breaks the signature rather than just "hiding" it — the browser
+   * would fetch from its own page origin instead of MinIO and get a 404 (or,
+   * against a same-host reverse proxy, a 403 SignatureDoesNotMatch). The
+   * configured MINIO_ENDPOINT must therefore be a host the browser can
+   * actually reach, same as any other asset URL returned to the client.
+   */
   async presignedGetUrl(
     objectKey: string,
     expirySeconds = 3600,
   ): Promise<string> {
-    const raw = await this.client.presignedGetObject(
+    return this.client.presignedGetObject(
       this.bucket,
       objectKey,
       expirySeconds,
     );
-    return raw.replace(/^https?:\/\/[^/]+/, '');
   }
 
   async delete(objectKey: string): Promise<void> {

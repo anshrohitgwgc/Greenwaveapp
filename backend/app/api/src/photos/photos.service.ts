@@ -206,14 +206,19 @@ export class PhotosService {
   }
 
   private async toDto(photo: PhotoAsset) {
-    const rawUrl = await this.storageService.presignedGetUrl(photo.objectKey);
-    const url = rawUrl.replace(/^https?:\/\/[^/]+/, '');
+    const url = await this.storageService.presignedGetUrl(photo.objectKey);
     return {
       id: photo.id,
       url,
       originalFilename: photo.originalFilename,
       mimeType: photo.mimeType,
-      sizeBytes: photo.sizeBytes,
+      // pg/TypeORM returns `bigint` columns as strings to avoid precision
+      // loss beyond Number.MAX_SAFE_INTEGER; photo sizes never approach
+      // that, and the frontend sums this across many photos with `+`, which
+      // silently does string concatenation instead of addition if this
+      // stays a string (e.g. "0" + "552" + "552" -> "0552552" -> a bogus
+      // multi-hundred-sextillion "MB" total once divided and formatted).
+      sizeBytes: Number(photo.sizeBytes),
       warehouseId: photo.warehouseId,
       customerId: photo.customerId,
       jobReference: photo.jobReference,
