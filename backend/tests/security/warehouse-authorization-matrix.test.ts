@@ -148,6 +148,7 @@ describe('Security: Server-Authoritative Warehouse Authorization Matrix', () => 
       '/customers',
       '/audit',
       '/warehouses',
+      '/materials',
     ];
 
     for (const domain of sensitiveDomains) {
@@ -190,5 +191,43 @@ describe('Security: Server-Authoritative Warehouse Authorization Matrix', () => 
 
     const adminView = filterRecordsForUser(globalAdminUser, databaseRecords);
     assert.equal(adminView.length, 3);
+  });
+
+  it('10. Product Division Isolation: Recycling and Healthcare catalogs never leak into each other', () => {
+    interface StagingMaterial {
+      id: string;
+      name: string;
+      division: 'recycling' | 'healthcare';
+      warehouseId: string | null;
+    }
+
+    const catalog: StagingMaterial[] = [
+      { id: '1', name: 'Cardboard', division: 'recycling', warehouseId: null },
+      { id: '2', name: 'HDPE Plastic', division: 'recycling', warehouseId: WAREHOUSE_MR },
+      { id: '3', name: 'Synguard', division: 'healthcare', warehouseId: WAREHOUSE_MR },
+      { id: '4', name: 'Healthcare PPE', division: 'healthcare', warehouseId: null },
+    ];
+
+    function filterCatalog(
+      division: 'recycling' | 'healthcare',
+      warehouseId: string,
+      records: StagingMaterial[],
+    ): StagingMaterial[] {
+      return records.filter(
+        (m) => m.division === division && (m.warehouseId === null || m.warehouseId === warehouseId),
+      );
+    }
+
+    const mrRecycling = filterCatalog('recycling', WAREHOUSE_MR, catalog);
+    assert.deepEqual(mrRecycling.map((m) => m.name).sort(), ['Cardboard', 'HDPE Plastic']);
+    assert.ok(!mrRecycling.some((m) => m.division === 'healthcare'), 'Healthcare product leaked into Recycling view');
+
+    const mrHealthcare = filterCatalog('healthcare', WAREHOUSE_MR, catalog);
+    assert.deepEqual(mrHealthcare.map((m) => m.name).sort(), ['Healthcare PPE', 'Synguard']);
+    assert.ok(!mrHealthcare.some((m) => m.division === 'recycling'), 'Recycling product leaked into Healthcare view');
+
+    // A warehouse-pinned product must not appear at a different facility.
+    const cgyRecycling = filterCatalog('recycling', WAREHOUSE_CGY, catalog);
+    assert.ok(!cgyRecycling.some((m) => m.name === 'HDPE Plastic'), 'Maple Ridge-only product leaked into Calgary');
   });
 });

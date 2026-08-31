@@ -9,6 +9,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 
+import { CurrentUser } from '../common/decorators/current-user.decorator';
+import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -23,13 +25,25 @@ export class MaterialsController {
 
   @Post()
   @Roles('admin', 'manager')
-  create(@Body() dto: CreateMaterialDto) {
-    return this.materialsService.create(dto);
+  create(
+    @Body() dto: CreateMaterialDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.materialsService.create(dto, actor);
   }
 
   @Get()
-  findAll(@Query('includeInactive') includeInactive?: string) {
-    return this.materialsService.findAll(includeInactive === 'true');
+  findAll(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Query('includeInactive') includeInactive?: string,
+    @Query('warehouseId') warehouseId?: string,
+    @Query('division') division?: string,
+  ) {
+    return this.materialsService.findAll(actor, {
+      includeInactive: includeInactive === 'true',
+      warehouseId,
+      division,
+    });
   }
 
   @Get(':id')
@@ -39,7 +53,11 @@ export class MaterialsController {
 
   @Patch(':id')
   @Roles('admin', 'manager')
-  update(@Param('id') id: string, @Body() dto: UpdateMaterialDto) {
-    return this.materialsService.update(id, dto);
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateMaterialDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.materialsService.update(id, dto, actor);
   }
 }

@@ -20,6 +20,9 @@ export class Material {
   @Column({ type: 'varchar', length: 100, nullable: true })
   category: string | null;
 
+  @Column({ type: 'text', nullable: true })
+  description: string | null;
+
   @Column({
     name: 'default_price',
     type: 'numeric',
@@ -31,6 +34,12 @@ export class Material {
 
   @Column({ type: 'boolean', default: true })
   active: boolean;
+
+  @Column({ type: 'varchar', length: 32, default: 'recycling' })
+  division: string;
+
+  @Column({ name: 'warehouse_id', type: 'uuid', nullable: true })
+  warehouseId: string | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

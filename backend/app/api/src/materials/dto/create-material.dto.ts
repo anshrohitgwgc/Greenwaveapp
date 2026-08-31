@@ -1,8 +1,10 @@
 import {
   IsBoolean,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -21,6 +23,17 @@ export class CreateMaterialDto {
   @IsString()
   @MaxLength(100)
   category?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsIn(['recycling', 'healthcare'])
+  division: string;
+
+  @IsOptional()
+  @IsUUID()
+  warehouseId?: string | null;
 
   @IsOptional()
   @IsNumber()
