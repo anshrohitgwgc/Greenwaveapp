@@ -77,7 +77,14 @@ test.beforeAll(async () => {
     });
     if (linkRes.ok()) {
       const link = await linkRes.json();
-      invoicePaymentPath = link.paymentUrl;
+      // Use the hash-route form (#pay/<token>), same as the app's own "Copy
+      // Payment Link" button builds: the hash never reaches the server, so
+      // it works when served by a plain static file server (serve.sh /
+      // python http.server has no SPA rewrite rule, unlike production
+      // nginx's `try_files ... /index.html`). The raw /pay/<token> path
+      // 404s in that environment even though the app supports it fine.
+      const token = String(link.paymentUrl || '').replace(/^\/?pay\//, '').split('?')[0];
+      invoicePaymentPath = '/#pay/' + token;
     }
   }
   await api.dispose();
@@ -100,14 +107,23 @@ for (const viewport of VIEWPORTS) {
       await shoot(page, viewport, 'login');
     });
 
-    test('Dashboard/Inventory renders without horizontal overflow', async ({ page }) => {
+    test('Dashboard renders without horizontal overflow', async ({ page }) => {
+      await loginAs(page, 'admin@greenwave.local');
+      await page.waitForSelector('#v-dashboard.view.active');
+      await page.waitForSelector('#dashRecentActivity .tablewrap, #dashRecentActivity .empty');
+      await expect(page.locator('#dashboardKpis .kpi-card').first()).toBeVisible();
+      await assertNoHorizontalOverflow(page, viewport.width, 'Dashboard');
+      await shoot(page, viewport, 'dashboard');
+    });
+
+    test('Inventory renders without horizontal overflow', async ({ page }) => {
       await loginAs(page, 'admin@greenwave.local');
       await goToNav(page, 'inventory');
       await page.waitForSelector('#v-inventory.view.active');
       await page.waitForSelector('#invenBody .table, #invenBody .empty');
       await expect(page.locator('#btnReceiveStock')).toBeVisible();
-      await assertNoHorizontalOverflow(page, viewport.width, 'Inventory/Dashboard');
-      await shoot(page, viewport, 'dashboard-inventory');
+      await assertNoHorizontalOverflow(page, viewport.width, 'Inventory');
+      await shoot(page, viewport, 'inventory');
     });
 
     test('Invoices list renders without horizontal overflow', async ({ page }) => {
@@ -128,8 +144,29 @@ for (const viewport of VIEWPORTS) {
 
     test('Customer payment page renders without horizontal overflow', async ({ page }) => {
       test.skip(!invoicePaymentPath, 'No payment link available (invoice/link API call failed in beforeAll)');
+      // This test navigates straight to the payment route without going
+      // through loginAs(), so (unlike every other test in this file) it
+      // never gets the `greenwave.apiBase` localStorage override set. Each
+      // Playwright test starts a brand-new browser context, so nothing
+      // persists from earlier tests either. Without the override, api.js
+      // falls back to same-origin (http://127.0.0.1:8080, the static file
+      // server) instead of the real API (http://127.0.0.1:4000), and
+      // GET /pay/:token 404s against the file server before the page ever
+      // has real invoice data to render.
+      await page.addInitScript((base) => {
+        window.localStorage.setItem('greenwave.apiBase', base);
+      }, API_BASE);
       await page.goto(invoicePaymentPath);
-      await page.waitForSelector('#gate, #app, body', { timeout: 10000 });
+      // Assert the real payment document renders, not just that *a* page
+      // loaded — `#gate, #app, body` would trivially match a 404 error page
+      // too and mask a broken link. Wait for the totals box, which only
+      // exists after Api.getPublicInvoice() resolves with real data (the
+      // pre-fetch state is a bare spinner with no invoice markup at all).
+      await page.waitForSelector('#payPortal:not([hidden])', { timeout: 10000 });
+      await page.waitForSelector('.payportal-totals-box', { timeout: 10000 });
+      await expect(page.locator('.payportal-inv-num')).toBeVisible();
+      await expect(page.locator('.payportal-inv-num')).not.toHaveText(/12345/);
+      await expect(page.locator('.payportal-logo')).toBeVisible();
       await assertNoHorizontalOverflow(page, viewport.width, 'Customer payment page');
       await shoot(page, viewport, 'customer-payment-page');
     });

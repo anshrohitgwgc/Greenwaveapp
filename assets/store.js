@@ -22,7 +22,7 @@
       version: 3,
       company: {
         name: 'Greenwave Recycling Inc.',
-        line1: '23394 Fisherman Rd,',
+        line1: '23394 Fisherman Rd',
         line2: 'Maple Ridge, BC V2W 1B9',
         email: 'sales@greenwaverecycling.ca',
         phone: '6724720423',

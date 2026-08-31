@@ -27,10 +27,10 @@
   };
 
   var ROLES = {
-    admin:   { label: 'Administrator', sees: ['inventory','photos','timeclock','chat','invoices','editor','customers','products','staff','history','settings'] },
-    manager: { label: 'Manager',       sees: ['inventory','photos','timeclock','chat','invoices','editor','customers','products','history'] },
-    staff:   { label: 'Staff',         sees: ['inventory','photos','timeclock','chat'] },
-    driver:  { label: 'Driver',        sees: ['inventory','photos','timeclock','chat'] }
+    admin:   { label: 'Administrator', sees: ['dashboard','inventory','photos','timeclock','chat','invoices','editor','customers','products','staff','history','settings'] },
+    manager: { label: 'Manager',       sees: ['dashboard','inventory','photos','timeclock','chat','invoices','editor','customers','products','history'] },
+    staff:   { label: 'Staff',         sees: ['dashboard','inventory','photos','timeclock','chat'] },
+    driver:  { label: 'Driver',        sees: ['dashboard','inventory','photos','timeclock','chat'] }
   };
 
   var SIZE_KEYS = ['xl', 'l', 'm', 's'];
@@ -184,7 +184,7 @@
 
   var db = S.get();
   var me = null;
-  var view = 'inventory';
+  var view = 'dashboard';
   var entity = db.entity || 'recycling';
   var warehouseId = S.getWarehouse();
   var warehouses = [];
@@ -429,6 +429,7 @@
 
   function renderTabbar() {
     var items = [
+      { v: 'dashboard', i: 'grid',  l: 'Home' },
       { v: 'inventory', i: 'box',   l: 'Inventory' },
       { v: 'chat',      i: 'chat',  l: 'Chat' },
       { v: 'invoices',  i: 'doc',   l: 'Invoices' },
@@ -473,7 +474,7 @@
 
   function show(next) {
     if (next === 'invoices' && !isRecycling()) next = 'inventory';
-    if (!can(next) && next !== 'editor') next = 'inventory';
+    if (!can(next) && next !== 'editor') next = 'dashboard';
     if (next === 'editor' && !can('invoices')) next = 'inventory';
 
     view = next;
@@ -491,6 +492,107 @@
     if (scroll) scroll.scrollTop = 0;
     renderTabbar();
     render();
+  }
+
+  function renderDashboard() {
+    loadUsersCache();
+    var w = warehouse();
+    var dashSub = $('#dashSub');
+    var facEl = $('#dashScopeFacilityName');
+    var divEl = $('#dashScopeDivisionUnit');
+    var isRec = isRecycling();
+    if (facEl) facEl.textContent = w ? w.name : 'No facility assigned';
+    if (divEl) divEl.textContent = (isRec ? 'Recycling' : 'Healthcare') + ' · ' + (isRec ? 'Pallets' : 'Boxes');
+    if (dashSub) dashSub.textContent = w ? 'Today’s operations at ' + w.name + '.' : 'Assign a facility to see operational data.';
+
+    var invCard = $('#dashInvoiceKpiCard');
+    if (invCard) invCard.hidden = !(isAdminOrManager() && isRec);
+
+    var activityHost = $('#dashRecentActivity');
+    if (!w) {
+      ['dashKpiCurrentStock', 'dashKpiInboundTotal', 'dashKpiOutboundTotal', 'dashKpiActiveStaff'].forEach(function (id) {
+        var el = $('#' + id); if (el) el.textContent = '0';
+      });
+      if (activityHost) activityHost.innerHTML = emptyState('box', 'No facility assigned', 'Ask an administrator to grant you access to a facility to see operational data.');
+      return;
+    }
+
+    loadingState('#dashRecentActivity');
+
+    var div = isRec ? 'recycling' : 'healthcare';
+    var tasks = [
+      Api.listMaterials({ warehouseId: w.id, division: div }),
+      Api.getInventoryBalances(w.id, div),
+      Api.listInventoryTransactions({ warehouseId: w.id, division: div })
+    ];
+    tasks.push(isAdminOrManager() ? Api.teamShifts() : Promise.resolve(currentShiftCache ? [currentShiftCache] : []));
+
+    Promise.all(tasks).then(function (res) {
+      var materials = res[0] || [];
+      var balances = res[1] || [];
+      var transactions = res[2] || [];
+      var shifts = res[3] || [];
+      var matById = {};
+      materials.forEach(function (m) { matById[m.id] = m; });
+
+      var grandCurrent = 0, grandInbound = 0, grandOutbound = 0;
+      balances.forEach(function (b) {
+        grandCurrent += Number(b.balance || b.totalBalance || 0);
+        grandInbound += Number(b.inboundTotal || 0);
+        grandOutbound += Number(b.outboundTotal || 0);
+      });
+      if (!balances.length && transactions.length) {
+        transactions.forEach(function (t) {
+          var tot = Number(t.total) || 0;
+          if (t.type === 'inbound') { grandInbound += tot; grandCurrent += tot; }
+          else if (t.type === 'outbound') { grandOutbound += tot; grandCurrent -= tot; }
+          else if (t.type === 'adjustment') { grandCurrent += tot; }
+        });
+      }
+
+      var elCur = $('#dashKpiCurrentStock'); if (elCur) elCur.textContent = num(grandCurrent);
+      var elIn = $('#dashKpiInboundTotal'); if (elIn) elIn.textContent = num(grandInbound);
+      var elOut = $('#dashKpiOutboundTotal'); if (elOut) elOut.textContent = num(grandOutbound);
+      var stockSub = $('#dashKpiStockSub');
+      if (stockSub) stockSub.textContent = isRec ? 'Total pallets across all materials' : 'Total boxes across all products';
+
+      var elStaff = $('#dashKpiActiveStaff'); if (elStaff) elStaff.textContent = num(shifts.length);
+
+      if (activityHost) {
+        var recent = transactions.slice().sort(function (a, b) {
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        }).slice(0, 8);
+
+        if (!recent.length) {
+          activityHost.innerHTML = emptyState('history', 'No activity recorded yet',
+            'Inbound, outbound, and adjustment transactions for this facility will appear here as they happen.');
+        } else {
+          activityHost.innerHTML = '<div class="tablewrap"><table class="table"><thead><tr>' +
+            '<th>When</th><th>Type</th><th>Product</th><th class="num">Qty</th><th>Recorded by</th></tr></thead><tbody>' +
+            recent.map(function (t) {
+              var typeLabel = t.type === 'inbound' ? 'Inbound' : (t.type === 'outbound' ? 'Outbound' : 'Adjustment');
+              var typeBadge = t.type === 'inbound' ? 'badge-received' : (t.type === 'outbound' ? 'badge-out' : 'badge-transit');
+              var m = matById[t.materialId] || { name: t.materialName || 'Item' };
+              return '<tr><td class="mono" style="font-size:13px" title="' + esc(when(t.createdAt)) + '">' + esc(friendlyTime(t.createdAt)) + '</td>' +
+                '<td><span class="badge ' + typeBadge + '">' + typeLabel + '</span></td>' +
+                '<td>' + esc(m.name) + '</td>' +
+                '<td class="num">' + num(Number(t.total) || 0) + '</td>' +
+                '<td style="color:var(--muted)">' + esc((me && t.createdBy === me.id) ? me.name : userName(t.createdBy)) + '</td></tr>';
+            }).join('') + '</tbody></table></div>';
+        }
+      }
+    }).catch(function (err) {
+      apiErrorState('#dashRecentActivity', err);
+    });
+
+    if (isAdminOrManager() && isRec) {
+      Api.getPaymentMetrics(w.id).then(function (metrics) {
+        if (!metrics) return;
+        var el = $('#dashKpiOutstanding'); if (el) el.textContent = moneyDollars(metrics.totalOutstanding);
+        var sub = $('#dashKpiOutstandingSub');
+        if (sub) sub.textContent = num(metrics.unpaidCount || 0) + ' unpaid, ' + num(metrics.pendingCount || 0) + ' pending';
+      }).catch(function () {});
+    }
   }
 
   function renderInventory() {
@@ -1927,7 +2029,8 @@
       lbMeta.innerHTML = esc(userName(p.takenBy)) + ' · ' + esc(when(p.takenAt)) +
         ' · ' + bytes(p.sizeBytes) +
         (p.jobReference ? '<br>' + esc(p.jobReference) : '') +
-        (me && me.role === 'admin' ? '<br><button type="button" class="btn danger" id="lbDel" style="margin-top:12px">Delete this photo</button>' : '');
+        '<br><a href="' + esc(p.url) + '" download="' + esc(p.originalFilename || 'photo.jpg') + '" target="_blank" rel="noopener" class="btn ghost btn-sm" id="lbDownload" style="margin-top:12px;text-decoration:none;display:inline-flex">Download</a>' +
+        (me && me.role === 'admin' ? ' <button type="button" class="btn danger" id="lbDel" style="margin-top:12px">Delete this photo</button>' : '');
     }
     var lb = $('#lightbox');
     if (lb) lb.hidden = false;
@@ -2086,7 +2189,7 @@
         name: co.name || 'Greenwave Recycling Inc.',
         bn: co.bn || 'BN 751161951BC0001',
         gst: co.gst || '751161951RT0001',
-        line1: co.line1 || '23394 Fisherman Rd,',
+        line1: co.line1 || '23394 Fisherman Rd',
         line2: co.line2 || 'Maple Ridge, BC V2W 1B9',
         email: co.email || 'sales@greenwaverecycling.ca',
         phone: co.phone || '6724720423'
@@ -2170,7 +2273,7 @@
         name: co.name || 'Greenwave Recycling Inc.',
         bn: co.bn || 'BN 751161951BC0001',
         gst: co.gst || '751161951RT0001',
-        line1: co.line1 || '23394 Fisherman Rd,',
+        line1: co.line1 || '23394 Fisherman Rd',
         line2: co.line2 || 'Maple Ridge, BC V2W 1B9',
         email: co.email || 'sales@greenwaverecycling.ca',
         phone: co.phone || '6724720423'
@@ -2216,15 +2319,21 @@
 
   function showPaymentLinkModal(invId) {
     Api.getPaymentLink(invId).then(function (linkRes) {
-      var fullUrl = window.location.origin + linkRes.paymentUrl;
+      // Build the shareable link as a hash route (#pay/<token>), not the raw
+      // /pay/<token> path: the hash never reaches the server, so the link
+      // works on any static host (including local dev via serve.sh) without
+      // depending on a server-side SPA rewrite rule. renderRoute() already
+      // accepts both forms.
+      var payToken = String(linkRes.paymentUrl || '').replace(/^\/?pay\//, '').split('?')[0];
+      var shareUrl = window.location.origin + window.location.pathname + '#pay/' + payToken;
       openModal('Secure Customer Payment Link: #' + linkRes.invoiceNumber,
         '<p style="color:var(--ink-2);margin-bottom:12px">Share this secure payment link with the customer to collect payment online:</p>' +
         '<div style="margin-bottom:16px">' +
-          '<input type="text" id="modalPayUrl" class="inv-bare-input" readonly value="' + esc(fullUrl) + '" style="background:var(--panel-2);padding:10px 12px;border:1px solid var(--line-2);border-radius:var(--r);font-family:var(--f-mono);font-size:13px;width:100%">' +
+          '<input type="text" id="modalPayUrl" class="inv-bare-input" readonly value="' + esc(shareUrl) + '" style="background:var(--panel-2);padding:10px 12px;border:1px solid var(--line-2);border-radius:var(--r);font-family:var(--f-mono);font-size:13px;width:100%">' +
         '</div>' +
         '<div style="display:flex;gap:10px;justify-content:flex-end">' +
           '<button type="button" class="btn btn-secondary btn-sm" id="btnCopyPayLink">Copy Payment Link</button>' +
-          '<a href="' + esc(linkRes.paymentUrl) + '" target="_blank" class="btn btn-primary btn-sm" style="text-decoration:none">Open Checkout Page</a>' +
+          '<a href="' + esc(shareUrl) + '" target="_blank" class="btn btn-primary btn-sm" style="text-decoration:none">Open Checkout Page</a>' +
         '</div>',
         function () { return Promise.resolve(); }
       );
@@ -2232,10 +2341,10 @@
       var copyBtn = $('#btnCopyPayLink');
       if (copyBtn) {
         copyBtn.onclick = function () {
-          navigator.clipboard.writeText(fullUrl).then(function () {
+          navigator.clipboard.writeText(shareUrl).then(function () {
             toast('Payment link copied to clipboard!');
           }).catch(function () {
-            toast('Link copied: ' + fullUrl);
+            toast('Link copied: ' + shareUrl);
           });
         };
       }
@@ -2607,7 +2716,7 @@
 
             '<div class="inv-1114-co-mid">' +
               '<div style="height:34px"></div>' +
-              '<input type="text" id="edCoLine1" class="inv-bare-input" value="' + esc(co.line1 || '23394 Fisherman Rd,') + '" placeholder="Address Line 1">' +
+              '<input type="text" id="edCoLine1" class="inv-bare-input" value="' + esc(co.line1 || '23394 Fisherman Rd') + '" placeholder="Address Line 1">' +
               '<input type="text" id="edCoLine2" class="inv-bare-input" value="' + esc(co.line2 || 'Maple Ridge, BC V2W 1B9') + '" placeholder="City, Province, Postal">' +
               '<input type="text" id="edCoEmail" class="inv-bare-input" value="' + esc(co.email || 'sales@greenwaverecycling.ca') + '" placeholder="Sales Email">' +
               '<input type="text" id="edCoPhone" class="inv-bare-input" value="' + esc(co.phone || '6724720423') + '" placeholder="Phone Number">' +
@@ -2745,7 +2854,7 @@
         name: coName || 'Greenwave Recycling Inc.',
         bn: coBn || 'BN 751161951BC0001',
         gst: coGst || '751161951RT0001',
-        line1: coLine1 || '23394 Fisherman Rd,',
+        line1: coLine1 || '23394 Fisherman Rd',
         line2: coLine2 || 'Maple Ridge, BC V2W 1B9',
         email: coEmail || 'sales@greenwaverecycling.ca',
         phone: coPhone || '6724720423'
@@ -2912,6 +3021,8 @@
   function renderProducts() {
     var pTitle = $('#prodTitle');
     if (pTitle) pTitle.textContent = isRecycling() ? 'Materials Catalog' : 'Healthcare Products';
+    var pSub = $('#prodSub');
+    if (pSub) pSub.textContent = isRecycling() ? 'Recycling materials tracked for this facility.' : 'Healthcare products tracked for this facility.';
     loadingState('#productBody');
     var w = warehouse();
     if (!w) { var pBody0 = $('#productBody'); if (pBody0) pBody0.innerHTML = ''; return; }
@@ -3435,7 +3546,8 @@
 
   function render() {
     syncChrome();
-    if (view === 'inventory') renderInventory();
+    if (view === 'dashboard') renderDashboard();
+    else if (view === 'inventory') renderInventory();
     else if (view === 'chat') renderChat();
     else if (view === 'intake') renderIntake();
     else if (view === 'photos') renderPhotos();
@@ -3606,6 +3718,14 @@
     if (photoFileEl) photoFileEl.addEventListener('change', function (e) { addPhotos(e.target.files); });
     var lbCloseBtn = $('#lbClose');
     if (lbCloseBtn) lbCloseBtn.addEventListener('click', function () { var lb = $('#lightbox'); if (lb) lb.hidden = true; });
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      var lb = $('#lightbox');
+      if (lb && !lb.hidden) { lb.hidden = true; return; }
+      var modalWrap = $('#modalWrap');
+      if (modalWrap && !modalWrap.hidden) { var modalCloseBtn = $('#modalClose'); if (modalCloseBtn) modalCloseBtn.click(); }
+    });
 
     var newInvoiceBtn = $('#newInvoice');
     if (newInvoiceBtn) newInvoiceBtn.addEventListener('click', function () { draft = newDraft(); editorViewMode = false; show('editor'); });

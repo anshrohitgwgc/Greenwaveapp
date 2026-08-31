@@ -19,6 +19,7 @@
 <body>
 
 <svg width="0" height="0" class="sprite" aria-hidden="true">
+  <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3.4" y="3.4" width="7.6" height="7.6" rx="1.2"/><rect x="13" y="3.4" width="7.6" height="7.6" rx="1.2"/><rect x="3.4" y="13" width="7.6" height="7.6" rx="1.2"/><rect x="13" y="13" width="7.6" height="7.6" rx="1.2"/></symbol>
   <symbol id="i-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 2.8 21 7.4v9.2L12 21.2 3 16.6V7.4z"/><path d="M3 7.4 12 12l9-4.6M12 12v9.2"/></symbol>
   <symbol id="i-scale" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.4v15M7 19.4h10M4.6 8.8h14.8"/><path d="m4.6 8.8-2.2 5.4h4.4zm14.8 0-2.2 5.4h4.4z"/></symbol>
   <symbol id="i-doc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6 2.8h8l4.2 4.2v14H6z"/><path d="M13.8 2.8v4.4h4.4M9.6 12.6h5M9.6 16.2h5"/></symbol>
@@ -100,7 +101,7 @@
     </div>
 
     <div class="payportal-body" id="payPortalBody">
-      <div style="text-align:center;padding:40px 20px;color:var(--muted)">Loading invoice payment details…</div>
+      <div style="text-align:center;padding:40px 20px;color:var(--muted)"><div class="spin" style="margin:0 auto 14px"></div>Loading invoice payment details…</div>
     </div>
 
     <div class="payportal-footer">
@@ -126,6 +127,9 @@
     </div>
 
     <nav class="nav" id="nav">
+      <span class="navlabel">Overview</span>
+      <button type="button" class="navitem" data-view="dashboard"><svg><use href="#i-grid"></use></svg>Dashboard</button>
+
       <span class="navlabel">Operations</span>
       <button type="button" class="navitem" data-view="inventory"><svg><use href="#i-box"></use></svg>Inventory</button>
       <button type="button" class="navitem" data-view="photos"><svg><use href="#i-cam"></use></svg>Photos</button>
@@ -184,7 +188,55 @@
 
     <div class="scroll" id="scroll">
 
-      <!-- ============ INVENTORY DASHBOARD VIEW ============ -->
+      <!-- ============ DASHBOARD VIEW ============ -->
+      <section class="view" id="v-dashboard">
+        <div class="vhead">
+          <div>
+            <h1>Dashboard</h1>
+            <div class="scope-context-pill" id="dashScopeContextPill">
+              <span class="scope-facility" id="dashScopeFacilityName">Calgary, AB</span>
+              <span class="scope-divider">·</span>
+              <span class="scope-division-unit" id="dashScopeDivisionUnit">Recycling · Pallets</span>
+            </div>
+            <p id="dashSub">Today's operations at a glance.</p>
+          </div>
+        </div>
+
+        <div class="kpi-grid" id="dashboardKpis">
+          <div class="kpi-card">
+            <span class="kpi-label">CURRENT STOCK</span>
+            <span class="kpi-value" id="dashKpiCurrentStock">0</span>
+            <span class="kpi-sub" id="dashKpiStockSub">Total across all materials</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">INBOUND RECEIVED</span>
+            <span class="kpi-value text-success" id="dashKpiInboundTotal">0</span>
+            <span class="kpi-sub">Total inbound stock</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">OUTBOUND SHIPPED</span>
+            <span class="kpi-value text-warning" id="dashKpiOutboundTotal">0</span>
+            <span class="kpi-sub">Total dispatched stock</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">ACTIVE STAFF</span>
+            <span class="kpi-value text-accent" id="dashKpiActiveStaff">0</span>
+            <span class="kpi-sub">On shift right now</span>
+          </div>
+          <div class="kpi-card" id="dashInvoiceKpiCard" hidden>
+            <span class="kpi-label">OUTSTANDING INVOICES</span>
+            <span class="kpi-value text-warning" id="dashKpiOutstanding">$0.00</span>
+            <span class="kpi-sub" id="dashKpiOutstandingSub">Unpaid &amp; pending payments</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="pad"><h3>Recent Activity</h3></div>
+          <div id="dashRecentActivity"></div>
+        </div>
+      </section>
+
+      <!-- ============ INVENTORY VIEW ============ -->
       <section class="view" id="v-inventory">
         <div class="vhead">
           <div>
@@ -387,7 +439,7 @@
       <!-- ============ MATERIALS / PRODUCTS VIEW ============ -->
       <section class="view" id="v-products">
         <div class="vhead">
-          <div><h1 id="prodTitle">Materials</h1><p id="prodSub">Catalog items and standard commodity pricing.</p></div>
+          <div><h1 id="prodTitle">Materials</h1><p id="prodSub">Catalog items tracked for this facility.</p></div>
           <button type="button" class="btn" id="newProduct"><svg><use href="#i-plus"></use></svg><span id="prodCta">Add material</span></button>
         </div>
         <div id="productBody"></div>
