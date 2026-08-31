@@ -4,6 +4,72 @@ Branch: `greenwave-payment-rbac-ui`
 HEAD at start of this pass: `45af737` (docs: add web perfection pass final report)
 Production baseline: `25f3d57f935b558ebe74af2112ba320a99018a06` (ancestor of HEAD — confirmed via `git merge-base --is-ancestor`)
 
+---
+
+## Addendum — Adjust Stock / Send Invoice modal closeout (this update)
+
+This update closes the one gap this report's original "Not exhaustively covered" section
+named: the Adjust Stock and Send Invoice modals were never individually re-scanned. Both
+were opened in the real running app (real Chromium via Playwright, real API/Postgres/
+Redis/MinIO stack, real seeded login) at all three required breakpoints — 390×844,
+768×1024, 1366×768 — with no adjustment ever submitted and no email ever sent (both flows
+were exercised only up to open/interact/close; the underlying test/local API calls were not
+invoked). New spec: `tests/e2e-legacy/specs/modal-adjust-send-invoice.spec.js` (6 tests: 2
+modals × 3 viewports).
+
+**Real defect found and fixed:** the Adjust Stock modal's "Reason for Adjustment" input
+(both Recycling and Healthcare variants) and the Recycling "Pallet Adjustment Quantity" /
+Healthcare XL·L·M·S quantity inputs had visible `<label>` text with no `for`/`id`
+association — the same disconnected-label defect already fixed elsewhere in this pass (see
+defect #4/#5 above), just not yet applied to this specific hand-rolled form. This was caught
+by the first run of the new spec (axe + an explicit unlabelled-control assertion failed with
+`["reason", "palletQty"]`), fixed in `openAdjustModal()` in `assets/app.js` by adding
+`id="modalAdjReason"`/`modalAdjPalletQty"`/`modalAdjXl/L/M/S"` and matching `for`
+attributes (plus `role="group" aria-labelledby="modalAdjSizesLabel"` on the BOX
+quantity fieldset), then re-verified clean. The Send Invoice modal (built entirely from the
+already-fixed `field()` helper) had no defects — it passed on the first run.
+
+A second, test-only issue was found and fixed in the new spec itself, not in the app: at the
+390×844 and 768×1024 breakpoints the side rail nav is off-canvas behind the hamburger
+`#menuBtn` (`app.css` `@media (max-width: 768px)`), so the shared `goToView()` test helper's
+direct click on `.navitem` could not reach it. This was a real gap in the *existing* mobile
+responsive test coverage (no prior spec had varied viewport width when calling `goToView`),
+not a production defect — the hamburger menu itself works correctly and is exercised
+elsewhere (`fix(nav): restore mobile hamburger menu toggle to actually open the rail`,
+commit `999f3d4`). Fixed locally in the new spec via a `goToViewResponsive()` wrapper that
+opens the menu first when the target nav item is off-screen.
+
+Per-item results below are updated for these two modals; all other content in this report is
+unchanged from the original pass and re-confirmed via the full regression re-run recorded in
+the addendum's test table.
+
+| Area | Result | Evidence |
+|---|---|---|
+| Accessibility — Adjust Stock modal | **PASS** (1 defect found and fixed this update) | `modal-adjust-send-invoice.spec.js`, 3 viewports, axe-clean + explicit label-association assertion, all green after fix |
+| Accessibility — Send Invoice modal | **PASS** (no defects found) | `modal-adjust-send-invoice.spec.js`, 3 viewports, axe-clean, all green |
+| Modal QA — Adjust Stock (open/focus/Tab-trap/Shift+Tab/Escape/close-button/backdrop/focus-restore/no overflow/no clipping) | **PASS** | Same spec — focus-in-modal, full Tab cycle assertions, Shift+Tab, Escape+restore, close-button+restore, backdrop no-op, `scrollWidth`≤`clientWidth`, modal bounding box within viewport |
+| Modal QA — Send Invoice (open/focus/Tab/Escape/close-button/focus-restore/no overflow) | **PASS** | Same spec, same assertion set |
+| Send Invoice — no sensitive data leaked | **PASS** | Modal body/HTML asserted not to contain Stripe secret-key or PaymentIntent-id patterns or `data-*-id` internal identifiers |
+| Console/network errors during both modals | **PASS — none observed** | `page.on('console'/'pageerror'/'requestfailed'/'response')` listeners asserted empty across all 6 test runs |
+
+### Test/Lint/Build/TSC/E2E — re-run after this update (exact numbers)
+
+```
+npm test          → PASS — 218/218 (137 Jest + 28 unit + 19 security + 34 acceptance), unchanged — no authorization/business logic touched
+npm run lint       → PASS — eslint --fix, 0 remaining errors
+npm run build      → PASS — API (nest build) + Web (vite build)
+npx tsc --noEmit   → PASS — backend/app/api: 0 errors (run from that package directory; the root-level invocation resolves to an unrelated npm package named "tsc" and must not be used)
+npm run test:e2e   → PASS — 85 legacy (79 prior + 6 new modal tests) + 29 backend/app/web = 114/114
+```
+
+No RBAC, warehouse, division, material, customer, photo, invoice, or payment authorization
+code was touched by this update — the only production change is the `id`/`for`/`aria-*`
+label-association markup inside `openAdjustModal()` in `assets/app.js`.
+
+**PRODUCTION: NOT DEPLOYED**
+
+---
+
 This pass picks up exactly where `WEB_PERFECTION_FINAL_REPORT.md` left off. That report's own "Not independently re-verified" section named one open gap: *"Full manual keyboard-tab-order audit and color-contrast measurement across every screen ... not exhaustive against every modal."* This pass closes that gap with a real, automated, evidence-producing accessibility audit (axe-core driven through actual Chromium via Playwright, against the live app on the real API/Postgres/Redis/MinIO stack — the same method the prior pass used), fixes every real defect it found, adds a lightweight real-network performance check, and re-runs the entire existing test/security/e2e matrix to confirm nothing regressed.
 
 Per the closeout instructions, work already fixed in the prior pass (photo URL/storage, photo size calc, fake-payment placeholder removal, invoice address, photo a11y/lightbox basics, SKU removal, warehouse/division isolation, material IDOR, inventory/history restructuring, mobile nav) was **not** re-done — only verified via the full regression re-run below.
@@ -46,7 +112,8 @@ Login, Login error state, Dashboard (Recycling + Healthcare), Inventory/Stock (R
 ## Not exhaustively covered by this pass
 
 - Automated axe scanning covers structural a11y (labels, roles, contrast, focus) reliably; it does not replace a screen-reader-software (NVDA/VoiceOver) listening pass. None was performed — no screen reader software is available in this environment.
-- The Adjust Stock modal, Send Invoice modal, and Duplicate-invoice flow were not independently axe-scanned (only the four highest-traffic modals plus Payment Link and the Lightbox were). They share the same `field()`/`openModal()` code paths already fixed and scanned elsewhere, so the fixes apply to them too, but they were not each individually re-scanned — **NOT TESTED** (not FAIL; no reason to expect a different result, but no direct evidence was collected).
+- The Adjust Stock modal and Send Invoice modal are now individually verified — see the addendum at the top of this report. **PASS** for both (one real defect was found in Adjust Stock and fixed; Send Invoice had none).
+- The Duplicate-invoice flow was not independently axe-scanned (it reuses the invoice editor form, not a distinct modal). It shares the same `field()`-derived code paths fixed and scanned elsewhere — **NOT TESTED** (not FAIL; no reason to expect a different result, but no direct evidence was collected).
 - Print/PDF-specific rendering (as opposed to the on-screen View document, which *was* scanned) was not run through axe, since axe operates on the live DOM, not the print-media/PDF render path.
 
 ---
@@ -89,6 +156,10 @@ npm run test:e2e  → PASS  — 79/79 (legacy frontend, tests/e2e-legacy — 48 
                              + 29/29 (backend/app/web)
                              = 108/108, exit 0
 ```
+
+Superseded by the addendum's re-run at the top of this document: 114/114 e2e (85 legacy + 29
+backend/app/web) after adding the 6 Adjust Stock/Send Invoice modal tests; all other numbers
+unchanged.
 
 ---
 

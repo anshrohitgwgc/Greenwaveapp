@@ -1490,8 +1490,8 @@
           '<div class="field"><label for="modalMaterialSelect">Material</label><select id="modalMaterialSelect" name="materialId" required>' +
             mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>'; }).join('') +
           '</select></div>' +
-          '<div class="field"><label>Reason for Adjustment (Required)</label><input type="text" name="reason" placeholder="e.g. physical recount, corrected pallet count" required></div>' +
-          '<div class="field"><label>Pallet Adjustment Quantity (+ / -)</label><input type="number" name="palletQty" step="any" placeholder="e.g. +2 or -1" required class="pallet-input"></div>' +
+          '<div class="field"><label for="modalAdjReason">Reason for Adjustment (Required)</label><input id="modalAdjReason" type="text" name="reason" placeholder="e.g. physical recount, corrected pallet count" required></div>' +
+          '<div class="field"><label for="modalAdjPalletQty">Pallet Adjustment Quantity (+ / -)</label><input id="modalAdjPalletQty" type="number" name="palletQty" step="any" placeholder="e.g. +2 or -1" required class="pallet-input"></div>' +
           '<div class="total-preview-box">' +
             '<span class="total-preview-label">Net Adjustment Total:</span>' +
             '<span class="total-preview-val text-accent" id="modalAutoTotal">0 PALLETS</span>' +
@@ -1505,13 +1505,13 @@
           '<div class="field"><label for="modalMaterialSelect">Product</label><select id="modalMaterialSelect" name="materialId" required>' +
             mats.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>'; }).join('') +
           '</select></div>' +
-          '<div class="field"><label>Reason for Adjustment (Required)</label><input type="text" name="reason" placeholder="e.g. physical recount, adjusted 5 units to match count" required></div>' +
-          '<label style="font-size:13px;font-weight:600;margin-top:10px;display:block">Adjustment Quantities (Whole BOX counts only)</label>' +
-          '<div class="sizes-grid">' +
-            '<div class="field"><label>XL</label><input type="number" name="xl" step="any" placeholder="0" class="size-input"></div>' +
-            '<div class="field"><label>L</label><input type="number" name="l" step="any" placeholder="0" class="size-input"></div>' +
-            '<div class="field"><label>M</label><input type="number" name="m" step="any" placeholder="0" class="size-input"></div>' +
-            '<div class="field"><label>S</label><input type="number" name="s" step="any" placeholder="0" class="size-input"></div>' +
+          '<div class="field"><label for="modalAdjReason">Reason for Adjustment (Required)</label><input id="modalAdjReason" type="text" name="reason" placeholder="e.g. physical recount, adjusted 5 units to match count" required></div>' +
+          '<label id="modalAdjSizesLabel" style="font-size:13px;font-weight:600;margin-top:10px;display:block">Adjustment Quantities (Whole BOX counts only)</label>' +
+          '<div class="sizes-grid" role="group" aria-labelledby="modalAdjSizesLabel">' +
+            '<div class="field"><label for="modalAdjXl">XL</label><input id="modalAdjXl" type="number" name="xl" step="any" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label for="modalAdjL">L</label><input id="modalAdjL" type="number" name="l" step="any" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label for="modalAdjM">M</label><input id="modalAdjM" type="number" name="m" step="any" placeholder="0" class="size-input"></div>' +
+            '<div class="field"><label for="modalAdjS">S</label><input id="modalAdjS" type="number" name="s" step="any" placeholder="0" class="size-input"></div>' +
           '</div>' +
           '<div class="total-preview-box">' +
             '<span class="total-preview-label">Net Adjustment Total:</span>' +
