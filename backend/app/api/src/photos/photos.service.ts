@@ -13,6 +13,7 @@ import { StorageService } from '../storage/storage.service';
 import { WarehousesService } from '../warehouses/warehouses.service';
 import { UploadPhotoMetadataDto } from './dto/upload-photo-metadata.dto';
 import { PhotoAsset } from './entities/photo-asset.entity';
+import { sanitizeImage } from './image-sanitizer';
 
 const PRIVILEGED_ROLES = ['admin', 'manager'];
 
@@ -43,11 +44,17 @@ export class PhotosService {
       );
     }
 
+    // Strip EXIF/GPS/camera metadata server-side before the bytes ever
+    // reach storage. Must happen here, not in the browser — a client can
+    // always send raw bytes directly to this API, bypassing any frontend
+    // sanitization.
+    const sanitizedBuffer = await sanitizeImage(file.buffer, file.mimetype);
+
     const id = randomUUID();
     const scope = meta.warehouseId ?? 'general';
     const objectKey = `photos/${scope}/${id}-${file.originalname}`;
 
-    await this.storageService.upload(objectKey, file.buffer, file.mimetype);
+    await this.storageService.upload(objectKey, sanitizedBuffer, file.mimetype);
 
     const photo = this.photoRepository.create({
       id,
@@ -55,7 +62,7 @@ export class PhotosService {
       bucketName: this.storageService.getBucketName(),
       originalFilename: file.originalname,
       mimeType: file.mimetype,
-      sizeBytes: file.size,
+      sizeBytes: sanitizedBuffer.length,
       warehouseId: meta.warehouseId ?? null,
       customerId: meta.customerId ?? null,
       jobReference: meta.jobReference ?? null,
