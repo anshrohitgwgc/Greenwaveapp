@@ -9,6 +9,7 @@
     "test:e2e": "playwright test --config=tests/e2e-legacy/playwright.config.js && npm --prefix backend run test:e2e"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.62.1"
   }
 }
