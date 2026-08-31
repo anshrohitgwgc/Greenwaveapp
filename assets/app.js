@@ -203,10 +203,19 @@
   var invenTab = 'balances';
   var invenSearchQuery = '';
   var invenProductFilter = '';
-  var invenTypeFilter = '';
   var inventoryBalancesCache = [];
   var inventoryTransactionsCache = [];
   var inventoryContainersCache = [];
+
+  var histTab = 'transactions';
+  var histSearchQuery = '';
+  var histFacilityFilter = '';
+  var histDivisionFilter = '';
+  var histTypeFilter = '';
+  var histProductFilter = '';
+  var histRecordedByFilter = '';
+  var histStartDate = '';
+  var histEndDate = '';
 
   function isRecycling() { return entity === 'recycling'; }
   function isHealthcare() { return entity === 'healthcare'; }
@@ -229,14 +238,6 @@
     return w ? w.name : (id ? 'Warehouse ' + String(id).slice(0, 6) : '—');
   }
   function taxFor(prov) { return TAX[prov] || TAX.BC; }
-
-  function visibleMaterials(all) {
-    return (all || []).filter(function (m) {
-      if (!m.active) return false;
-      var c = (m.category || '').toLowerCase();
-      return isRecycling() ? c !== 'healthcare' : (c === 'healthcare' || c === 'ppe' || c === 'gloves' || c === 'cases');
-    });
-  }
 
   function materialCapture(m) {
     var u = (m && m.unit ? m.unit : '').toLowerCase();
@@ -495,7 +496,7 @@
   function renderInventory() {
     var w = warehouse();
     var invSub = $('#invenSub');
-    if (invSub) invSub.textContent = w ? 'Live balances & transactions at ' + w.name + ' (PostgreSQL ledger).' : '';
+    if (invSub) invSub.textContent = w ? 'Current inventory and operations for ' + w.name + '.' : '';
     var invBody = $('#invenBody');
     if (!w) { if (invBody) invBody.innerHTML = ''; return; }
 
@@ -503,7 +504,7 @@
 
     var div = isRecycling() ? 'recycling' : 'healthcare';
     Promise.all([
-      Api.listMaterials(),
+      Api.listMaterials({ warehouseId: w.id, division: div }),
       Api.getInventoryBalances(w.id, div),
       Api.listInventoryTransactions({ warehouseId: w.id, division: div }),
       Api.listContainers({ warehouseId: w.id, division: div })
@@ -513,7 +514,7 @@
       var transactions = res[2];
       var containers = res[3];
 
-      var visibleMats = visibleMaterials(allMaterials);
+      var visibleMats = allMaterials;
       inventoryBalancesCache = balances;
       inventoryTransactionsCache = transactions;
       inventoryContainersCache = containers;
@@ -557,8 +558,6 @@
 
       if (invenTab === 'balances') {
         renderBalancesTab(visibleMats, balances, transactions);
-      } else if (invenTab === 'transactions') {
-        renderTransactionsTab(visibleMats, transactions);
       } else if (invenTab === 'containers') {
         renderContainersTab(containers);
       }
@@ -719,21 +718,26 @@
       '</table></div></div>';
   }
 
-  function renderTransactionsTab(materials, transactions) {
+  /* Operational transaction timeline — lives on the History page. Spans every
+     facility/division the user is authorized for, so each row states its own
+     facility/division/unit rather than assuming the app's current scope. */
+  function renderHistoryTransactionsTable(materials, transactions) {
     var matById = {};
     materials.forEach(function (m) { matById[m.id] = m; });
 
     var rows = transactions.slice();
-    var isRec = isRecycling();
 
-    if (invenProductFilter) {
-      rows = rows.filter(function (t) { return t.materialId === invenProductFilter; });
+    if (histProductFilter) {
+      rows = rows.filter(function (t) { return t.materialId === histProductFilter; });
     }
-    if (invenTypeFilter) {
-      rows = rows.filter(function (t) { return t.type === invenTypeFilter; });
+    if (histTypeFilter) {
+      rows = rows.filter(function (t) { return t.type === histTypeFilter; });
     }
-    if (invenSearchQuery) {
-      var q = invenSearchQuery.toLowerCase();
+    if (histRecordedByFilter) {
+      rows = rows.filter(function (t) { return String(t.createdBy) === histRecordedByFilter; });
+    }
+    if (histSearchQuery) {
+      var q = histSearchQuery.toLowerCase();
       rows = rows.filter(function (t) {
         var m = matById[t.materialId] || {};
         return (t.orderNumber || '').toLowerCase().indexOf(q) >= 0 ||
@@ -746,90 +750,58 @@
       });
     }
 
-    var head = isRec
-      ? '<tr>' +
-          '<th>Date</th>' +
-          '<th>Order / Ref #</th>' +
-          '<th>Type</th>' +
-          '<th>Material</th>' +
-          '<th>Unit</th>' +
-          '<th>Weight</th>' +
-          '<th>Container No.</th>' +
-          '<th>Seal No.</th>' +
-          '<th class="num">Total Pallets</th>' +
-          '<th>Recorded By</th>' +
-          '<th>Notes / Reason</th>' +
-        '</tr>'
-      : '<tr>' +
-          '<th>Date</th>' +
-          '<th>Order / Ref #</th>' +
-          '<th>Type</th>' +
-          '<th>Product</th>' +
-          '<th>Unit</th>' +
-          '<th>Container No.</th>' +
-          '<th>Seal No.</th>' +
-          '<th class="num">XL</th>' +
-          '<th class="num">L</th>' +
-          '<th class="num">M</th>' +
-          '<th class="num">S</th>' +
-          '<th class="num">Total Boxes</th>' +
-          '<th>Recorded By</th>' +
-          '<th>Notes / Reason</th>' +
-        '</tr>';
+    var head = '<tr>' +
+        '<th>Date</th>' +
+        '<th>Facility</th>' +
+        '<th>Division</th>' +
+        '<th>Order / Ref #</th>' +
+        '<th>Type</th>' +
+        '<th>Product / Material</th>' +
+        '<th>Unit</th>' +
+        '<th class="num">Quantity</th>' +
+        '<th>Container No.</th>' +
+        '<th>Seal No.</th>' +
+        '<th>Recorded By</th>' +
+        '<th>Notes / Reason</th>' +
+      '</tr>';
 
     var body = rows.map(function (t) {
-      var m = matById[t.materialId] || { name: 'Item', unit: isRec ? 'PALLET' : 'BOX' };
+      var isRec = t.division === 'healthcare' ? false : true;
+      var m = matById[t.materialId] || { name: t.materialName || 'Item' };
       var badgeClass = t.type === 'inbound' ? 'badge-in' : t.type === 'outbound' ? 'badge-out' : 'badge-adj';
       var typeLabel = t.type === 'inbound' ? 'IN' : t.type === 'outbound' ? 'OUT' : 'ADJ';
       var by = (me && t.createdBy === me.id) ? me.name : (usersCache ? userName(t.createdBy) : ('Staff #' + t.createdBy));
       var unitStr = (t.unitType || (isRec ? 'pallet' : 'box')).toUpperCase();
-      var weightStr = (t.weightValue != null && Number(t.weightValue) > 0) ? (num(t.weightValue) + ' ' + (t.weightUnit || 'kg').toUpperCase()) : '—';
+      var qtyStr = isRec
+        ? num(t.total) + ' PALLETS' + ((t.weightValue != null && Number(t.weightValue) > 0) ? ' (' + num(t.weightValue) + ' ' + (t.weightUnit || 'kg').toUpperCase() + ')' : '')
+        : num(t.total) + ' BOXES (XL' + num(t.xl) + '/L' + num(t.l) + '/M' + num(t.m) + '/S' + num(t.s) + ')';
 
-      if (isRec) {
-        return '<tr class="clickable-row" data-tx="' + esc(t.id) + '" title="Click to view full transaction details and photos">' +
-          '<td class="mono" style="font-size:12.5px">' + esc(when(t.createdAt).split(' ')[0]) + '</td>' +
-          '<td class="mono"><strong>' + esc(t.orderNumber || t.reference || '—') + '</strong></td>' +
-          '<td><span class="badge ' + badgeClass + '">' + typeLabel + '</span></td>' +
-          '<td>' + esc(m.name) + '</td>' +
-          '<td><span class="mono" style="font-size:11.5px;font-weight:700">' + esc(unitStr) + '</span></td>' +
-          '<td class="mono" style="font-size:12px">' + esc(weightStr) + '</td>' +
-          '<td class="mono">' + esc(t.containerNumber || '—') + '</td>' +
-          '<td class="mono">' + esc(t.sealNumber || '—') + '</td>' +
-          '<td class="num"><strong>' + num(t.total) + '</strong></td>' +
-          '<td style="color:var(--ink-2)">' + esc(by) + '</td>' +
-          '<td style="color:var(--muted);font-size:12.5px">' + esc(t.reason || t.notes || '—') + '</td>' +
-          '</tr>';
-      } else {
-        return '<tr class="clickable-row" data-tx="' + esc(t.id) + '" title="Click to view full transaction details and photos">' +
-          '<td class="mono" style="font-size:12.5px">' + esc(when(t.createdAt).split(' ')[0]) + '</td>' +
-          '<td class="mono"><strong>' + esc(t.orderNumber || t.reference || '—') + '</strong></td>' +
-          '<td><span class="badge ' + badgeClass + '">' + typeLabel + '</span></td>' +
-          '<td>' + esc(m.name) + '</td>' +
-          '<td><span class="mono" style="font-size:11.5px;font-weight:700">' + esc(unitStr) + '</span></td>' +
-          '<td class="mono">' + esc(t.containerNumber || '—') + '</td>' +
-          '<td class="mono">' + esc(t.sealNumber || '—') + '</td>' +
-          '<td class="num">' + num(t.xl) + '</td>' +
-          '<td class="num">' + num(t.l) + '</td>' +
-          '<td class="num">' + num(t.m) + '</td>' +
-          '<td class="num">' + num(t.s) + '</td>' +
-          '<td class="num"><strong>' + num(t.total) + '</strong></td>' +
-          '<td style="color:var(--ink-2)">' + esc(by) + '</td>' +
-          '<td style="color:var(--muted);font-size:12.5px">' + esc(t.reason || t.notes || '—') + '</td>' +
-          '</tr>';
-      }
+      return '<tr class="clickable-row" data-tx="' + esc(t.id) + '" title="Click to view full transaction details and photos">' +
+        '<td class="mono" style="font-size:12.5px">' + esc(when(t.createdAt).split(' ')[0]) + '</td>' +
+        '<td>' + esc(t.warehouseName || warehouseName(t.warehouseId)) + '</td>' +
+        '<td>' + (isRec ? 'Recycling' : 'Healthcare') + '</td>' +
+        '<td class="mono"><strong>' + esc(t.orderNumber || t.reference || '—') + '</strong></td>' +
+        '<td><span class="badge ' + badgeClass + '">' + typeLabel + '</span></td>' +
+        '<td>' + esc(m.name) + '</td>' +
+        '<td><span class="mono" style="font-size:11.5px;font-weight:700">' + esc(unitStr) + '</span></td>' +
+        '<td class="num mono" style="font-size:12px"><strong>' + qtyStr + '</strong></td>' +
+        '<td class="mono">' + esc(t.containerNumber || '—') + '</td>' +
+        '<td class="mono">' + esc(t.sealNumber || '—') + '</td>' +
+        '<td style="color:var(--ink-2)">' + esc(by) + '</td>' +
+        '<td style="color:var(--muted);font-size:12.5px">' + esc(t.reason || t.notes || '—') + '</td>' +
+        '</tr>';
     }).join('');
 
-    var colSpan = isRec ? 11 : 14;
-    var invBody = $('#invenBody');
-    if (invBody) {
-      invBody.innerHTML = '<div class="card">' +
+    var histBody = $('#historyBody');
+    if (histBody) {
+      histBody.innerHTML = '<div class="card">' +
         '<div class="tablewrap"><table class="table">' +
         '<thead>' + head + '</thead>' +
-        '<tbody>' + (body || '<tr><td colspan="' + colSpan + '" style="text-align:center;color:var(--muted);padding:30px">No matching transactions found.</td></tr>') + '</tbody>' +
+        '<tbody>' + (body || '<tr><td colspan="12" style="text-align:center;color:var(--muted);padding:30px">No matching transactions found.</td></tr>') + '</tbody>' +
         '</table></div></div>';
     }
 
-    $$('.clickable-row[data-tx]').forEach(function (row) {
+    $$('#historyBody .clickable-row[data-tx]').forEach(function (row) {
       row.addEventListener('click', function () {
         openTransactionDetailModal(row.dataset.tx);
       });
@@ -983,8 +955,8 @@
     var w = warehouse();
     if (!w) { toast('Please select a warehouse first.'); return; }
 
-    Api.listMaterials().then(function (all) {
-      var mats = visibleMaterials(all);
+    Api.listMaterials({ warehouseId: w.id, division: entity }).then(function (all) {
+      var mats = all;
       if (!mats.length) { toast('Please create materials in the catalog first.'); return; }
 
       var isRec = isRecycling();
@@ -1249,8 +1221,8 @@
     var w = warehouse();
     if (!w) { toast('Please select a warehouse first.'); return; }
 
-    Api.listMaterials().then(function (all) {
-      var mats = visibleMaterials(all);
+    Api.listMaterials({ warehouseId: w.id, division: entity }).then(function (all) {
+      var mats = all;
       if (!mats.length) { toast('Please create materials in the catalog first.'); return; }
 
       var isRec = isRecycling();
@@ -1396,8 +1368,8 @@
     var w = warehouse();
     if (!w) { toast('Please select a warehouse first.'); return; }
 
-    Api.listMaterials().then(function (all) {
-      var mats = visibleMaterials(all);
+    Api.listMaterials({ warehouseId: w.id, division: entity }).then(function (all) {
+      var mats = all;
       if (!mats.length) { toast('Please create materials in the catalog first.'); return; }
 
       var isRec = isRecycling();
@@ -1526,45 +1498,21 @@
     var w = warehouse();
     if (!w) return;
 
-    var csvContent = '';
-    var filename = 'greenwave-inventory-' + (w.code || 'wh') + '-' + today() + '.csv';
-
-    if (invenTab === 'transactions') {
-      csvContent = 'Date,Order Number,Type,Product ID,Container Number,Seal Number,XL,L,M,S,Total,Created By,Notes\n';
-      inventoryTransactionsCache.forEach(function (t) {
-        csvContent += [
-          when(t.createdAt),
-          '"' + (t.orderNumber || t.reference || '').replace(/"/g, '""') + '"',
-          t.type,
-          t.materialId,
-          '"' + (t.containerNumber || '').replace(/"/g, '""') + '"',
-          '"' + (t.sealNumber || '').replace(/"/g, '""') + '"',
-          t.xl || 0,
-          t.l || 0,
-          t.m || 0,
-          t.s || 0,
-          t.total || 0,
-          t.createdBy,
-          '"' + (t.reason || t.notes || '').replace(/"/g, '""') + '"'
-        ].join(',') + '\n';
-      });
-    } else {
-      csvContent = 'Warehouse,Product ID,XL Balance,L Balance,M Balance,S Balance,Current Stock,Inbound Total,Outbound Total,Net Adjustment\n';
-      inventoryBalancesCache.forEach(function (b) {
-        csvContent += [
-          '"' + w.name + '"',
-          b.materialId,
-          b.xlBalance || 0,
-          b.lBalance || 0,
-          b.mBalance || 0,
-          b.sBalance || 0,
-          b.balance || b.totalBalance || 0,
-          b.inboundTotal || 0,
-          b.outboundTotal || 0,
-          b.adjustmentTotal || 0
-        ].join(',') + '\n';
-      });
-    }
+    var csvContent = 'Warehouse,Product ID,XL Balance,L Balance,M Balance,S Balance,Current Stock,Inbound Total,Outbound Total,Net Adjustment\n';
+    inventoryBalancesCache.forEach(function (b) {
+      csvContent += [
+        '"' + w.name + '"',
+        b.materialId,
+        b.xlBalance || 0,
+        b.lBalance || 0,
+        b.mBalance || 0,
+        b.sBalance || 0,
+        b.balance || b.totalBalance || 0,
+        b.inboundTotal || 0,
+        b.outboundTotal || 0,
+        b.adjustmentTotal || 0
+      ].join(',') + '\n';
+    });
 
     var blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     var link = document.createElement('a');
@@ -1759,8 +1707,8 @@
     if (!w) { if (body) body.innerHTML = ''; return; }
 
     loadingState('#intakeBody');
-    Api.listMaterials().then(function (all) {
-      var list = visibleMaterials(all);
+    Api.listMaterials({ warehouseId: w.id, division: entity }).then(function (all) {
+      var list = all;
       intakeMaterials = list;
       if (!list.length) {
         if (body) {
@@ -2926,12 +2874,49 @@
     }).catch(function (err) { apiErrorState('#customerBody', err); });
   }
 
+  function productDivisionFacilityFields(currentDivision, facilityName) {
+    return field('facilityDisplay', 'Facility', { value: facilityName || '—', readonly: true }) +
+      field('division', 'Division', {
+        type: 'select', required: true,
+        value: currentDivision || entity,
+        options: [
+          { value: 'recycling', label: 'Recycling' },
+          { value: 'healthcare', label: 'Healthcare' }
+        ]
+      });
+  }
+
+  function openEditProductModal(mat) {
+    var w = warehouseById(mat.warehouseId) || warehouse();
+    openModal('Edit ' + (mat.division === 'healthcare' ? 'Product' : 'Material'),
+      field('name', 'Product', { required: true, value: mat.name }) +
+      field('category', 'Category', { value: mat.category || '' }) +
+      productDivisionFacilityFields(mat.division, w ? w.name : (mat.warehouseId ? 'Unknown facility' : 'All facilities (shared)')) +
+      field('description', 'Description (Optional)', { type: 'textarea', value: mat.description || '' }) +
+      field('active', 'Status', {
+        type: 'select',
+        value: mat.active === false ? 'false' : 'true',
+        options: [
+          { value: 'true', label: 'Active' },
+          { value: 'false', label: 'Inactive' }
+        ]
+      }),
+      function (fd) {
+        return Api.updateMaterial(mat.id, {
+          name: fd.name, category: fd.category, description: fd.description,
+          division: fd.division, active: fd.active === 'true'
+        }).then(function () { toast('Catalog item updated.'); renderProducts(); });
+      });
+  }
+
   function renderProducts() {
     var pTitle = $('#prodTitle');
     if (pTitle) pTitle.textContent = isRecycling() ? 'Materials Catalog' : 'Healthcare Products';
     loadingState('#productBody');
-    Api.listMaterials().then(function (all) {
-      var list = visibleMaterials(all);
+    var w = warehouse();
+    if (!w) { var pBody0 = $('#productBody'); if (pBody0) pBody0.innerHTML = ''; return; }
+    Api.listMaterials({ warehouseId: w.id, division: entity, includeInactive: true }).then(function (all) {
+      var list = all;
       var pBody = $('#productBody');
       if (!pBody) return;
       if (!list.length) {
@@ -2940,11 +2925,24 @@
         return;
       }
       pBody.innerHTML = '<div class="card"><div class="tablewrap"><table class="table"><thead><tr>' +
-        '<th>Name</th><th>Category</th><th>SKU / Code</th><th>Description</th></tr></thead><tbody>' +
+        '<th>Product / Material</th><th>Category</th><th>Description</th><th>Division</th><th>Status</th><th>Actions</th></tr></thead><tbody>' +
         list.map(function (m) {
+          var divLabel = m.division === 'healthcare' ? 'Healthcare' : 'Recycling';
+          var statusLabel = m.active === false ? 'Inactive' : 'Active';
+          var statusCls = m.active === false ? 'badge-inactive' : 'badge-active';
           return '<tr><td><strong>' + esc(m.name) + '</strong></td><td>' + esc(m.category || '—') + '</td>' +
-            '<td class="mono">' + esc(m.sku || m.code || '—') + '</td><td style="color:var(--muted)">' + esc(m.description || '—') + '</td></tr>';
+            '<td style="color:var(--muted)">' + esc(m.description || '—') + '</td>' +
+            '<td>' + esc(divLabel) + '</td>' +
+            '<td><span class="badge ' + statusCls + '">' + statusLabel + '</span></td>' +
+            '<td><button type="button" class="btn ghost btn-sm" data-edit-material="' + esc(m.id) + '">Edit</button></td></tr>';
         }).join('') + '</tbody></table></div></div>';
+
+      $$('[data-edit-material]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var mat = list.filter(function (x) { return x.id === btn.dataset.editMaterial; })[0];
+          if (mat) openEditProductModal(mat);
+        });
+      });
     }).catch(function (err) { apiErrorState('#productBody', err); });
   }
 
@@ -3233,6 +3231,60 @@
   }
 
   function renderHistory() {
+    var filtersEl = $('#historyFilters');
+    if (filtersEl) filtersEl.hidden = histTab !== 'transactions';
+
+    if (histTab === 'audit') {
+      renderHistoryAuditLog();
+      return;
+    }
+    renderHistoryTransactions();
+  }
+
+  function renderHistoryTransactions() {
+    loadingState('#historyBody');
+
+    var facEl = $('#histFacilityFilter');
+    if (facEl && facEl.options.length <= 1) {
+      facEl.innerHTML = '<option value="">All Facilities</option>' +
+        warehouses.map(function (w) { return '<option value="' + esc(w.id) + '">' + esc(w.name) + '</option>'; }).join('');
+      facEl.value = histFacilityFilter;
+    }
+
+    loadUsersCache().then(function (users) {
+      var byEl = $('#histRecordedByFilter');
+      if (byEl && byEl.options.length <= 1) {
+        byEl.innerHTML = '<option value="">All Staff</option>' +
+          (users || []).map(function (u) { return '<option value="' + esc(u.id) + '">' + esc(u.name || u.fullName || u.email) + '</option>'; }).join('');
+        byEl.value = histRecordedByFilter;
+      }
+    });
+
+    Promise.all([
+      Api.listMaterials({ warehouseId: histFacilityFilter || undefined, division: histDivisionFilter || undefined, includeInactive: true }),
+      Api.listInventoryTransactions({
+        warehouseId: histFacilityFilter || undefined,
+        division: histDivisionFilter || undefined,
+        startDate: histStartDate || undefined,
+        endDate: histEndDate || undefined
+      })
+    ]).then(function (res) {
+      var materials = res[0];
+      var transactions = res[1];
+
+      var prodFilterEl = $('#histProductFilter');
+      if (prodFilterEl) {
+        var prevVal = prodFilterEl.value;
+        prodFilterEl.innerHTML = '<option value="">All Products / Materials</option>' +
+          materials.map(function (m) { return '<option value="' + esc(m.id) + '">' + esc(m.name) + '</option>'; }).join('');
+        prodFilterEl.value = prevVal || histProductFilter;
+      }
+
+      renderHistoryTransactionsTable(materials, transactions);
+    }).catch(function (err) { apiErrorState('#historyBody', err); });
+  }
+
+  function renderHistoryAuditLog() {
     loadingState('#historyBody');
     Api.listAudit({ warehouseId: warehouseId }).then(function (logs) {
       var hBody = $('#historyBody');
@@ -3449,6 +3501,12 @@
       whEl.addEventListener('change', function (e) {
         warehouseId = e.target.value;
         S.setWarehouse(warehouseId);
+        var modalWrap = $('#modalWrap');
+        if (modalWrap && !modalWrap.hidden) {
+          modalWrap.hidden = true;
+          var modalFormEl = $('#modalForm');
+          if (modalFormEl) modalFormEl.innerHTML = '';
+        }
         render();
       });
     }
@@ -3461,6 +3519,14 @@
         db.entity = entity;
         S.save(db);
         if (view === 'invoices' && isHealthcare()) view = 'inventory';
+        // Close any open form so a product/material selected under the
+        // previous division can't linger after switching divisions.
+        var modalWrap = $('#modalWrap');
+        if (modalWrap && !modalWrap.hidden) {
+          modalWrap.hidden = true;
+          var modalFormEl = $('#modalForm');
+          if (modalFormEl) modalFormEl.innerHTML = '';
+        }
         syncChrome();
         render();
       });
@@ -3486,13 +3552,23 @@
     var expBtn = $('#btnExportInventory');
     if (expBtn) expBtn.addEventListener('click', exportInventoryCsv);
 
-    $$('.inven-tab').forEach(function (tab) {
+    $$('#v-inventory .inven-tab[data-tab]').forEach(function (tab) {
       tab.addEventListener('click', function () {
-        $$('.inven-tab').forEach(function (t) { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
+        $$('#v-inventory .inven-tab[data-tab]').forEach(function (t) { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
         tab.classList.add('active');
         tab.setAttribute('aria-selected', 'true');
         invenTab = tab.dataset.tab;
         renderInventory();
+      });
+    });
+
+    $$('#v-history .inven-tab[data-hist-tab]').forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        $$('#v-history .inven-tab[data-hist-tab]').forEach(function (t) { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
+        tab.classList.add('active');
+        tab.setAttribute('aria-selected', 'true');
+        histTab = tab.dataset.histTab;
+        renderHistory();
       });
     });
 
@@ -3510,13 +3586,19 @@
         renderInventory();
       });
     }
-    var typeFilter = $('#invenTypeFilter');
-    if (typeFilter) {
-      typeFilter.addEventListener('change', function () {
-        invenTypeFilter = typeFilter.value;
-        renderInventory();
-      });
-    }
+    [
+      ['#histSearch', 'input', function (v) { histSearchQuery = v.trim(); }],
+      ['#histFacilityFilter', 'change', function (v) { histFacilityFilter = v; }],
+      ['#histDivisionFilter', 'change', function (v) { histDivisionFilter = v; }],
+      ['#histTypeFilter', 'change', function (v) { histTypeFilter = v; }],
+      ['#histProductFilter', 'change', function (v) { histProductFilter = v; }],
+      ['#histRecordedByFilter', 'change', function (v) { histRecordedByFilter = v; }],
+      ['#histStartDate', 'change', function (v) { histStartDate = v; }],
+      ['#histEndDate', 'change', function (v) { histEndDate = v; }]
+    ].forEach(function (cfg) {
+      var el = $(cfg[0]);
+      if (el) el.addEventListener(cfg[1], function () { cfg[2](el.value); renderHistory(); });
+    });
 
     var addPhotoBtn = $('#addPhoto');
     if (addPhotoBtn) addPhotoBtn.addEventListener('click', function () { var pf = $('#photoFile'); if (pf) pf.click(); });
@@ -3546,14 +3628,18 @@
     var newProductBtn = $('#newProduct');
     if (newProductBtn) {
       newProductBtn.addEventListener('click', function () {
+        var w = warehouse();
+        if (!w) { toast('Please select a warehouse first.'); return; }
         openModal('Add ' + (isRecycling() ? 'Material' : 'Product'),
-          field('name', 'Name', { required: true, placeholder: isRecycling() ? 'e.g. Mixed Electronics' : 'e.g. Synguard 100 Nitrile Gloves' }) +
+          field('name', 'Product', { required: true, placeholder: isRecycling() ? 'e.g. Mixed Electronics' : 'e.g. Synguard 100 Nitrile Gloves' }) +
           field('category', 'Category', { placeholder: isRecycling() ? 'e.g. Electronics / Plastics' : 'e.g. PPE / Gloves' }) +
-          field('sku', 'SKU / Code (Optional)', { placeholder: isRecycling() ? 'e.g. MAT-ELEC-01' : 'e.g. GLV-NIT-M' }) +
+          productDivisionFacilityFields(entity, w.name) +
           field('description', 'Description (Optional)', { type: 'textarea' }),
           function (fd) {
             return Api.createMaterial({
-              name: fd.name, category: fd.category, sku: fd.sku, description: fd.description, unit: isRecycling() ? 'pallet' : 'box'
+              name: fd.name, category: fd.category, description: fd.description,
+              division: fd.division, warehouseId: w.id,
+              unit: fd.division === 'recycling' ? 'pallet' : 'box'
             }).then(function () { toast('Catalog item added.'); renderProducts(); });
           });
       });

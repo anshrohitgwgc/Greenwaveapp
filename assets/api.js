@@ -116,8 +116,14 @@
     updateCustomer: function (id, data) { return request('PATCH', '/customers/' + id, data); },
 
     // Materials
-    listMaterials: function (includeInactive) {
-      return request('GET', '/materials' + qs({ includeInactive: includeInactive ? 'true' : undefined }));
+    listMaterials: function (params) {
+      params = params || {};
+      if (params === true || params === false) params = { includeInactive: params }; // legacy boolean call sites
+      return request('GET', '/materials' + qs({
+        includeInactive: params.includeInactive ? 'true' : undefined,
+        warehouseId: params.warehouseId,
+        division: params.division,
+      }));
     },
     createMaterial: function (data) { return request('POST', '/materials', data); },
     updateMaterial: function (id, data) { return request('PATCH', '/materials/' + id, data); },

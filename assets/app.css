@@ -1531,6 +1531,11 @@ th.num { text-align: right; }
   color: #166534;
   border: 1px solid #BBF7D0;
 }
+.badge-inactive {
+  background: #F1F5F9;
+  color: #64748B;
+  border: 1px solid #E2E8F0;
+}
 /* Management Portal & User Detail Panel */
 .user-detail-wrap {
   display: flex;

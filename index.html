@@ -8,13 +8,13 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Greenwave">
 <title>GreenWave Operations Platform</title>
-<link rel="manifest" href="manifest.webmanifest?v=20260829_213000">
+<link rel="manifest" href="manifest.webmanifest?v=20260830_150000">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="icon" href="assets/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/app.css?v=20260829_213000">
+<link rel="stylesheet" href="assets/app.css?v=20260830_150000">
 </head>
 <body>
 
@@ -194,7 +194,7 @@
               <span class="scope-divider">·</span>
               <span class="scope-division-unit" id="scopeDivisionUnit">Recycling · Pallets</span>
             </div>
-            <p id="invenSub">Live multi-warehouse inventory balances, container tracking, and transaction ledger.</p>
+            <p id="invenSub">Current inventory and operations.</p>
           </div>
           <div class="vactions">
             <button type="button" class="btn btn-primary" id="btnReceiveStock"><svg><use href="#i-plus"></use></svg>Inbound</button>
@@ -231,8 +231,7 @@
         <!-- Inventory Section Sub-Navigation & Filters -->
         <div class="inven-toolbar">
           <div class="inven-tabs" role="tablist">
-            <button type="button" class="inven-tab active" data-tab="balances" role="tab" aria-selected="true">Stock Balances</button>
-            <button type="button" class="inven-tab" data-tab="transactions" role="tab" aria-selected="false">Transactions Ledger</button>
+            <button type="button" class="inven-tab active" data-tab="balances" role="tab" aria-selected="true">Current Stock</button>
             <button type="button" class="inven-tab" data-tab="containers" role="tab" aria-selected="false">Containers &amp; Loading</button>
           </div>
           <div class="inven-filters">
@@ -242,12 +241,6 @@
             </div>
             <select id="invenProductFilter">
               <option value="">All Products / Materials</option>
-            </select>
-            <select id="invenTypeFilter">
-              <option value="">All Transaction Types</option>
-              <option value="inbound">Inbound (IN)</option>
-              <option value="outbound">Outbound (OUT)</option>
-              <option value="adjustment">Adjustment (ADJ)</option>
             </select>
           </div>
         </div>
@@ -409,9 +402,45 @@
         <div id="staffBody"></div>
       </section>
 
-      <!-- ============ HISTORY / AUDIT VIEW ============ -->
+      <!-- ============ HISTORY / TRANSACTION TIMELINE VIEW ============ -->
       <section class="view" id="v-history">
-        <div class="vhead"><div><h1>History &amp; Audit Log</h1><p>Append-only operational audit trail, newest first.</p></div></div>
+        <div class="vhead"><div><h1>History</h1><p>Operational transaction timeline across facilities, newest first.</p></div></div>
+
+        <div class="inven-toolbar">
+          <div class="inven-tabs" role="tablist">
+            <button type="button" class="inven-tab active" data-hist-tab="transactions" role="tab" aria-selected="true">Transactions</button>
+            <button type="button" class="inven-tab" data-hist-tab="audit" role="tab" aria-selected="false">Audit Log</button>
+          </div>
+          <div class="inven-filters" id="historyFilters">
+            <div class="search-wrap">
+              <svg class="search-ico"><use href="#i-search"></use></svg>
+              <input type="search" id="histSearch" placeholder="Search order #, container #, seal #, product...">
+            </div>
+            <select id="histFacilityFilter">
+              <option value="">All Facilities</option>
+            </select>
+            <select id="histDivisionFilter">
+              <option value="">All Divisions</option>
+              <option value="recycling">Recycling</option>
+              <option value="healthcare">Healthcare</option>
+            </select>
+            <select id="histTypeFilter">
+              <option value="">All Transaction Types</option>
+              <option value="inbound">Inbound (IN)</option>
+              <option value="outbound">Outbound (OUT)</option>
+              <option value="adjustment">Adjustment (ADJ)</option>
+            </select>
+            <select id="histProductFilter">
+              <option value="">All Products / Materials</option>
+            </select>
+            <select id="histRecordedByFilter">
+              <option value="">All Staff</option>
+            </select>
+            <input type="date" id="histStartDate" title="From date">
+            <input type="date" id="histEndDate" title="To date">
+          </div>
+        </div>
+
         <div id="historyBody"></div>
       </section>
 
@@ -452,10 +481,10 @@
   <div class="lbmeta" id="lbMeta"></div>
 </div>
 
-<script src="assets/api.js?v=20260829_213000"></script>
-<script src="assets/store.js?v=20260829_213000"></script>
-<script src="assets/photos.js?v=20260829_213000"></script>
-<script src="assets/app.js?v=20260829_213000"></script>
+<script src="assets/api.js?v=20260830_150000"></script>
+<script src="assets/store.js?v=20260830_150000"></script>
+<script src="assets/photos.js?v=20260830_150000"></script>
+<script src="assets/app.js?v=20260830_150000"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
