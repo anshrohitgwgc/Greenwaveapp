@@ -49,6 +49,7 @@ describe('PaymentsController', () => {
       id: 1,
       email: 'admin@greenwave.test',
       role: 'admin',
+      fullName: 'Admin User',
       permissions: ['payments:manage'],
     };
     const res = await controller.getMetrics(actor, 'wh-1');
@@ -64,6 +65,7 @@ describe('PaymentsController', () => {
       id: 1,
       email: 'admin@greenwave.test',
       role: 'admin',
+      fullName: 'Admin User',
       permissions: ['payments:manage'],
     };
     const res = await controller.getPaymentLink('inv-1', actor);

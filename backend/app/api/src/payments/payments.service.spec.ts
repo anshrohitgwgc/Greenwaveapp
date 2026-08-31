@@ -95,6 +95,7 @@ describe('PaymentsService', () => {
         id: 1,
         email: 'admin@greenwave.test',
         role: 'admin',
+        fullName: 'Admin User',
         permissions: ['payments:manage'],
       };
 
@@ -399,6 +400,7 @@ describe('PaymentsService', () => {
         id: 1,
         email: 'admin@greenwave.test',
         role: 'admin',
+        fullName: 'Admin User',
         permissions: ['payments:refund'],
       };
 

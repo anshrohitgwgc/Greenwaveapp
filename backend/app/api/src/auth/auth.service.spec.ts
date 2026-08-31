@@ -15,6 +15,7 @@ describe('AuthService', () => {
     findByEmail: jest.Mock;
     create: jest.Mock;
     count: jest.Mock;
+    recordLogin: jest.Mock;
   };
   let auditService: { record: jest.Mock };
   let rolesService: { getPermissionsForRole: jest.Mock };
