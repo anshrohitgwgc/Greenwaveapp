@@ -67,8 +67,14 @@ test.describe('Global Chat', () => {
     await page.waitForSelector('#v-chat.view.active');
     // Let the initial GET /chat/messages load finish before taking the
     // baseline count, or a late-arriving history load can be mistaken for
-    // messages the (incorrect) empty send produced.
-    await page.waitForSelector('#chatMessagesList .chat-msg, #chatMessagesList .chat-empty');
+    // messages the (incorrect) empty send produced. The static "Loading
+    // messages…" placeholder also carries the .chat-empty class, so waiting
+    // on ".chat-msg, .chat-empty" alone can match that placeholder itself
+    // (before the real GET resolves) rather than the loaded result.
+    await page.waitForFunction(() => {
+      var el = document.querySelector('#chatMessagesList');
+      return !!el && !el.textContent.includes('Loading messages');
+    });
 
     const before = await page.locator('.chat-msg').count();
     await page.fill('#chatInput', '   ');
