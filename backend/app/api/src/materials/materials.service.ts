@@ -89,14 +89,28 @@ export class MaterialsService {
     return qb.getMany();
   }
 
-  async findOne(id: string) {
+  private async findMaterialOrFail(id: string) {
     const material = await this.materialRepository.findOne({ where: { id } });
     if (!material) throw new NotFoundException('Material not found');
     return material;
   }
 
+  // Single-record lookup - same warehouse-scoping rule as findAll: a material
+  // with no warehouseId is global (shared) and readable by anyone, otherwise
+  // the actor must be authorized for the material's warehouse. There is no
+  // separate division-level permission in this app; division is a data
+  // attribute, not an authorization boundary.
+  async findOne(id: string, actor: AuthenticatedUser) {
+    const material = await this.findMaterialOrFail(id);
+    await this.warehousesService.assertWarehouseAccess(
+      actor,
+      material.warehouseId,
+    );
+    return material;
+  }
+
   async update(id: string, dto: UpdateMaterialDto, actor: AuthenticatedUser) {
-    const existing = await this.findOne(id);
+    const existing = await this.findMaterialOrFail(id);
 
     // Check access against both the material's current warehouse and the
     // warehouse it's being moved to, so a user can't reassign a product they
@@ -117,6 +131,6 @@ export class MaterialsService {
       defaultPrice:
         dto.defaultPrice != null ? String(dto.defaultPrice) : undefined,
     });
-    return this.findOne(id);
+    return this.findMaterialOrFail(id);
   }
 }

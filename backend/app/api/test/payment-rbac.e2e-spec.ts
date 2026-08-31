@@ -50,10 +50,19 @@ describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
   const WAREHOUSE_ON = '33333333-3333-4333-8333-333333333333';
   const WAREHOUSE_MR = '11111111-1111-4111-8111-111111111111';
 
+  const MATERIAL_CGY_RECYCLING = 'aaaaaaaa-0001-4aaa-8aaa-aaaaaaaaaaaa';
+  const MATERIAL_CGY_HEALTHCARE = 'aaaaaaaa-0002-4aaa-8aaa-aaaaaaaaaaaa';
+  const MATERIAL_ON_RECYCLING = 'aaaaaaaa-0003-4aaa-8aaa-aaaaaaaaaaaa';
+  const MATERIAL_ON_HEALTHCARE = 'aaaaaaaa-0004-4aaa-8aaa-aaaaaaaaaaaa';
+  const MATERIAL_MR_RECYCLING = 'aaaaaaaa-0005-4aaa-8aaa-aaaaaaaaaaaa';
+  const MATERIAL_MR_HEALTHCARE = 'aaaaaaaa-0006-4aaa-8aaa-aaaaaaaaaaaa';
+  const MATERIAL_GLOBAL = 'aaaaaaaa-0007-4aaa-8aaa-aaaaaaaaaaaa';
+
   let adminToken: string;
   let managerToken: string;
   let staffToken: string;
   let driverToken: string;
+  let ontarioStaffToken: string;
 
   const webhookSecret = 'whsec_e2e_acceptance_test_secret_key_12345';
 
@@ -147,6 +156,68 @@ describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
       { id: WAREHOUSE_MR, name: 'Maple Ridge, BC', code: 'MR', active: true },
     ]);
 
+    // Seed Materials - one Recycling + one Healthcare material per facility,
+    // plus one global (warehouse-agnostic) material.
+    const materialRepo = dataSource.getRepository(Material);
+    await materialRepo.save([
+      {
+        id: MATERIAL_CGY_RECYCLING,
+        name: 'Calgary Recycling Scrap',
+        unit: 'kg',
+        division: 'recycling',
+        warehouseId: WAREHOUSE_CGY,
+        active: true,
+      },
+      {
+        id: MATERIAL_CGY_HEALTHCARE,
+        name: 'Calgary Healthcare Sharps',
+        unit: 'box',
+        division: 'healthcare',
+        warehouseId: WAREHOUSE_CGY,
+        active: true,
+      },
+      {
+        id: MATERIAL_ON_RECYCLING,
+        name: 'Ontario Recycling Scrap',
+        unit: 'kg',
+        division: 'recycling',
+        warehouseId: WAREHOUSE_ON,
+        active: true,
+      },
+      {
+        id: MATERIAL_ON_HEALTHCARE,
+        name: 'Ontario Healthcare Sharps',
+        unit: 'box',
+        division: 'healthcare',
+        warehouseId: WAREHOUSE_ON,
+        active: true,
+      },
+      {
+        id: MATERIAL_MR_RECYCLING,
+        name: 'Maple Ridge Recycling Scrap',
+        unit: 'kg',
+        division: 'recycling',
+        warehouseId: WAREHOUSE_MR,
+        active: true,
+      },
+      {
+        id: MATERIAL_MR_HEALTHCARE,
+        name: 'Maple Ridge Healthcare Sharps',
+        unit: 'box',
+        division: 'healthcare',
+        warehouseId: WAREHOUSE_MR,
+        active: true,
+      },
+      {
+        id: MATERIAL_GLOBAL,
+        name: 'Universal Baler Twine',
+        unit: 'kg',
+        division: 'recycling',
+        warehouseId: null,
+        active: true,
+      },
+    ]);
+
     // Seed Permissions
     const permRepo = dataSource.getRepository(Permission);
     const roleRepo = dataSource.getRepository(Role);
@@ -223,6 +294,14 @@ describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
       status: 'active',
     });
 
+    const ontarioStaffUser = await userRepo.save({
+      fullName: 'Ontario Staff',
+      email: 'ontario-staff@greenwave.test',
+      password: passwordHash,
+      role: 'staff',
+      status: 'active',
+    });
+
     // Assign warehouse memberships
     const userWhRepo = dataSource.getRepository(UserWarehouse);
     await userWhRepo.save([
@@ -233,6 +312,8 @@ describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
       { id: 'uw-3', userId: staffUser.id, warehouseId: WAREHOUSE_CGY },
       // Driver: Maple Ridge only
       { id: 'uw-4', userId: driverUser.id, warehouseId: WAREHOUSE_MR },
+      // Ontario Staff: Ontario only
+      { id: 'uw-5', userId: ontarioStaffUser.id, warehouseId: WAREHOUSE_ON },
     ]);
 
     // Obtain JWT Tokens
@@ -247,6 +328,7 @@ describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
     managerToken = await login('manager@greenwave.test');
     staffToken = await login('staff@greenwave.test');
     driverToken = await login('driver@greenwave.test');
+    ontarioStaffToken = await login('ontario-staff@greenwave.test');
   });
 
   afterAll(async () => {
@@ -317,6 +399,172 @@ describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
         .set('Authorization', `Bearer ${staffToken}`)
         .send({ warehouseIds: [WAREHOUSE_ON] })
         .expect(403);
+    });
+  });
+
+  describe('2b. Material Detail IDOR Defense (GET /materials/:id)', () => {
+    it('Calgary-only staff can retrieve Calgary Recycling material (200)', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/materials/${MATERIAL_CGY_RECYCLING}`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .expect(200);
+
+      expect(res.body.id).toBe(MATERIAL_CGY_RECYCLING);
+      expect(res.body.name).toBe('Calgary Recycling Scrap');
+    });
+
+    it('Calgary-only staff can retrieve Calgary Healthcare material (division is not a separate access boundary)', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/materials/${MATERIAL_CGY_HEALTHCARE}`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .expect(200);
+
+      expect(res.body.id).toBe(MATERIAL_CGY_HEALTHCARE);
+    });
+
+    it('Calgary-only staff CANNOT retrieve Ontario Recycling material by direct ID (403, no data leak)', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/materials/${MATERIAL_ON_RECYCLING}`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .expect(403);
+
+      expect(res.body.name).toBeUndefined();
+      expect(res.body.warehouseId).toBeUndefined();
+      expect(res.body.division).toBeUndefined();
+      expect(res.body.category).toBeUndefined();
+    });
+
+    it('Calgary-only staff CANNOT retrieve Ontario Healthcare material by direct ID (403, no data leak)', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/materials/${MATERIAL_ON_HEALTHCARE}`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .expect(403);
+
+      expect(res.body.name).toBeUndefined();
+    });
+
+    it('Calgary-only staff CANNOT retrieve Maple Ridge material by direct ID (403)', async () => {
+      await request(app.getHttpServer())
+        .get(`/materials/${MATERIAL_MR_RECYCLING}`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .expect(403);
+    });
+
+    it('Ontario material is unreachable for any actor not assigned to Ontario (staff, manager, and driver all 403)', async () => {
+      await request(app.getHttpServer())
+        .get(`/materials/${MATERIAL_ON_RECYCLING}`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .expect(403);
+
+      await request(app.getHttpServer())
+        .get(`/materials/${MATERIAL_ON_RECYCLING}`)
+        .set('Authorization', `Bearer ${driverToken}`)
+        .expect(403);
+    });
+
+    it('Ontario-only staff can retrieve both Ontario divisions but CANNOT retrieve Calgary material by direct ID (reverse-direction IDOR)', async () => {
+      await request(app.getHttpServer())
+        .get(`/materials/${MATERIAL_ON_RECYCLING}`)
+        .set('Authorization', `Bearer ${ontarioStaffToken}`)
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .get(`/materials/${MATERIAL_ON_HEALTHCARE}`)
+        .set('Authorization', `Bearer ${ontarioStaffToken}`)
+        .expect(200);
+
+      const res = await request(app.getHttpServer())
+        .get(`/materials/${MATERIAL_CGY_RECYCLING}`)
+        .set('Authorization', `Bearer ${ontarioStaffToken}`)
+        .expect(403);
+      expect(res.body.name).toBeUndefined();
+
+      await request(app.getHttpServer())
+        .get(`/materials/${MATERIAL_CGY_HEALTHCARE}`)
+        .set('Authorization', `Bearer ${ontarioStaffToken}`)
+        .expect(403);
+
+      await request(app.getHttpServer())
+        .get(`/materials/${MATERIAL_MR_RECYCLING}`)
+        .set('Authorization', `Bearer ${ontarioStaffToken}`)
+        .expect(403);
+    });
+
+    it('Maple Ridge driver can retrieve Maple Ridge material but not Calgary material', async () => {
+      await request(app.getHttpServer())
+        .get(`/materials/${MATERIAL_MR_HEALTHCARE}`)
+        .set('Authorization', `Bearer ${driverToken}`)
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .get(`/materials/${MATERIAL_CGY_RECYCLING}`)
+        .set('Authorization', `Bearer ${driverToken}`)
+        .expect(403);
+    });
+
+    it('Manager with Calgary + Maple Ridge assignment can access both, but not Ontario', async () => {
+      await request(app.getHttpServer())
+        .get(`/materials/${MATERIAL_CGY_RECYCLING}`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .get(`/materials/${MATERIAL_MR_HEALTHCARE}`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .expect(200);
+
+      await request(app.getHttpServer())
+        .get(`/materials/${MATERIAL_ON_HEALTHCARE}`)
+        .set('Authorization', `Bearer ${managerToken}`)
+        .expect(403);
+    });
+
+    it('Admin (global access) can retrieve materials from every facility', async () => {
+      for (const id of [
+        MATERIAL_CGY_RECYCLING,
+        MATERIAL_ON_HEALTHCARE,
+        MATERIAL_MR_RECYCLING,
+      ]) {
+        await request(app.getHttpServer())
+          .get(`/materials/${id}`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .expect(200);
+      }
+    });
+
+    it('Any authenticated actor can retrieve a global (warehouse-agnostic) material', async () => {
+      await request(app.getHttpServer())
+        .get(`/materials/${MATERIAL_GLOBAL}`)
+        .set('Authorization', `Bearer ${staffToken}`)
+        .expect(200);
+    });
+
+    it('Unauthenticated request to material detail is rejected (401)', async () => {
+      await request(app.getHttpServer())
+        .get(`/materials/${MATERIAL_CGY_RECYCLING}`)
+        .expect(401);
+    });
+
+    it('A non-existent material ID returns 404, not an authorization bypass', async () => {
+      await request(app.getHttpServer())
+        .get('/materials/ffffffff-9999-4fff-8fff-ffffffffffff')
+        .set('Authorization', `Bearer ${staffToken}`)
+        .expect(404);
+    });
+
+    it('Direct ID tampering across every facility/division pair is rejected for Calgary-only staff', async () => {
+      const forbidden = [
+        MATERIAL_ON_RECYCLING,
+        MATERIAL_ON_HEALTHCARE,
+        MATERIAL_MR_RECYCLING,
+        MATERIAL_MR_HEALTHCARE,
+      ];
+      for (const id of forbidden) {
+        await request(app.getHttpServer())
+          .get(`/materials/${id}`)
+          .set('Authorization', `Bearer ${staffToken}`)
+          .expect(403);
+      }
     });
   });
 

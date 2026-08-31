@@ -160,4 +160,69 @@ describe('MaterialsService — warehouse & division isolation', () => {
       service.update('mat-1', { warehouseId: 'ontario' }, staffActor),
     ).rejects.toThrow(ForbiddenException);
   });
+
+  describe('findOne — single-record IDOR guard', () => {
+    it('returns the material when the actor is authorized for its warehouse', async () => {
+      const material = await service.findOne('mat-1', staffActor);
+
+      expect(warehousesService.assertWarehouseAccess).toHaveBeenCalledWith(
+        staffActor,
+        'maple-ridge',
+      );
+      expect(material.id).toBe('mat-1');
+    });
+
+    it('rejects direct ID access to a material in an unauthorized warehouse (403)', async () => {
+      warehousesService.assertWarehouseAccess.mockRejectedValueOnce(
+        new ForbiddenException(
+          'You are not authorized to access this warehouse',
+        ),
+      );
+
+      await expect(service.findOne('mat-1', staffActor)).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('does not leak material data when access is denied', async () => {
+      warehousesService.assertWarehouseAccess.mockRejectedValueOnce(
+        new ForbiddenException(
+          'You are not authorized to access this warehouse',
+        ),
+      );
+
+      await expect(service.findOne('mat-1', staffActor)).rejects.toMatchObject({
+        response: {
+          message: 'You are not authorized to access this warehouse',
+        },
+      });
+    });
+
+    it('allows access to global (warehouse-agnostic) materials regardless of warehouse assignment', async () => {
+      materialRepo.findOne.mockResolvedValueOnce({
+        id: 'mat-global',
+        name: 'Universal Scrap',
+        division: 'recycling',
+        warehouseId: null,
+        active: true,
+      });
+
+      const material = await service.findOne('mat-global', staffActor);
+
+      expect(warehousesService.assertWarehouseAccess).toHaveBeenCalledWith(
+        staffActor,
+        null,
+      );
+      expect(material.id).toBe('mat-global');
+    });
+
+    it('throws NotFoundException before any warehouse check when the material does not exist', async () => {
+      materialRepo.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.findOne('missing', staffActor)).rejects.toThrow(
+        'Material not found',
+      );
+      expect(warehousesService.assertWarehouseAccess).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -47,8 +47,8 @@ export class MaterialsController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.materialsService.findOne(id);
+  findOne(@Param('id') id: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.materialsService.findOne(id, actor);
   }
 
   @Patch(':id')
