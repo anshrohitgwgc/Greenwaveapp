@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
+import type { Request } from 'express';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 
 import { RolesService } from '../roles/roles.service';
@@ -22,7 +23,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private readonly warehousesService: WarehousesService,
   ) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      // The `/chat/stream` SSE endpoint is consumed via the browser
+      // EventSource API, which cannot set an Authorization header — the
+      // frontend (Api.chatStreamUrl()) passes the token as `?token=`
+      // instead. Every other endpoint keeps using the standard bearer
+      // header; the query param is only ever consulted as a fallback.
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+        (req: Request) => (req?.query?.token as string) || null,
+      ]),
       ignoreExpiration: false,
       secretOrKey:
         configService.get<string>('JWT_SECRET') ?? 'insecure-dev-only-secret',
