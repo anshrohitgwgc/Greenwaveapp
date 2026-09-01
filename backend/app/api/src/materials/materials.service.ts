@@ -1,9 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
 
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { Container } from '../inventory/entities/container.entity';
+import { InventoryTransaction } from '../inventory/entities/inventory-transaction.entity';
 import { WarehousesService } from '../warehouses/warehouses.service';
 import { CreateMaterialDto } from './dto/create-material.dto';
 import { UpdateMaterialDto } from './dto/update-material.dto';
@@ -20,6 +26,10 @@ export class MaterialsService {
   constructor(
     @InjectRepository(Material)
     private readonly materialRepository: Repository<Material>,
+    @InjectRepository(InventoryTransaction)
+    private readonly inventoryTransactionRepository: Repository<InventoryTransaction>,
+    @InjectRepository(Container)
+    private readonly containerRepository: Repository<Container>,
     private readonly warehousesService: WarehousesService,
   ) {}
 
@@ -132,5 +142,38 @@ export class MaterialsService {
         dto.defaultPrice != null ? String(dto.defaultPrice) : undefined,
     });
     return this.findMaterialOrFail(id);
+  }
+
+  // Safe delete: a product is only removed when nothing depends on it.
+  // Referential integrity is checked at the application layer (not just left
+  // to the DB's ON DELETE RESTRICT on inventory_transactions) so every
+  // reference type gets the same clear 409 rather than a raw DB error, and
+  // so containers.material_id (ON DELETE SET NULL) doesn't silently get
+  // orphaned by a delete that should have been rejected.
+  async remove(id: string, actor: AuthenticatedUser): Promise<void> {
+    const existing = await this.findMaterialOrFail(id);
+
+    // Same IDOR guard as findOne/update — a caller must be authorized for
+    // the product's warehouse, not just hold the admin role.
+    await this.warehousesService.assertWarehouseAccess(
+      actor,
+      existing.warehouseId,
+    );
+
+    const [inventoryReferenceCount, containerReferenceCount] =
+      await Promise.all([
+        this.inventoryTransactionRepository.count({
+          where: { materialId: id },
+        }),
+        this.containerRepository.count({ where: { materialId: id } }),
+      ]);
+
+    if (inventoryReferenceCount > 0 || containerReferenceCount > 0) {
+      throw new ConflictException(
+        'This product cannot be deleted because it is referenced by existing business records.',
+      );
+    }
+
+    await this.materialRepository.delete(id);
   }
 }

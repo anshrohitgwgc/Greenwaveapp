@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -59,5 +61,14 @@ export class MaterialsController {
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     return this.materialsService.update(id, dto, actor);
+  }
+
+  // Deletion is admin-only — unlike create/update, managers cannot remove a
+  // product from the catalog.
+  @Delete(':id')
+  @Roles('admin')
+  @HttpCode(204)
+  remove(@Param('id') id: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.materialsService.remove(id, actor);
   }
 }

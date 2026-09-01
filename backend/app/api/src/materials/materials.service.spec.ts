@@ -1,8 +1,10 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { Container } from '../inventory/entities/container.entity';
+import { InventoryTransaction } from '../inventory/entities/inventory-transaction.entity';
 import { WarehousesService } from '../warehouses/warehouses.service';
 import { Material } from './entities/material.entity';
 import { MaterialsService } from './materials.service';
@@ -14,8 +16,11 @@ describe('MaterialsService — warehouse & division isolation', () => {
     save: jest.Mock;
     findOne: jest.Mock;
     update: jest.Mock;
+    delete: jest.Mock;
     createQueryBuilder: jest.Mock;
   };
+  let inventoryTransactionRepo: { count: jest.Mock };
+  let containerRepo: { count: jest.Mock };
   let warehousesService: {
     assertWarehouseAccess: jest.Mock;
     resolveWarehouseId: jest.Mock;
@@ -46,12 +51,16 @@ describe('MaterialsService — warehouse & division isolation', () => {
         active: true,
       }),
       update: jest.fn().mockResolvedValue(undefined),
+      delete: jest.fn().mockResolvedValue(undefined),
       createQueryBuilder: jest.fn(() => ({
         andWhere: qbAndWhere,
         orderBy: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([]),
       })),
     };
+
+    inventoryTransactionRepo = { count: jest.fn().mockResolvedValue(0) };
+    containerRepo = { count: jest.fn().mockResolvedValue(0) };
 
     warehousesService = {
       assertWarehouseAccess: jest.fn().mockResolvedValue(undefined),
@@ -65,6 +74,11 @@ describe('MaterialsService — warehouse & division isolation', () => {
       providers: [
         MaterialsService,
         { provide: getRepositoryToken(Material), useValue: materialRepo },
+        {
+          provide: getRepositoryToken(InventoryTransaction),
+          useValue: inventoryTransactionRepo,
+        },
+        { provide: getRepositoryToken(Container), useValue: containerRepo },
         { provide: WarehousesService, useValue: warehousesService },
       ],
     }).compile();
@@ -223,6 +237,72 @@ describe('MaterialsService — warehouse & division isolation', () => {
         'Material not found',
       );
       expect(warehousesService.assertWarehouseAccess).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('remove — safe delete', () => {
+    it('deletes a product that has no inventory or container references', async () => {
+      await service.remove('mat-1', staffActor);
+
+      expect(inventoryTransactionRepo.count).toHaveBeenCalledWith({
+        where: { materialId: 'mat-1' },
+      });
+      expect(containerRepo.count).toHaveBeenCalledWith({
+        where: { materialId: 'mat-1' },
+      });
+      expect(materialRepo.delete).toHaveBeenCalledWith('mat-1');
+    });
+
+    it('checks warehouse authorization before deleting (403 on unauthorized warehouse)', async () => {
+      warehousesService.assertWarehouseAccess.mockRejectedValueOnce(
+        new ForbiddenException(
+          'You are not authorized to access this warehouse',
+        ),
+      );
+
+      await expect(service.remove('mat-1', staffActor)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(materialRepo.delete).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException before any other check when the product does not exist', async () => {
+      materialRepo.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.remove('missing', staffActor)).rejects.toThrow(
+        'Material not found',
+      );
+      expect(warehousesService.assertWarehouseAccess).not.toHaveBeenCalled();
+      expect(materialRepo.delete).not.toHaveBeenCalled();
+    });
+
+    it('rejects deletion with 409 when referenced by inventory_transactions', async () => {
+      inventoryTransactionRepo.count.mockResolvedValueOnce(1);
+
+      await expect(service.remove('mat-1', staffActor)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(materialRepo.delete).not.toHaveBeenCalled();
+    });
+
+    it('rejects deletion with 409 when referenced by containers', async () => {
+      containerRepo.count.mockResolvedValueOnce(1);
+
+      await expect(service.remove('mat-1', staffActor)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(materialRepo.delete).not.toHaveBeenCalled();
+    });
+
+    it('surfaces a clear, non-technical reason for the 409', async () => {
+      inventoryTransactionRepo.count.mockResolvedValueOnce(1);
+
+      await expect(service.remove('mat-1', staffActor)).rejects.toMatchObject({
+        response: {
+          message:
+            'This product cannot be deleted because it is referenced by existing business records.',
+        },
+      });
     });
   });
 });

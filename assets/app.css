@@ -1623,6 +1623,39 @@ th.num { text-align: right; }
   font-weight: 600;
 }
 
+/* Delete Product Confirmation Modal */
+.delete-confirm-lead {
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.5;
+  margin-bottom: 14px;
+}
+.delete-confirm-details {
+  background: var(--panel-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  padding: 4px 14px;
+}
+.delete-confirm-details > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line-2);
+}
+.delete-confirm-details > div:last-child { border-bottom: none; }
+.delete-confirm-details dt {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.delete-confirm-details dd {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink);
+  text-align: right;
+}
+
 /* Audit Activity Explorer Cards */
 .audit-list {
   display: flex;

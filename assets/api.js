@@ -127,6 +127,7 @@
     },
     createMaterial: function (data) { return request('POST', '/materials', data); },
     updateMaterial: function (id, data) { return request('PATCH', '/materials/' + id, data); },
+    deleteMaterial: function (id) { return request('DELETE', '/materials/' + id); },
 
     // Containers
     listContainers: function (params) {

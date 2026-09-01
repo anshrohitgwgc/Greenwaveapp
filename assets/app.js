@@ -3030,6 +3030,33 @@
       });
   }
 
+  function openDeleteProductModal(mat) {
+    var w = warehouseById(mat.warehouseId);
+    var warehouseLabel = w ? w.name : 'All facilities (shared)';
+    var divisionLabel = mat.division === 'healthcare' ? 'Healthcare' : 'Recycling';
+
+    var bodyHtml =
+      '<div class="delete-confirm">' +
+        '<p class="delete-confirm-lead">This will permanently remove the product from the catalog. This cannot be undone.</p>' +
+        '<dl class="delete-confirm-details">' +
+          '<div><dt>Product</dt><dd>' + esc(mat.name) + '</dd></div>' +
+          '<div><dt>Warehouse</dt><dd>' + esc(warehouseLabel) + '</dd></div>' +
+          '<div><dt>Division</dt><dd>' + esc(divisionLabel) + '</dd></div>' +
+        '</dl>' +
+        '<div class="global-access-warning">' +
+          '<svg style="width:14px;height:14px;flex:none"><use href="#i-alert"></use></svg>' +
+          'This action permanently removes the product from the catalog.' +
+        '</div>' +
+      '</div>';
+
+    openModal('Delete Product?', bodyHtml, function () {
+      return Api.deleteMaterial(mat.id).then(function () {
+        toast('Product deleted successfully.');
+        renderProducts();
+      });
+    }, { okLabel: 'Delete Product', okClass: 'danger', savingLabel: 'Deleting…' });
+  }
+
   function renderProducts() {
     var pTitle = $('#prodTitle');
     if (pTitle) pTitle.textContent = isRecycling() ? 'Materials Catalog' : 'Healthcare Products';
@@ -3057,13 +3084,23 @@
             '<td style="color:var(--muted)">' + esc(m.description || '—') + '</td>' +
             '<td>' + esc(divLabel) + '</td>' +
             '<td><span class="badge ' + statusCls + '">' + statusLabel + '</span></td>' +
-            '<td><button type="button" class="btn ghost btn-sm" data-edit-material="' + esc(m.id) + '">Edit</button></td></tr>';
+            '<td><div style="display:flex;gap:6px">' +
+              '<button type="button" class="btn ghost btn-sm" data-edit-material="' + esc(m.id) + '">Edit</button>' +
+              (isAdmin() ? '<button type="button" class="btn btn-sm danger" data-delete-material="' + esc(m.id) + '">Delete Product</button>' : '') +
+            '</div></td></tr>';
         }).join('') + '</tbody></table></div></div>';
 
       $$('[data-edit-material]').forEach(function (btn) {
         btn.addEventListener('click', function () {
           var mat = list.filter(function (x) { return x.id === btn.dataset.editMaterial; })[0];
           if (mat) openEditProductModal(mat);
+        });
+      });
+
+      $$('[data-delete-material]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var mat = list.filter(function (x) { return x.id === btn.dataset.deleteMaterial; })[0];
+          if (mat) openDeleteProductModal(mat);
         });
       });
     }).catch(function (err) { apiErrorState('#productBody', err); });
@@ -3512,7 +3549,8 @@
     }
   }
 
-  function openModal(title, bodyHtml, onSave) {
+  function openModal(title, bodyHtml, onSave, opts) {
+    opts = opts || {};
     var wrap = $('#modalWrap');
     if (!wrap) return;
     dialogOpenerEl = document.activeElement;
@@ -3522,8 +3560,14 @@
     if (formEl) formEl.innerHTML = bodyHtml;
     wrap.hidden = false;
 
-    var okBtn = $('#modalOk'); if (okBtn) okBtn.hidden = false;
-    var cancelBtn = $('#modalCancel'); if (cancelBtn) cancelBtn.textContent = 'Cancel';
+    var okLabel = opts.okLabel || 'Save';
+    var okBtn = $('#modalOk');
+    if (okBtn) {
+      okBtn.hidden = false;
+      okBtn.textContent = okLabel;
+      okBtn.className = 'btn ' + (opts.okClass || 'btn-primary');
+    }
+    var cancelBtn = $('#modalCancel'); if (cancelBtn) cancelBtn.textContent = opts.cancelLabel || 'Cancel';
 
     var close = function () {
       wrap.hidden = true;
@@ -3548,13 +3592,13 @@
         if (typeof onSave === 'function') {
           if (okBtn) {
             okBtn.disabled = true;
-            okBtn.dataset.origText = okBtn.textContent;
-            okBtn.textContent = 'Saving…';
+            okBtn.dataset.origText = okLabel;
+            okBtn.textContent = opts.savingLabel || 'Saving…';
           }
           var resetOkBtn = function () {
             if (okBtn) {
               okBtn.disabled = false;
-              okBtn.textContent = okBtn.dataset.origText || 'Save';
+              okBtn.textContent = okBtn.dataset.origText || okLabel;
             }
           };
           var res;
