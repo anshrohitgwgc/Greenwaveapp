@@ -60,6 +60,12 @@ export function computeTotals(
   return { items: builtItems, subtotal, discountTotal, taxTotal, total };
 }
 
+/**
+ * First invoice number issued by a fresh install. Kept in sync with the
+ * START WITH / floor value in migration 016_invoice_number_sequence.sql.
+ */
+export const INVOICE_NUMBER_START = 10000;
+
 @Injectable()
 export class InvoicesService {
   constructor(
@@ -74,30 +80,96 @@ export class InvoicesService {
   ) {}
 
   /**
-   * Allocates the next invoice number from a single-row counter table
-   * inside the caller's transaction with row locking.
+   * Allocates the next invoice number.
+   *
+   * On PostgreSQL this is a bare `nextval()` on `invoice_number_seq` (see
+   * migration 016). `nextval` is atomic and deliberately NOT transactional:
+   * two concurrent creates can never receive the same number, and a number
+   * that was handed out is never reissued -- including when the invoice that
+   * received it is later deleted. It is intentionally NOT run on the caller's
+   * queryRunner-bound transaction semantics for rollback purposes; a rolled
+   * back create simply burns a number, which is the correct trade-off for an
+   * invoice series (gaps are acceptable, duplicates are not).
+   *
+   * Non-PostgreSQL drivers (better-sqlite3, used by the integration specs)
+   * have no sequences, so they fall back to an atomic increment of the
+   * legacy single-row `invoice_number_counter` table. SQLite serialises
+   * writers, so the increment-then-read is safe there.
    */
   private async allocateInvoiceNumber(
     queryRunner: QueryRunner,
   ): Promise<string> {
-    try {
-      const isPostgres = this.dataSource.options.type === 'postgres';
+    if (this.dataSource.options.type === 'postgres') {
       const rows = (await queryRunner.query(
-        `SELECT next_value FROM invoice_number_counter WHERE id = 1${isPostgres ? ' FOR UPDATE' : ''}`,
-      )) as Array<{ next_value: number }>;
-      if (rows && rows.length > 0) {
-        const nextValue = rows[0]?.next_value ?? 1115;
-        await queryRunner.query(
-          `UPDATE invoice_number_counter SET next_value = next_value + 1 WHERE id = 1`,
-        );
-        return String(nextValue);
+        `SELECT nextval('invoice_number_seq') AS value`,
+      )) as Array<{ value: string | number }>;
+      const value = rows?.[0]?.value;
+      if (value === undefined || value === null) {
+        throw new Error('invoice_number_seq did not return a value');
       }
-    } catch {
-      // Fallback for environments where invoice_number_counter is not seeded (e.g. in-memory SQLite)
+      // pg returns bigint as a string to avoid precision loss; keep it as-is
+      // so the stored invoice_number matches the sequence exactly.
+      return String(value);
     }
 
-    const count = await queryRunner.manager.count(Invoice);
-    return String(1115 + count);
+    await queryRunner.query(
+      `INSERT INTO invoice_number_counter (id, next_value)
+       SELECT 1, ${INVOICE_NUMBER_START}
+       WHERE NOT EXISTS (SELECT 1 FROM invoice_number_counter WHERE id = 1)`,
+    );
+    await queryRunner.query(
+      `UPDATE invoice_number_counter SET next_value = next_value + 1 WHERE id = 1`,
+    );
+    const rows = (await queryRunner.query(
+      `SELECT next_value FROM invoice_number_counter WHERE id = 1`,
+    )) as Array<{ next_value: number }>;
+    const next = Number(rows?.[0]?.next_value);
+    if (!Number.isFinite(next)) {
+      throw new Error('invoice_number_counter did not return a value');
+    }
+    // The row holds the *next* value to issue, so the number we just claimed
+    // is one below what the incremented row now reads.
+    return String(next - 1);
+  }
+
+  /**
+   * Returns the number the *next* invoice would receive, WITHOUT consuming it.
+   *
+   * This exists so the editor can show "10000 (Assigned)" while composing a
+   * new invoice instead of a hardcoded guess -- the backend stays the single
+   * source of truth for numbering. It is explicitly a preview, not a
+   * reservation: if another user saves first, they take this number and the
+   * next save gets the one after. The authoritative number is the one
+   * returned by create().
+   */
+  async peekNextInvoiceNumber(): Promise<{
+    nextNumber: string;
+    preview: true;
+  }> {
+    if (this.dataSource.options.type === 'postgres') {
+      const rows = await this.dataSource.query<
+        Array<{ value: string | number }>
+      >(
+        `SELECT GREATEST(
+                  $1::BIGINT,
+                  COALESCE(pg_sequence_last_value('invoice_number_seq') + 1, $1::BIGINT)
+                ) AS value`,
+        [INVOICE_NUMBER_START],
+      );
+      return {
+        nextNumber: String(rows?.[0]?.value ?? INVOICE_NUMBER_START),
+        preview: true,
+      };
+    }
+
+    const rows = await this.dataSource.query<Array<{ next_value: number }>>(
+      `SELECT next_value FROM invoice_number_counter WHERE id = 1`,
+    );
+    const next = Number(rows?.[0]?.next_value);
+    return {
+      nextNumber: String(Number.isFinite(next) ? next : INVOICE_NUMBER_START),
+      preview: true,
+    };
   }
 
   async create(
@@ -115,10 +187,15 @@ export class InvoicesService {
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
+    // Declared outside the try so the post-commit audit/re-read below can
+    // still see them once the connection has been released.
+    const invoiceId = randomUUID();
+    let invoiceNumber: string;
+    let totals: ReturnType<typeof computeTotals>;
+
     try {
-      const invoiceId = randomUUID();
-      const invoiceNumber = await this.allocateInvoiceNumber(queryRunner);
-      const totals = computeTotals(invoiceId, dto.items, dto.taxRate ?? 0);
+      invoiceNumber = await this.allocateInvoiceNumber(queryRunner);
+      totals = computeTotals(invoiceId, dto.items, dto.taxRate ?? 0);
 
       const invoice = queryRunner.manager.create(Invoice, {
         id: invoiceId,
@@ -159,24 +236,36 @@ export class InvoicesService {
       await queryRunner.manager.save(Invoice, invoice);
       await queryRunner.manager.save(InvoiceItem, totals.items);
       await queryRunner.commitTransaction();
-
-      await this.auditService.record({
-        actorUserId: actor.id,
-        actorRole: actor.role,
-        action: 'invoice.created',
-        entityType: 'invoice',
-        entityId: invoiceId,
-        warehouseId: dto.warehouseId ?? null,
-        summary: `${actor.email} created invoice #${invoiceNumber} (total ${totals.total})`,
-      });
-
-      return this.findOneInternal(invoiceId);
     } catch (err) {
-      await queryRunner.rollbackTransaction();
+      // Only roll back a transaction that is still open. A failure raised
+      // after commitTransaction() would otherwise be masked by the
+      // "transaction not started" error thrown from here.
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction();
+      }
       throw err;
     } finally {
       await queryRunner.release();
     }
+
+    // IMPORTANT: everything below runs *after* the query runner has returned
+    // its connection to the pool. Both the audit write and the re-read need a
+    // connection of their own, and the pool defaults to 10. Doing them while
+    // still holding the runner's connection meant that under concurrent
+    // invoice creation every pooled connection was held by a request waiting
+    // for a connection that could never be freed -- the API deadlocked and
+    // stopped serving *all* authenticated endpoints until restarted.
+    await this.auditService.record({
+      actorUserId: actor.id,
+      actorRole: actor.role,
+      action: 'invoice.created',
+      entityType: 'invoice',
+      entityId: invoiceId,
+      warehouseId: dto.warehouseId ?? null,
+      summary: `${actor.email} created invoice #${invoiceNumber} (total ${totals.total})`,
+    });
+
+    return this.findOneInternal(invoiceId);
   }
 
   async duplicate(id: string, actor: AuthenticatedUser): Promise<Invoice> {

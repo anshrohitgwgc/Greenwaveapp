@@ -2174,6 +2174,172 @@
     });
   }
 
+  /* --------------------------------------------------------------------
+     Invoice number display.
+
+     The number is allocated server-side (PostgreSQL sequence) at save time,
+     so an unsaved draft has none yet. We show the backend's preview of the
+     next number when we have it, and a plain non-numeric label when we do
+     not -- never a hardcoded digit string, which previously read as a real
+     invoice number ("1115 (Assigned)") and misled users.
+     -------------------------------------------------------------------- */
+  var nextInvoiceNumberHint = null;
+
+  function invoiceNumberDisplay(d) {
+    if (d && d.invoiceNumber) return String(d.invoiceNumber);
+    if (nextInvoiceNumberHint) return nextInvoiceNumberHint + ' (Assigned)';
+    return 'Assigned on save';
+  }
+
+  /* Refreshes the "(Assigned)" hint from the backend and patches the editor
+     label in place, so opening the editor never has to block on the call. */
+  function refreshNextInvoiceNumber() {
+    if (!Api || typeof Api.nextInvoiceNumber !== 'function') return;
+    Api.nextInvoiceNumber().then(function (res) {
+      if (!res || !res.nextNumber) return;
+      nextInvoiceNumberHint = String(res.nextNumber);
+      var el = $('#edInvoiceNo');
+      if (el && !(draft && draft.invoiceNumber)) {
+        el.textContent = invoiceNumberDisplay(draft);
+      }
+    }).catch(function () { /* hint only -- editor stays usable without it */ });
+  }
+
+  /* ====================================================================
+     Action registry
+
+     Every "create" affordance in the app resolves through this one table.
+     Previously the top-right toolbar buttons owned their modal code via
+     addEventListener, while the centered empty-state buttons rendered
+     `data-action="newCustomer"` / `data-action="newProduct"` -- names that
+     matched the toolbar button *element ids* but were never registered in
+     the delegated click handler, so those buttons silently did nothing.
+
+     Both entry points now dispatch to the same function here, so there is a
+     single modal implementation per entity and no id-click indirection.
+     ==================================================================== */
+
+  function openNewInvoice() {
+    draft = newDraft();
+    editorViewMode = false;
+    show('editor');
+    refreshNextInvoiceNumber();
+  }
+
+  function openAddCustomerModal() {
+    openModal('Add Customer',
+      field('name', 'Customer / Company Name', { required: true }) +
+      field('billTo', 'Billing Address', { type: 'textarea', required: true }) +
+      field('shipTo', 'Shipping Address', { type: 'textarea' }) +
+      field('email', 'Email Address', { type: 'email' }),
+      function (fd) {
+        return Api.createCustomer({
+          name: fd.name, billTo: fd.billTo, shipTo: fd.shipTo, email: fd.email, warehouseId: warehouseId
+        }).then(function () { toast('Customer added.'); renderCustomers(); });
+      });
+  }
+
+  function openAddProductModal() {
+    var w = warehouse();
+    if (!w) { toast('Please select a warehouse first.'); return; }
+    // `entity` is the division currently being viewed, so a product created
+    // from the Healthcare catalog defaults to division=healthcare and one
+    // created from Recycling defaults to division=recycling. The field is
+    // always rendered and always submitted -- the API rejects a missing or
+    // unknown division, and must keep doing so.
+    openModal('Add ' + (isRecycling() ? 'Material' : 'Product'),
+      field('name', 'Product', { required: true, placeholder: isRecycling() ? 'e.g. Mixed Electronics' : 'e.g. Synguard 100 Nitrile Gloves' }) +
+      field('category', 'Category', { placeholder: isRecycling() ? 'e.g. Electronics / Plastics' : 'e.g. PPE / Gloves' }) +
+      productDivisionFacilityFields(entity, w.name) +
+      field('description', 'Description (Optional)', { type: 'textarea' }),
+      function (fd) {
+        var division = fd.division || entity;
+        return Api.createMaterial({
+          name: fd.name, category: fd.category, description: fd.description,
+          division: division, warehouseId: w.id,
+          unit: division === 'recycling' ? 'pallet' : 'box'
+        }).then(function () { toast('Catalog item added.'); renderProducts(); });
+      });
+  }
+
+  var ACTIONS = {
+    newInvoice: openNewInvoice,
+    newCustomer: openAddCustomerModal,
+    newProduct: openAddProductModal,
+    goProducts: function () { show('products'); },
+    addPhoto: function () { var ap = $('#addPhoto'); if (ap) ap.click(); }
+  };
+
+  function runAction(name) {
+    var fn = ACTIONS[name];
+    if (typeof fn === 'function') { fn(); return true; }
+    return false;
+  }
+
+  /* Binds a concrete element (the toolbar buttons) to a registered action.
+     Also stamps data-action so the element is discoverable by the same
+     delegated handler and by tests. */
+  function bindAction(el, name) {
+    if (!el) return;
+    el.setAttribute('data-action', name);
+    el.setAttribute('data-action-bound', '');
+    el.addEventListener('click', function (e) { e.preventDefault(); runAction(name); });
+  }
+
+  /* --------------------------------------------------------------------
+     Printing / Save as PDF.
+
+     Browsers derive the default "Save as PDF" filename from document.title,
+     which is the app shell's title ("GreenWave Operations Platform") -- so
+     every saved invoice landed on disk under the same meaningless name. We
+     swap in a deterministic document name for the duration of the print job
+     and restore it afterwards.
+
+     The invoice number is read from the saved record, never invented here;
+     an unsaved draft prints as Invoice-Draft rather than borrowing a number
+     it has not been allocated yet.
+     -------------------------------------------------------------------- */
+  function printDocumentName(d) {
+    var n = d && d.invoiceNumber ? String(d.invoiceNumber) : '';
+    // Keep only characters that are safe in a filename on every OS.
+    n = n.replace(/[^A-Za-z0-9._-]/g, '');
+    return n ? 'Invoice-' + n : 'Invoice-Draft';
+  }
+
+  function printInvoiceDocument() {
+    var previousTitle = document.title;
+    var restored = false;
+    function restore() {
+      if (restored) return;
+      restored = true;
+      document.title = previousTitle;
+      window.removeEventListener('afterprint', restore);
+      if (mql && mql.removeListener) mql.removeListener(onMqlChange); 
+    }
+
+    // The title must already be in place when the print dialog is created,
+    // because that is the moment the browser snapshots the filename.
+    document.title = printDocumentName(draft);
+
+    // Restore as soon as the dialog closes. afterprint is the reliable
+    // signal in Chrome/Edge/Firefox; the matchMedia fallback covers Safari,
+    // which historically did not fire afterprint.
+    var mql = null;
+    function onMqlChange(e) { if (!e.matches) restore(); }
+    window.addEventListener('afterprint', restore);
+    try {
+      mql = window.matchMedia('print');
+      if (mql && mql.addListener) mql.addListener(onMqlChange);
+    } catch (e) { /* matchMedia('print') unsupported -- afterprint covers us */ }
+
+    window.print();
+
+    // Last-resort safety net so the tab is never left renamed if neither
+    // signal arrives. Long enough that it cannot win the race against the
+    // dialog snapshotting the filename.
+    setTimeout(restore, 60000);
+  }
+
   function newDraft() {
     var w = warehouse();
     var t = w ? taxFor(w.province) : { label: 'GST @ 5%', rate: 0.05 };
@@ -2534,7 +2700,7 @@
     }
 
     var edPrint = $('#edPrint');
-    if (edPrint) edPrint.onclick = function () { window.print(); };
+    if (edPrint) edPrint.onclick = function () { printInvoiceDocument(); };
 
     var canShowInvoiceActions = editorViewMode && !!draft.id;
     var edPayLink = $('#edPayLink');
@@ -2762,7 +2928,7 @@
 
             '<div class="inv-1114-meta-block">' +
               '<h4>Invoice details</h4>' +
-              '<div class="inv-1114-meta-row"><label>Invoice no.:</label><span class="mono" style="font-weight:700">' + esc(draft.invoiceNumber || '1115 (Assigned)') + '</span></div>' +
+              '<div class="inv-1114-meta-row"><label>Invoice no.:</label><span class="mono" id="edInvoiceNo" style="font-weight:700">' + esc(invoiceNumberDisplay(draft)) + '</span></div>' +
               '<div class="inv-1114-meta-row"><label>Terms:</label><input type="text" id="edTerms" class="inv-1114-meta-input" value="' + esc(draft.paymentTerms || 'Net 15') + '"></div>' +
               '<div class="inv-1114-meta-row"><label>Invoice date:</label><input type="date" id="edDate" class="inv-1114-meta-input" value="' + esc(draft.invoiceDate) + '"></div>' +
               '<div class="inv-1114-meta-row"><label>Due date:</label><input type="date" id="edDueDate" class="inv-1114-meta-input" value="' + esc(draft.dueDate) + '"></div>' +
@@ -3820,43 +3986,9 @@
       }
     });
 
-    var newInvoiceBtn = $('#newInvoice');
-    if (newInvoiceBtn) newInvoiceBtn.addEventListener('click', function () { draft = newDraft(); editorViewMode = false; show('editor'); });
-    var newCustomerBtn = $('#newCustomer');
-    if (newCustomerBtn) {
-      newCustomerBtn.addEventListener('click', function () {
-        openModal('Add Customer',
-          field('name', 'Customer / Company Name', { required: true }) +
-          field('billTo', 'Billing Address', { type: 'textarea', required: true }) +
-          field('shipTo', 'Shipping Address', { type: 'textarea' }) +
-          field('email', 'Email Address', { type: 'email' }),
-          function (fd) {
-            return Api.createCustomer({
-              name: fd.name, billTo: fd.billTo, shipTo: fd.shipTo, email: fd.email, warehouseId: warehouseId
-            }).then(function () { toast('Customer added.'); renderCustomers(); });
-          });
-      });
-    }
-
-    var newProductBtn = $('#newProduct');
-    if (newProductBtn) {
-      newProductBtn.addEventListener('click', function () {
-        var w = warehouse();
-        if (!w) { toast('Please select a warehouse first.'); return; }
-        openModal('Add ' + (isRecycling() ? 'Material' : 'Product'),
-          field('name', 'Product', { required: true, placeholder: isRecycling() ? 'e.g. Mixed Electronics' : 'e.g. Synguard 100 Nitrile Gloves' }) +
-          field('category', 'Category', { placeholder: isRecycling() ? 'e.g. Electronics / Plastics' : 'e.g. PPE / Gloves' }) +
-          productDivisionFacilityFields(entity, w.name) +
-          field('description', 'Description (Optional)', { type: 'textarea' }),
-          function (fd) {
-            return Api.createMaterial({
-              name: fd.name, category: fd.category, description: fd.description,
-              division: fd.division, warehouseId: w.id,
-              unit: fd.division === 'recycling' ? 'pallet' : 'box'
-            }).then(function () { toast('Catalog item added.'); renderProducts(); });
-          });
-      });
-    }
+    bindAction($('#newInvoice'), 'newInvoice');
+    bindAction($('#newCustomer'), 'newCustomer');
+    bindAction($('#newProduct'), 'newProduct');
 
     var newStaffBtn = $('#newStaff');
     if (newStaffBtn) {
@@ -3937,10 +4069,11 @@
       if (goto) { e.preventDefault(); show(goto.dataset.goto); }
       var act = e.target.closest('[data-action]');
       if (act) {
-        var a = act.dataset.action;
-        if (a === 'goProducts') show('products');
-        else if (a === 'addPhoto') { var ap = $('#addPhoto'); if (ap) ap.click(); }
-        else if (a === 'newInvoice') { var ni = $('#newInvoice'); if (ni) ni.click(); }
+        // Toolbar buttons bind their own listener via bindAction(); skip them
+        // here so a click on one does not run the action twice.
+        if (!act.hasAttribute('data-action-bound')) {
+          if (runAction(act.dataset.action)) e.preventDefault();
+        }
       }
     });
 

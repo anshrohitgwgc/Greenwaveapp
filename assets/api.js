@@ -171,6 +171,7 @@
     listInvoices: function (params) { return request('GET', '/invoices' + qs(params)); },
     getInvoice: function (id) { return request('GET', '/invoices/' + id); },
     createInvoice: function (data) { return request('POST', '/invoices', data); },
+    nextInvoiceNumber: function () { return request('GET', '/invoices/next-number'); },
     updateInvoice: function (id, data) { return request('PATCH', '/invoices/' + id, data); },
     duplicateInvoice: function (id) { return request('POST', '/invoices/' + id + '/duplicate'); },
     getPaymentLink: function (invoiceId) { return request('POST', '/payments/invoices/' + invoiceId + '/link'); },

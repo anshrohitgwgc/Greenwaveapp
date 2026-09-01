@@ -51,6 +51,15 @@ export class InvoicesController {
     });
   }
 
+  /**
+   * Preview of the next invoice number for the editor's "(Assigned)" hint.
+   * Declared before @Get(':id') so Nest does not route it as an invoice id.
+   */
+  @Get('next-number')
+  nextNumber() {
+    return this.invoicesService.peekNextInvoiceNumber();
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentUser() actor: AuthenticatedUser) {
     return this.invoicesService.findOne(id, actor);
