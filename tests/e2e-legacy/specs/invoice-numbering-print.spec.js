@@ -89,6 +89,11 @@ test.describe('Invoice numbering', () => {
       const body = {
         invoiceDate: new Date().toISOString().slice(0, 10),
         billTo: 'E2E concurrency',
+        // This admin holds both divisions, so the API requires the invoice's
+        // division to be stated rather than guessed. Numbering itself is
+        // division-agnostic — one global sequence — which is what the
+        // assertions below check.
+        division: 'greenwave',
         items: [{ description: 'concurrent', quantity: 1, unitPrice: 1 }],
       };
       const results = await Promise.all(

@@ -583,6 +583,9 @@ test.describe("7. INVOICE MANAGEMENT & PRINT/PDF UI", () => {
         warehouseId: W_MR,
         invoiceDate: "2026-08-29",
         dueDate: "2026-09-29",
+        // The admin account holds both business divisions, so the API
+        // requires the invoice's division to be stated rather than inferred.
+        division: "greenwave",
         status: "draft",
         items: [
           {
