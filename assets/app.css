@@ -53,15 +53,16 @@
   --rail-2:      #16233B;
   --rail-ink:    #93A4C0;
   --rail-on:     #FFFFFF;
-  --rail-hi:     rgba(255, 255, 255, 0.08);
-  --rail-line:   rgba(255, 255, 255, 0.09);
+  --rail-hi:     rgba(255, 255, 255, 0.12);
+  --rail-line:   rgba(255, 255, 255, 0.14);
 
   /* ---- Accent (CloudCore / admin default: Lumina soft indigo) ----------- */
   --acc:         #4F46E5;
   --acc-ink:     #FFFFFF;
   --acc-soft:    #EEF2FF;
   --acc-hover:   #4338CA;
-  --acc-ring:    rgba(79, 70, 229, 0.18);
+  --acc-ring:    rgba(79, 70, 229, 0.30);
+  --acc-bright:  #6366F1;
   --brand:       var(--acc);
 
   /* ---- Functional. Used sparingly, per the design brief. ---------------- */
@@ -112,24 +113,30 @@
 /* GreenWave Recycling — professional green operational identity. */
 [data-entity="recycling"],
 [data-entity="greenwave"] {
-  --acc:       #0F7A4C;
-  --acc-soft:  #E3F3EC;
-  --acc-hover: #0C653F;
-  --acc-ring:  rgba(15, 122, 76, 0.18);
-  --rail:      #0B2119;
-  --rail-2:    #102E23;
-  --rail-ink:  #8FB3A4;
+  --acc:        #0B8050;   /* 4.98:1 on white — brighter than the old #0F7A4C
+                              while still clearing AA for the button label
+                              and for .text-accent on a white card. */
+  --acc-soft:   #E8F8F1;   /* keeps accent-on-soft at 4.54:1 (AA) */
+  --acc-hover:  #096B43;
+  --acc-ring:   rgba(11, 128, 80, 0.30);
+  --acc-bright: #12A268;   /* energy only — KPI accents, chart marks, the
+                              rail's active glow. Never small text. */
+  --rail:       #08241A;
+  --rail-2:     #0E3527;
+  --rail-ink:   #9DC4B2;
 }
 
 /* Healthcare — its own clinical identity, same system. */
 [data-entity="healthcare"] {
-  --acc:       #0E6E8C;
-  --acc-soft:  #E0F2F9;
-  --acc-hover: #0B5670;
-  --acc-ring:  rgba(14, 110, 140, 0.18);
-  --rail:      #0A1E2A;
-  --rail-2:    #102B3A;
-  --rail-ink:  #8FB2C4;
+  --acc:        #0B7A9C;   /* 4.91:1 on white. Stays unmistakably blue-teal
+                              against the recycling green at every size. */
+  --acc-soft:   #EBF8FD;   /* keeps accent-on-soft at 4.53:1 (AA) */
+  --acc-hover:  #09627E;
+  --acc-ring:   rgba(11, 122, 156, 0.30);
+  --acc-bright: #17A0C4;
+  --rail:       #07202D;
+  --rail-2:     #0E3245;
+  --rail-ink:   #9CBFD2;
 }
 
 /* -------------------------------------------------------------- Base ---- */
@@ -201,13 +208,34 @@ h4 { font-size: 14px; line-height: 20px; }
 }
 .brand, .entsw, .entsw-static, .railfoot { flex: 0 0 auto; }
 .brand {
-  display: flex; align-items: center; gap: 12px;
-  padding: 8px 12px 16px;
+  display: flex; align-items: center; justify-content: center;
+  padding: 12px 12px 16px;
   margin-bottom: 8px;
   border-bottom: 1px solid var(--rail-line);
 }
+/* The supplied artwork is a dark green/blue mark on a transparent ground —
+   drawn for light surfaces. On the dark rail it previously sat unbacked at
+   36px, which is what made it read as small and washed out. Rather than
+   recolour or redraw the logo, it gets a snug light plate sized to the
+   artwork itself (not a large white block) so the original colours keep
+   their intended contrast, and it is rendered larger. */
+.brand-plate {
+  display: block;
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: var(--r-md);
+  background: #FFFFFF;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
+}
+/* Scale to the plate's width rather than to a fixed height: the artwork is
+   a wide 860x311 lockup, so pinning its height left it floating in the
+   middle of the plate at roughly half the available width. Letting the
+   width drive it keeps the aspect ratio exactly and renders it about 40%
+   larger. */
 .raillogo {
-  height: 36px; width: auto; max-width: 100%; object-fit: contain;
+  display: block;
+  width: 100%; height: auto;
+  object-fit: contain;
   image-rendering: -webkit-optimize-contrast;
 }
 .railbrandtext {
@@ -1042,6 +1070,90 @@ h4 { font-size: 14px; line-height: 20px; }
 .no-division-state p { color: var(--muted); font-size: 14px; line-height: 22px; margin: 0 auto; max-width: 400px; }
 
 .taxnote { font-size: 12px; color: var(--muted); }
+
+/* ------------------------------------------- Contrast & vibrancy -------- */
+/* The Lumina system stays exactly as it is — white cards, light ground,
+   diffused shadows, restrained borders. What changes here is energy: the
+   division accent is allowed to show up at the edges of surfaces, hierarchy
+   is carried by a firmer step between ground/card/heading, and interactive
+   states are unmistakable. No large text sits on a saturated fill, and every
+   pair below was contrast-checked. */
+
+/* KPI cards earn a hairline of division colour along the top edge, so a
+   dashboard reads as GreenWave (or Healthcare) at a glance instead of as a
+   grid of neutral boxes. */
+.kpi-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  transition: box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease;
+}
+.kpi-card::before {
+  content: "";
+  position: absolute; inset: 0 0 auto 0; height: 3px;
+  background: linear-gradient(90deg, var(--acc), var(--acc-bright));
+}
+.kpi-card:hover {
+  box-shadow: var(--shadow-2);
+  border-color: var(--line-2);
+  transform: translateY(-1px);
+}
+.kpi-value { color: var(--ink); letter-spacing: -0.025em; }
+
+/* Headings carry a touch more weight against the body copy. */
+h1 { letter-spacing: -0.021em; }
+.vhead h1 { color: var(--ink); }
+
+/* Links read as links. */
+a { color: var(--acc); text-decoration-color: color-mix(in srgb, var(--acc) 40%, transparent); text-underline-offset: 2px; }
+a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
+
+/* Keyboard focus is a visible, division-coloured ring on every control,
+   not just the browser default outline. */
+:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+.btn:focus-visible,
+.navitem:focus-visible,
+.top-div-btn:focus-visible,
+.inven-tab:focus-visible { box-shadow: 0 0 0 4px var(--acc-ring); }
+
+/* Primary actions get a little depth so they read as the page's main move. */
+.btn-primary {
+  box-shadow: 0 1px 2px rgba(17, 28, 45, 0.10), 0 1px 3px var(--acc-ring);
+}
+.btn-primary:hover { box-shadow: 0 2px 6px rgba(17, 28, 45, 0.14), 0 2px 8px var(--acc-ring); }
+.btn-primary:active { transform: translateY(1px); }
+.btn-secondary:hover { border-color: var(--acc); color: var(--acc); }
+
+/* Active navigation and the division selector are the two places a user
+   confirms "where am I" — both get the full accent plus a soft halo. */
+.navitem.active { box-shadow: 0 2px 10px rgba(0, 0, 0, 0.30); }
+.top-div-btn.active,
+.top-div-btn[aria-pressed="true"] { box-shadow: 0 1px 4px var(--acc-ring); }
+
+/* Empty states stop looking like errors. */
+.eico { box-shadow: 0 0 0 6px color-mix(in srgb, var(--acc-soft) 55%, transparent); }
+.empty h3 { color: var(--ink); }
+.empty p { color: var(--muted); }
+
+/* Success / positive figures pick up the brighter functional green. */
+.text-success { color: var(--good); font-weight: 600; }
+.text-warning { color: var(--warn); font-weight: 600; }
+.text-accent  { color: var(--acc);  font-weight: 600; }
+
+/* Badges: same restrained pill, one step more colour so status is scannable. */
+.badge { border: 1px solid transparent; }
+.badge-in, .badge-received, .badge-active { border-color: color-mix(in srgb, var(--good) 22%, transparent); }
+.badge-out, .badge-dispatched            { border-color: color-mix(in srgb, var(--warn) 22%, transparent); }
+.badge-transit                           { border-color: color-mix(in srgb, var(--info) 22%, transparent); }
+.badge-failed, .badge-inactive           { border-color: var(--line-2); }
+
+/* Tables: a firmer head and a clearer hover row. */
+.table th { color: var(--ink-2); background: var(--panel-2); }
+.table tr:hover td { background: var(--acc-soft); }
 
 /* ----------------------------------------------- Mobile & responsive ---- */
 .tabbar { display: none; }
