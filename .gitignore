@@ -3,3 +3,62 @@
 node_modules/
 test-results/
 playwright-report/
+
+# ---------------------------------------------------------------------------
+# Environment files.
+#
+# The nested backend/.gitignore and backend/app/api/.gitignore already cover
+# their own trees, but nothing protected the repository root or any new
+# directory added later. These patterns are repo-wide, so a `.env` dropped
+# anywhere is ignored, while the checked-in templates stay tracked.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+*.env
+**/.env
+**/.env.*
+
+# Templates are the exception — they must stay in version control.
+!.env.example
+!.env.template
+!.env.sample
+!**/.env.example
+!**/.env.template
+!**/.env.sample
+
+# ---------------------------------------------------------------------------
+# Credentials and private key material.
+#
+# Scoped to key/certificate material specifically. Note that *.crt and *.pub
+# are deliberately NOT ignored — they are public halves, and ignoring them
+# would silently drop legitimate configuration.
+# ---------------------------------------------------------------------------
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_rsa.*
+id_dsa
+id_ecdsa
+id_ed25519
+*_rsa
+*_ed25519
+.npmrc
+.pypirc
+.netrc
+credentials.json
+service-account*.json
+gcp-*.json
+aws-credentials
+.aws/
+secrets/
+*.secret
+*.secrets
+
+# Public certificate material is safe to track — do not ignore it.
+!*.pub
+!*.crt
+!*.cer
