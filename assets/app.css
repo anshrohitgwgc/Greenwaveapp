@@ -164,10 +164,21 @@ h4 { font-size: 14px; line-height: 20px; }
 .text-accent  { color: var(--acc); }
 
 /* ------------------------------------------------------------ Layout ---- */
+/* The shell is exactly one viewport tall and never scrolls as a page: the
+   rail's nav and the main .scroll region each scroll on their own.
+   `grid-template-rows` matters as much as the height here — an implicit
+   `auto` row sizes to the *max-content* of its items, so the rail grew to
+   its full ~1050px content height against a 900px viewport and `overflow:
+   hidden` simply clipped the account card off the bottom. `minmax(0, 1fr)`
+   makes the row take the container's height instead of the content's. */
 .app {
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
-  height: 100%;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 100vh;
+  max-height: 100vh;
+  min-height: 100dvh;
+  max-height: 100dvh;
   overflow: hidden;
 }
 
@@ -178,9 +189,17 @@ h4 { font-size: 14px; line-height: 20px; }
   display: flex;
   flex-direction: column;
   gap: 8px;
-  overflow-y: auto;
+  /* Three bands: brand/division (static), .nav (the only scroller), and
+     .railfoot (the account card, always pinned to the bottom). The rail
+     itself must not scroll — if it did, the account card would ride away
+     with the nav. */
+  min-height: 0;
+  max-height: 100vh;
+  max-height: 100dvh;
+  overflow: hidden;
   border-right: 1px solid var(--rail-line);
 }
+.brand, .entsw, .entsw-static, .railfoot { flex: 0 0 auto; }
 .brand {
   display: flex; align-items: center; gap: 12px;
   padding: 8px 12px 16px;
@@ -243,7 +262,16 @@ h4 { font-size: 14px; line-height: 20px; }
 }
 
 /* --------------------------------------------------------- Navigation --- */
-.nav { display: flex; flex-direction: column; gap: 2px; flex: 1; padding: 0 4px; }
+.nav {
+  display: flex; flex-direction: column; gap: 2px; padding: 0 4px;
+  /* Takes the space the brand and account card leave, and scrolls inside it.
+     min-height:0 is required — without it the flex item's automatic minimum
+     size is its content height and it pushes the account card off-screen. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .navlabel {
   font-size: 10px; font-weight: 700;
   letter-spacing: 0.08em; text-transform: uppercase;
@@ -301,7 +329,7 @@ h4 { font-size: 14px; line-height: 20px; }
 }
 
 /* ------------------------------------------------------------- Main ----- */
-.main { display: flex; flex-direction: column; min-width: 0; background: var(--ground); }
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--ground); }
 
 .topbar {
   height: var(--topbar-h);
@@ -321,7 +349,7 @@ h4 { font-size: 14px; line-height: 20px; }
 .menubtn svg { width: 20px; height: 20px; }
 
 .scroll {
-  flex: 1; overflow-y: auto;
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
   padding: 32px var(--margin-desktop) 64px;
   scroll-behavior: smooth;
 }

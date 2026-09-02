@@ -1,15 +1,15 @@
 /* Offline cache for Greenwave Ops */
-var CACHE = 'greenwave-v18';
+var CACHE = 'greenwave-v19';
 var FILES = [
   '/',
   '/index.html',
-  '/manifest.webmanifest?v=20260901_lumina',
-  '/assets/app.css?v=20260901_lumina',
-  '/assets/api.js?v=20260901_lumina',
-  '/assets/app.js?v=20260901_lumina',
-  '/assets/store.js?v=20260901_lumina',
-  '/assets/photos.js?v=20260901_lumina',
-  '/assets/logo.png?v=20260901_lumina',
+  '/manifest.webmanifest?v=20260902_rail',
+  '/assets/app.css?v=20260902_rail',
+  '/assets/api.js?v=20260902_rail',
+  '/assets/app.js?v=20260902_rail',
+  '/assets/store.js?v=20260902_rail',
+  '/assets/photos.js?v=20260902_rail',
+  '/assets/logo.png?v=20260902_rail',
   '/assets/icon-192.png',
   '/assets/icon-512.png'
 ];
