@@ -66,6 +66,25 @@ export function computeTotals(
  */
 export const INVOICE_NUMBER_START = 10000;
 
+/**
+ * Guards the legacy `invoice_number_counter` path.
+ *
+ * Production always runs on PostgreSQL (`type: 'postgres'` is hardcoded in
+ * AppModule), so the counter branch below exists purely for the SQLite-backed
+ * integration specs. Making that explicit means a future misconfiguration
+ * fails fast instead of quietly issuing numbers from the deprecated counter --
+ * which is precisely how the pre-016 `1115 + COUNT(*)` fallback went unnoticed.
+ */
+function assertLegacyCounterAllowed(): void {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'Invoice numbering requires PostgreSQL: refusing to allocate from the ' +
+        'deprecated invoice_number_counter in production. Expected the ' +
+        'datasource to be postgres so nextval(invoice_number_seq) is used.',
+    );
+  }
+}
+
 @Injectable()
 export class InvoicesService {
   constructor(
@@ -111,6 +130,8 @@ export class InvoicesService {
       // so the stored invoice_number matches the sequence exactly.
       return String(value);
     }
+
+    assertLegacyCounterAllowed();
 
     await queryRunner.query(
       `INSERT INTO invoice_number_counter (id, next_value)
@@ -161,6 +182,8 @@ export class InvoicesService {
         preview: true,
       };
     }
+
+    assertLegacyCounterAllowed();
 
     const rows = await this.dataSource.query<Array<{ next_value: number }>>(
       `SELECT next_value FROM invoice_number_counter WHERE id = 1`,

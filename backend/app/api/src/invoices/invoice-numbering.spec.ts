@@ -111,6 +111,25 @@ describe('invoice numbering', () => {
       expect(statements).toContain('UPDATE invoice_number_counter');
       expect(statements).toContain(String(INVOICE_NUMBER_START));
     });
+
+    it('refuses to allocate from the legacy counter in production', async () => {
+      const previous = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      try {
+        const { service, queryRunner, log } = serviceWith(
+          'better-sqlite3',
+          () => [{ next_value: 10001 }],
+        );
+
+        await expect(allocate(service, queryRunner)).rejects.toThrow(
+          /requires PostgreSQL/i,
+        );
+        // It must fail before touching the counter, not after issuing a number.
+        expect(log).toHaveLength(0);
+      } finally {
+        process.env.NODE_ENV = previous;
+      }
+    });
   });
 });
 
