@@ -4238,6 +4238,15 @@
     if (rxBtn) rxBtn.addEventListener('click', openReceiveModal);
     var shipBtn = $('#btnShipStock');
     if (shipBtn) shipBtn.addEventListener('click', openShipModal);
+
+    /* The dashboard's two header actions are the same operations, not a
+       second implementation: they open the identical modals, so scope,
+       division/facility inheritance and the server-side authorization on
+       POST /inventory/transactions are shared with the Inventory view. */
+    var dashInBtn = $('#dashBtnAddInbound');
+    if (dashInBtn) dashInBtn.addEventListener('click', openReceiveModal);
+    var dashOutBtn = $('#dashBtnAddOutbound');
+    if (dashOutBtn) dashOutBtn.addEventListener('click', openShipModal);
     var adjBtn = $('#btnAdjustStock');
     if (adjBtn) adjBtn.addEventListener('click', openAdjustModal);
     var expBtn = $('#btnExportInventory');

@@ -220,6 +220,14 @@
             </div>
             <p id="dashSub">Today's operations at a glance.</p>
           </div>
+          <!-- Same two operations as the Inventory view's header, surfaced on
+               the dashboard. They open the existing inbound/outbound modals,
+               which inherit the signed-in user, the selected division and the
+               selected facility — no separate inventory path. -->
+          <div class="vactions">
+            <button type="button" class="btn btn-primary" id="dashBtnAddInbound"><svg><use href="#i-plus"></use></svg>Add Inbound</button>
+            <button type="button" class="btn btn-secondary" id="dashBtnAddOutbound"><svg><use href="#i-truck"></use></svg>Add Outbound</button>
+          </div>
         </div>
 
         <div class="kpi-grid" id="dashboardKpis">
