@@ -26,11 +26,16 @@
     PE: { label: 'HST @ 15%', rate: 0.15 }
   };
 
+  // `settings` is available to every role: it is where a user reads back
+  // their own role, division access and warehouse access. The admin-only part
+  // of that screen (company details) is gated inside renderSettings(), not by
+  // withholding the whole view — otherwise a manager or staff member has no
+  // way to see what they have been granted.
   var ROLES = {
     admin:   { label: 'Administrator', sees: ['dashboard','inventory','photos','timeclock','chat','invoices','editor','customers','products','staff','history','settings'] },
-    manager: { label: 'Manager',       sees: ['dashboard','inventory','photos','timeclock','chat','invoices','editor','customers','products','history'] },
-    staff:   { label: 'Staff',         sees: ['dashboard','inventory','photos','timeclock','chat'] },
-    driver:  { label: 'Driver',        sees: ['dashboard','inventory','photos','timeclock','chat'] }
+    manager: { label: 'Manager',       sees: ['dashboard','inventory','photos','timeclock','chat','invoices','editor','customers','products','history','settings'] },
+    staff:   { label: 'Staff',         sees: ['dashboard','inventory','photos','timeclock','chat','settings'] },
+    driver:  { label: 'Driver',        sees: ['dashboard','inventory','photos','timeclock','chat','settings'] }
   };
 
   var SIZE_KEYS = ['xl', 'l', 'm', 's'];
@@ -186,7 +191,32 @@
   var db = S.get();
   var me = null;
   var view = 'dashboard';
-  var entity = db.entity || 'recycling';
+
+  /* ----------------------------------------------------------------------
+     Division / business-unit state.
+
+     `myDivisions` is filled from GET /divisions and is the ONLY thing that
+     decides which divisions this session may touch. It is never derived from
+     the role, from localStorage, or from anything else the client can see or
+     edit — the API is authoritative and the UI renders what it is told.
+
+     `entity` is the *active* division in the client's own vocabulary
+     ('recycling' | 'healthcare'). The API's canonical key for the recycling
+     business is 'greenwave'; DIVISION_KEY_MAP translates. A stored preference
+     is only honoured if the server still grants it.
+     ---------------------------------------------------------------------- */
+  var DIVISION_LABELS = { recycling: 'GreenWave Recycling', healthcare: 'Healthcare' };
+  var myDivisions = [];
+
+  function apiDivisionKey(ent) { return ent === 'healthcare' ? 'healthcare' : 'greenwave'; }
+  function entityFromApiKey(key) { return key === 'healthcare' ? 'healthcare' : 'recycling'; }
+  function divisionLabel(ent) { return DIVISION_LABELS[ent] || 'Unassigned'; }
+
+  /** True only when the server has granted this division to this session. */
+  function hasDivision(ent) { return myDivisions.indexOf(ent) >= 0; }
+  function hasAnyDivision() { return myDivisions.length > 0; }
+
+  var entity = 'recycling';
   var warehouseId = S.getWarehouse();
   var warehouses = [];
   var usersCache = null;
@@ -217,6 +247,73 @@
   var histRecordedByFilter = '';
   var histStartDate = '';
   var histEndDate = '';
+
+  /**
+   * Renders a user's division grants as chips.
+   *
+   * "No division access" is shown deliberately and prominently rather than
+   * being left blank: an unassigned account is a real state an administrator
+   * needs to notice and act on, not an empty cell.
+   */
+  function divisionChips(divisions) {
+    var list = (divisions || []).map(function (d) {
+      return typeof d === 'string' ? d : entityFromApiKey(d.key);
+    });
+    if (list.length === 0) {
+      return '<span class="division-badge none">No division access</span>';
+    }
+    return '<span class="division-badge-group">' + list.map(function (ent) {
+      var cls = ent === 'healthcare' ? 'division-badge healthcare' : 'division-badge';
+      return '<span class="' + cls + '"><span class="dot"></span>' + esc(divisionLabel(ent)) + '</span>';
+    }).join('') + '</span>';
+  }
+
+  /**
+   * The DIVISION ACCESS control for the create/edit staff forms.
+   *
+   * Only divisions the acting administrator holds are offered — the API
+   * enforces the same rule, so offering more would just produce a 403. A
+   * division the admin cannot grant is rendered disabled with the reason,
+   * which is clearer than omitting it silently.
+   */
+  function divisionAccessSection(currentDivisions) {
+    var current = (currentDivisions || []).map(function (d) {
+      return typeof d === 'string' ? d : entityFromApiKey(d.key);
+    });
+    var rows = ['recycling', 'healthcare'].map(function (ent) {
+      var checked = current.indexOf(ent) >= 0;
+      var grantable = hasDivision(ent);
+      return '<label class="check-row">' +
+        '<input type="checkbox" name="div_' + esc(ent) + '" value="' + esc(ent) + '"' +
+          (checked ? ' checked' : '') + (grantable ? '' : ' disabled') + '>' +
+        '<span>' +
+          '<span class="check-label">' + esc(divisionLabel(ent)) + '</span>' +
+          '<span class="check-help">' + (grantable
+            ? (ent === 'healthcare'
+                ? 'Healthcare inventory, products, customers and invoices.'
+                : 'Recycling inventory, materials, customers and invoices.')
+            : 'You cannot grant a division you do not have access to yourself.') +
+          '</span>' +
+        '</span>' +
+      '</label>';
+    }).join('');
+
+    return '<div class="form-section">' +
+      '<span class="form-section-title">Division access</span>' +
+      '<span class="form-section-help">Which business unit\u2019s data this account can reach. ' +
+        'Separate from facility access \u2014 a user needs both. Leave both unchecked for no access.</span>' +
+      rows +
+    '</div>';
+  }
+
+  /** Reads the DIVISION ACCESS checkboxes out of a submitted modal form. */
+  function selectedDivisionsFrom(fd) {
+    var out = [];
+    ['recycling', 'healthcare'].forEach(function (ent) {
+      if (fd['div_' + ent]) out.push(apiDivisionKey(ent));
+    });
+    return out;
+  }
 
   function isRecycling() { return entity === 'recycling'; }
   function isHealthcare() { return entity === 'healthcare'; }
@@ -350,8 +447,53 @@
     showGate();
   }
 
+  /**
+   * Renders the division chrome from `myDivisions`.
+   *
+   * Two shapes, never both:
+   *   - more than one division -> a real switcher, listing only granted ones.
+   *   - exactly one            -> a plain statement of the active business
+   *                               unit, so a single-division user is never
+   *                               shown a control for something unreachable.
+   * A user with no divisions gets neither, and render() shows the
+   * "no business unit assigned" state instead of fetching anything.
+   */
+  function syncDivisionChrome() {
+    var multi = myDivisions.length > 1;
+
+    var railSwitcher = $('#railDivisionSwitcher');
+    var railStatic = $('#railDivisionStatic');
+    var topToggle = $('#topDivisionToggle');
+    var topStatic = $('#topDivisionStatic');
+    var topWrap = $('#topDivisionWrap');
+
+    if (topWrap) topWrap.hidden = !hasAnyDivision();
+
+    if (railSwitcher) railSwitcher.hidden = !multi;
+    if (topToggle) topToggle.hidden = !multi;
+    if (railStatic) railStatic.hidden = multi || !hasAnyDivision();
+    if (topStatic) topStatic.hidden = multi || !hasAnyDivision();
+
+    // Any button for a division this session was not granted is removed from
+    // the tab order and hidden outright — hiding alone is not the control,
+    // but there is no reason to render an affordance that would 403.
+    $$('.entsw button, .top-div-btn').forEach(function (b) {
+      var ent = b.dataset.entity || b.dataset.div;
+      var granted = hasDivision(ent);
+      b.hidden = !granted;
+      b.disabled = !granted;
+    });
+
+    var label = divisionLabel(entity);
+    var railLabel = $('#railDivisionLabel');
+    if (railLabel) railLabel.textContent = label;
+    var topStaticLabel = $('#topDivisionStaticLabel');
+    if (topStaticLabel) topStaticLabel.textContent = label;
+  }
+
   function syncChrome() {
     document.documentElement.setAttribute('data-entity', entity);
+    syncDivisionChrome();
     $$('.entsw button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.entity === entity)); });
     $$('.top-div-btn').forEach(function (b) {
       var isAct = (b.dataset.entity || b.dataset.div) === entity;
@@ -364,11 +506,41 @@
     var scopeDiv = $('#scopeDivisionUnit');
     if (scopeDiv) scopeDiv.textContent = isRecycling() ? 'Recycling · Pallets' : 'Healthcare · Boxes';
 
+    // Navigation reflects both role and division authorization. `data-only`
+    // marks an item that belongs to one division; it is shown only when that
+    // division is BOTH the active one and one this session actually holds, so
+    // a Healthcare-only user never sees GreenWave-specific navigation (and
+    // vice versa) — and render() never fetches behind a hidden item.
     $$('[data-only], [data-role]').forEach(function (el) {
-      var okEntity = !el.dataset.only || el.dataset.only === entity;
+      var okEntity = !el.dataset.only ||
+        (el.dataset.only === entity && hasDivision(el.dataset.only));
       var okRole = !el.dataset.role || (me && el.dataset.role.split(',').indexOf(me.role) >= 0);
-      el.hidden = !(okEntity && okRole);
+      el.hidden = !hasAnyDivision() || !okEntity || !okRole;
     });
+
+    // With no division granted there is nothing operational to navigate to,
+    // so those entries are hidden rather than left as links into an empty
+    // state. Settings and Staff stay available: an administrator must still
+    // be able to reach Staff Management to grant themselves or others access.
+    var DIVISION_SCOPED_VIEWS = [
+      'dashboard', 'inventory', 'photos', 'timeclock', 'chat',
+      'invoices', 'customers', 'products', 'history'
+    ];
+    if (!hasAnyDivision()) {
+      $$('.navitem').forEach(function (b) {
+        if (DIVISION_SCOPED_VIEWS.indexOf(b.dataset.view) >= 0) b.hidden = true;
+      });
+      $$('.navlabel').forEach(function (l) {
+        // Hide a section heading once every item under it is hidden.
+        var next = l.nextElementSibling;
+        var anyVisible = false;
+        while (next && !next.classList.contains('navlabel')) {
+          if (next.classList.contains('navitem') && !next.hidden) anyVisible = true;
+          next = next.nextElementSibling;
+        }
+        l.hidden = !anyVisible;
+      });
+    }
 
     var prodEl = $('#productsNav');
     if (prodEl) prodEl.textContent = isRecycling() ? 'Materials Catalog' : 'Healthcare Products';
@@ -477,6 +649,12 @@
     if (next === 'invoices' && !isRecycling()) next = 'inventory';
     if (!can(next) && next !== 'editor') next = 'dashboard';
     if (next === 'editor' && !can('invoices')) next = 'inventory';
+    // A session with no division has no operational views to land on; keep it
+    // on the administrative ones rather than bouncing to a dashboard that
+    // would render empty.
+    if (!hasAnyDivision() && next !== 'settings' && next !== 'staff') {
+      next = isAdmin() ? 'staff' : 'dashboard';
+    }
 
     view = next;
     $$('.view').forEach(function (v) { v.classList.remove('active'); });
@@ -2234,7 +2412,13 @@
       field('email', 'Email Address', { type: 'email' }),
       function (fd) {
         return Api.createCustomer({
-          name: fd.name, billTo: fd.billTo, shipTo: fd.shipTo, email: fd.email, warehouseId: warehouseId
+          name: fd.name, billTo: fd.billTo, shipTo: fd.shipTo, email: fd.email,
+          warehouseId: warehouseId,
+          // The customer belongs to the division currently being worked in.
+          // Stated explicitly rather than left to the server to infer: a user
+          // with access to both divisions has no unambiguous default, and the
+          // API rejects a create that does not say which.
+          division: apiDivisionKey(entity)
         }).then(function () { toast('Customer added.'); renderCustomers(); });
       });
   }
@@ -3105,6 +3289,11 @@
         notes: draft.notes || '',
         taxLabel: draft.taxLabel || 'GST @ 5%',
         taxRate: Number(draft.taxRatePct) || 5,
+        // Same rule as customers: the invoice is created in the division the
+        // user is working in, stated explicitly. This is scoping only — it has
+        // no bearing on the invoice number, which stays a single global
+        // sequence shared by both divisions.
+        division: apiDivisionKey(entity),
         items: draft.items.map(function (it) {
           return {
             serviceDate: it.serviceDate || draft.invoiceDate,
@@ -3355,22 +3544,25 @@
         var lastLoginHtml = formatLastLogin(u.lastLoginAt);
 
         return '<tr data-user-id="' + esc(u.id) + '">' +
-          '<td><strong>' + esc(u.name || u.fullName) + '</strong></td>' +
-          '<td><span class="mono" style="font-size:13px">' + esc(u.email) + '</span></td>' +
-          '<td><span class="badge ' + (u.role === 'admin' ? 'badge-in' : (u.role === 'manager' ? 'badge-transit' : 'badge-received')) + '">' + esc(u.role) + '</span></td>' +
-          '<td><span class="badge ' + statusBadgeClass + '">' + statusLabel + '</span></td>' +
-          '<td><div style="display:flex;flex-wrap:wrap;gap:4px">' + assignedWhNames + '</div></td>' +
-          '<td class="mono" style="font-size:12.5px">' + esc(createdDate) + '</td>' +
-          '<td class="mono" style="font-size:12.5px">' + lastLoginHtml + '</td>' +
-          '<td><div style="display:flex;gap:6px">' +
+          '<td data-label="User"><strong>' + esc(u.name || u.fullName) + '</strong></td>' +
+          '<td data-label="Email"><span class="mono" style="font-size:13px">' + esc(u.email) + '</span></td>' +
+          '<td data-label="Role"><span class="badge ' + (u.role === 'admin' ? 'badge-in' : (u.role === 'manager' ? 'badge-transit' : 'badge-received')) + '">' + esc(u.role) + '</span></td>' +
+          '<td data-label="Status"><span class="badge ' + statusBadgeClass + '">' + statusLabel + '</span></td>' +
+          // Division and warehouse are separate permissions and are shown as
+          // separate columns on purpose — a user needs both to see anything.
+          '<td data-label="Division access">' + divisionChips(u.divisions) + '</td>' +
+          '<td data-label="Warehouse access"><div style="display:flex;flex-wrap:wrap;gap:4px">' + assignedWhNames + '</div></td>' +
+          '<td data-label="Created" class="mono" style="font-size:12.5px">' + esc(createdDate) + '</td>' +
+          '<td data-label="Last login" class="mono" style="font-size:12.5px">' + lastLoginHtml + '</td>' +
+          '<td><div style="display:flex;gap:6px;justify-content:flex-end">' +
             '<button type="button" class="btn ghost btn-sm btn-view-user" data-user-id="' + esc(u.id) + '" title="View user details & permissions">View</button>' +
-            '<button type="button" class="btn ghost btn-sm btn-edit-user" data-user-id="' + esc(u.id) + '" title="Edit user role & facility permissions">Edit</button>' +
+            '<button type="button" class="btn ghost btn-sm btn-edit-user" data-user-id="' + esc(u.id) + '" title="Edit user role, division and facility permissions">Edit</button>' +
           '</div></td></tr>';
       }).join('');
 
-      sBody.innerHTML = toolbarHtml + '<div class="card"><div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table class="table"><thead><tr>' +
-        '<th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Warehouse Access</th><th>Created</th><th>Last Login</th><th>Actions</th></tr></thead><tbody>' +
-        (rowsHtml || '<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:30px">No matching staff accounts found.</td></tr>') +
+      sBody.innerHTML = toolbarHtml + '<div class="card"><div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table class="table stack-mobile"><thead><tr>' +
+        '<th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Division Access</th><th>Warehouse Access</th><th>Created</th><th>Last Login</th><th>Actions</th></tr></thead><tbody>' +
+        (rowsHtml || '<tr><td colspan="9"><div class="empty"><div class="eico"><svg><use href="#i-users"></use></svg></div><h3>No matching staff accounts</h3><p>Try clearing the search or role filter, or create a new staff account.</p></div></td></tr>') +
         '</tbody></table></div></div>';
 
       var sInput = $('#staffSearchInput');
@@ -3405,7 +3597,12 @@
           var isSelf = me && me.id === uid;
           var canGrantGlobal = me && (me.role === 'admin' || (me.permissions && me.permissions.indexOf('warehouses:global_access') >= 0));
 
-          Api.getUserWarehouses(uid).then(function (userWhs) {
+          Promise.all([
+            Api.getUserWarehouses(uid),
+            Api.getUserDivisions(uid)
+          ]).then(function (userAccess) {
+            var userWhs = userAccess[0];
+            var currentDivisions = userAccess[1] || [];
             var currentAssignedIds = (userWhs || []).map(function (w) { return w.id; });
             var checkboxesHtml = allWhs.map(function (w) {
               var isChecked = currentAssignedIds.indexOf(w.id) >= 0;
@@ -3449,6 +3646,7 @@
                   { value: 'suspended', label: 'Suspended (Locked)' }
                 ]
               }) +
+              divisionAccessSection(currentDivisions) +
               '<div style="margin-top:16px"><label style="font-size:12px;font-weight:700;color:var(--muted)">WAREHOUSE FACILITY ACCESS</label>' +
               '<div style="background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--r);padding:12px 16px;margin-top:6px">' +
                 '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;margin-bottom:8px;border-bottom:1px solid var(--line-2);cursor:' + (canGrantGlobal ? 'pointer' : 'not-allowed') + ';font-weight:600">' +
@@ -3473,7 +3671,12 @@
                   fullName: fd.fullName.trim(),
                   role: isSelf ? targetUser.role : (fd.role || targetUser.role),
                   status: isSelf ? (targetUser.status || 'active') : (fd.status || 'active'),
-                  warehouseIds: selectedWhIds
+                  warehouseIds: selectedWhIds,
+                  // Division access is sent as an explicit list every time,
+                  // including an empty one — that is how access is revoked.
+                  // The API re-checks that the acting admin may grant each
+                  // value, so this is a convenience, never the control.
+                  divisions: selectedDivisionsFrom(fd)
                 };
 
                 return Api.updateUser(uid, updatePayload).then(function () {
@@ -3496,6 +3699,7 @@
   }
 
   function openUserDetailModal(u, allWhs) {
+    var divisionAccessHtml = divisionChips(u.divisions);
     var assignedWhNames = (u.warehouses && u.warehouses.length)
       ? deduplicateWarehouses(u.warehouses).map(function (w) { return esc(w.name) + ' (' + esc(w.code) + ')'; }).join(', ')
       : (u.role === 'admin' ? 'All Facilities (Global Admin)' : 'None');
@@ -3538,6 +3742,7 @@
         '</div>' +
       '</div>' +
       '<div class="user-detail-grid">' +
+        '<div class="user-detail-field"><span class="user-detail-label">Division Access</span><span class="user-detail-val">' + divisionAccessHtml + '</span></div>' +
         '<div class="user-detail-field"><span class="user-detail-label">Assigned Facilities</span><span class="user-detail-val">' + esc(assignedWhNames) + '</span></div>' +
         '<div class="user-detail-field"><span class="user-detail-label">Account Created</span><span class="user-detail-val mono">' + esc(createdDate) + '</span></div>' +
         '<div class="user-detail-field"><span class="user-detail-label">Last Login</span><span class="user-detail-val mono">' + esc(lastLoginText) + '</span></div>' +
@@ -3650,7 +3855,50 @@
     var co = db.company || {};
     var sBody = $('#settingsBody');
     if (!sBody) return;
-    sBody.innerHTML = '<div class="card pad">' +
+
+    // "Your access" states what this account can actually reach, read back
+    // from the server profile rather than assumed from the role. It is
+    // read-only for everyone: changing it is an administrator action in Staff
+    // Management, so no admin-only control is exposed here.
+    var accessCardHtml = '<div class="card pad" style="margin-bottom:24px">' +
+      '<h3>Your access</h3>' +
+      '<p style="color:var(--muted);font-size:13px;margin:6px 0 20px">' +
+        'Granted by an administrator and enforced by the server. ' +
+        'Contact an administrator to request a change.</p>' +
+      '<div class="user-detail-grid">' +
+        '<div class="user-detail-field">' +
+          '<span class="user-detail-label">Role</span>' +
+          '<span class="user-detail-val"><span class="badge ' +
+            (me && me.role === 'admin' ? 'badge-in' : (me && me.role === 'manager' ? 'badge-transit' : 'badge-received')) +
+            '">' + esc(me ? me.role : '—') + '</span></span>' +
+        '</div>' +
+        '<div class="user-detail-field">' +
+          '<span class="user-detail-label">Division access</span>' +
+          '<span class="user-detail-val">' + divisionChips(myDivisions) + '</span>' +
+        '</div>' +
+        '<div class="user-detail-field">' +
+          '<span class="user-detail-label">Warehouse access</span>' +
+          '<span class="user-detail-val">' + (
+            (me && me.hasGlobalAccess)
+              ? 'All facilities (global access)'
+              : (deduplicateWarehouses(warehouses).length
+                  ? deduplicateWarehouses(warehouses).map(function (w) {
+                      return '<span class="audit-wh-badge">' + esc(w.name) + '</span>';
+                    }).join(' ')
+                  : '<span class="division-badge none">No facilities assigned</span>')
+          ) + '</span>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+    // Company details are an administrator control and are simply not
+    // rendered for anyone else — an ordinary user still gets the access card.
+    if (!isAdmin()) {
+      sBody.innerHTML = accessCardHtml;
+      return;
+    }
+
+    sBody.innerHTML = accessCardHtml + '<div class="card pad">' +
       '<h3>Company Details &amp; Letterhead</h3>' +
       '<form id="setForm" style="margin-top:14px">' +
         field('name', 'Company Name', { value: co.name || 'GreenWave Recycling Inc.' }) +
@@ -3794,8 +4042,52 @@
     }
   }
 
+  /**
+   * Renders the "no business unit assigned" state.
+   *
+   * This is a real, expected state: every account starts with no division
+   * until an administrator grants one. It is shown instead of the normal
+   * views, and critically nothing division-scoped is fetched while it is up —
+   * hiding menus while still loading the data behind them would defeat the
+   * whole point.
+   */
+  function renderNoDivisionState() {
+    var scroll = $('#scroll');
+    if (!scroll) return;
+    $$('.view').forEach(function (v) { v.classList.remove('active'); });
+
+    var existing = $('#noDivisionState');
+    if (existing) { existing.hidden = false; return; }
+
+    var el = document.createElement('div');
+    el.id = 'noDivisionState';
+    el.className = 'no-division-state';
+    el.innerHTML =
+      '<div class="eico"><svg><use href="#i-alert"></use></svg></div>' +
+      '<h2>No business unit assigned</h2>' +
+      '<p>Your account does not yet have access to a business division. ' +
+      'An administrator needs to grant you GreenWave Recycling, Healthcare, ' +
+      'or both before operational data becomes available.</p>';
+    scroll.appendChild(el);
+  }
+
+  function clearNoDivisionState() {
+    var el = $('#noDivisionState');
+    if (el) el.hidden = true;
+  }
+
   function render() {
     syncChrome();
+
+    // Guard every division-scoped view behind an actual grant. Settings and
+    // Staff are administrative and not division-scoped, so they stay usable
+    // (an admin must still be able to assign divisions to people).
+    if (!hasAnyDivision() && view !== 'settings' && view !== 'staff') {
+      renderNoDivisionState();
+      return;
+    }
+    clearNoDivisionState();
+
     if (view === 'dashboard') renderDashboard();
     else if (view === 'inventory') renderInventory();
     else if (view === 'chat') renderChat();
@@ -3817,7 +4109,12 @@
         id: user.id,
         name: user.fullName || user.email,
         email: user.email,
-        role: user.role
+        role: user.role,
+        // Carried through for display only. Every one of these is re-derived
+        // and re-enforced server-side on each request; the client copy exists
+        // so the UI can reflect authorization, never to decide it.
+        permissions: user.permissions || [],
+        hasGlobalAccess: !!user.hasGlobalAccess
       };
       S.setServerSession(me);
 
@@ -3825,6 +4122,25 @@
       if (gate) gate.hidden = true;
       var app = $('#app');
       if (app) app.hidden = false;
+
+      // Division access comes from the server, resolved before anything
+      // division-scoped is fetched. The profile already carries the grants,
+      // so there is no second round trip; GET /divisions returns the same
+      // list and stays available for other clients.
+      //
+      // A stored preference is honoured only if it is still granted;
+      // otherwise the first granted division becomes active. With no grants
+      // at all `entity` stays empty and render() shows the "no business unit
+      // assigned" state rather than issuing requests that would 403.
+      myDivisions = (user.divisions || [])
+        .map(function (d) { return entityFromApiKey(d.key || d); })
+        .filter(function (e, i, a) { return a.indexOf(e) === i; });
+
+      var storedEntity = db.entity;
+      entity = hasDivision(storedEntity) ? storedEntity : (myDivisions[0] || '');
+      db.entity = entity;
+      S.save(db);
+      syncDivisionChrome();
 
       return Api.listWarehouses(false).then(function (whs) {
         warehouses = deduplicateWarehouses(whs || []);
@@ -3877,6 +4193,13 @@
       b.addEventListener('click', function () {
         var newEntity = b.dataset.entity || b.dataset.div;
         if (!newEntity) return;
+        // The client cannot invent a division. Even if a button were injected
+        // or un-hidden in the DOM, switching to a division this session was
+        // not granted is refused here — and the API would refuse it anyway.
+        if (!hasDivision(newEntity)) {
+          toast('You are not authorized for that business division.');
+          return;
+        }
         entity = newEntity;
         db.entity = entity;
         S.save(db);
@@ -4015,6 +4338,9 @@
                 { value: 'admin', label: 'Administrator (Full Access)' }
               ]
             }) +
+            // New accounts start with nothing checked: no division access is
+            // the deliberate default, and an admin has to opt in.
+            divisionAccessSection([]) +
             '<div style="margin-top:12px"><label style="font-size:12px;font-weight:700;color:var(--muted)">FACILITY ACCESS</label>' +
             '<div style="background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--r);padding:10px 14px;margin-top:4px">' +
               '<label style="display:flex;align-items:center;gap:8px;padding:4px 0;margin-bottom:6px;border-bottom:1px solid var(--line-2);cursor:pointer;font-weight:600">' +
@@ -4037,14 +4363,19 @@
                 if (fd['wh_' + w.id]) selectedWhIds.push(w.id);
               });
 
+              var selectedDivisions = selectedDivisionsFrom(fd);
+
               return Api.createUser({
                 fullName: fd.fullName.trim(),
                 email: fd.email.trim(),
                 password: fd.password,
                 role: fd.role,
-                warehouseIds: selectedWhIds
+                warehouseIds: selectedWhIds,
+                divisions: selectedDivisions
               }).then(function () {
-                toast('User account created successfully.');
+                toast(selectedDivisions.length === 0
+                  ? 'User created with no division access \u2014 assign one before they can see operational data.'
+                  : 'User account created successfully.');
                 renderStaff();
               });
             });

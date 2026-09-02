@@ -58,6 +58,10 @@ export default function Invoices() {
         shipTo,
         shipVia,
         shipDate,
+        // Invoices in this app are recycling-side billing. The API no longer
+        // infers a division for an account that holds more than one, so it is
+        // stated here rather than left to a server-side guess.
+        division: "greenwave",
         status: "draft",
         items: [
           {

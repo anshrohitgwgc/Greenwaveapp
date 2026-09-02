@@ -102,6 +102,17 @@
     updateUser: function (id, data) { return request('PATCH', '/users/' + id, data); },
     getUserWarehouses: function (userId) { return request('GET', '/users/' + userId + '/warehouses'); },
     assignUserWarehouses: function (userId, warehouseIds) { return request('PUT', '/users/' + userId + '/warehouses', { warehouseIds: warehouseIds }); },
+    getUserDivisions: function (userId) { return request('GET', '/users/' + userId + '/divisions'); },
+    assignUserDivisions: function (userId, divisions) { return request('PUT', '/users/' + userId + '/divisions', { divisions: divisions }); },
+
+    // Divisions / business units.
+    //
+    // `myDivisions()` is the ONLY source of truth for what the user may
+    // operate in. The client never derives division access from a role, a
+    // localStorage value, or anything else it can see -- it asks the server
+    // and renders exactly what comes back.
+    myDivisions: function () { return request('GET', '/divisions'); },
+    divisionCatalog: function () { return request('GET', '/divisions/catalog'); },
 
     // Warehouses
     listWarehouses: function (includeInactive) {
@@ -111,7 +122,12 @@
     updateWarehouse: function (id, data) { return request('PATCH', '/warehouses/' + id, data); },
 
     // Customers
-    listCustomers: function (warehouseId) { return request('GET', '/customers' + qs({ warehouseId: warehouseId })); },
+    listCustomers: function (warehouseId, division) {
+      if (typeof warehouseId === 'object' && warehouseId !== null) {
+        return request('GET', '/customers' + qs(warehouseId));
+      }
+      return request('GET', '/customers' + qs({ warehouseId: warehouseId, division: division }));
+    },
     createCustomer: function (data) { return request('POST', '/customers', data); },
     updateCustomer: function (id, data) { return request('PATCH', '/customers/' + id, data); },
 

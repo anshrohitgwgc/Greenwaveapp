@@ -4,17 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0F7A4C">
+<meta name="color-scheme" content="light">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Greenwave">
 <title>GreenWave Operations Platform</title>
-<link rel="manifest" href="manifest.webmanifest?v=20260830_150000">
+<link rel="manifest" href="manifest.webmanifest?v=20260901_lumina">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="icon" href="assets/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/app.css?v=20260830_150000">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/app.css?v=20260901_lumina">
 </head>
 <body>
 
@@ -120,10 +121,21 @@
       <img src="assets/logo.png" alt="GreenWave" class="raillogo">
     </div>
 
-    <!-- Company Entity Switcher -->
-    <div class="entsw" role="group" aria-label="Company Division">
+    <!-- Business division switcher — only rendered for users authorized for
+         more than one division. Populated from GET /divisions. -->
+    <div class="entsw" id="railDivisionSwitcher" role="group" aria-label="Business division" hidden>
       <button type="button" data-entity="recycling" aria-pressed="true">Recycling</button>
       <button type="button" data-entity="healthcare" aria-pressed="false">Healthcare</button>
+    </div>
+
+    <!-- Single-division users see their active business unit stated, not a
+         switcher offering something they cannot reach. -->
+    <div class="entsw-static" id="railDivisionStatic" hidden>
+      <span class="dot" aria-hidden="true"></span>
+      <span>
+        <span class="sub">Business unit</span>
+        <span class="lbl" id="railDivisionLabel">—</span>
+      </span>
     </div>
 
     <nav class="nav" id="nav">
@@ -146,7 +158,9 @@
       <button type="button" class="navitem" data-view="products" data-role="admin,manager"><svg><use href="#i-tag"></use></svg><span id="productsNav">Materials Catalog</span></button>
       <button type="button" class="navitem" data-view="staff" data-role="admin"><svg><use href="#i-users"></use></svg>Staff</button>
       <button type="button" class="navitem" data-view="history" data-role="admin,manager"><svg><use href="#i-history"></use></svg>History</button>
-      <button type="button" class="navitem" data-view="settings" data-role="admin"><svg><use href="#i-gear"></use></svg>Settings</button>
+
+      <span class="navlabel">Account</span>
+      <button type="button" class="navitem" data-view="settings"><svg><use href="#i-gear"></use></svg>Settings</button>
     </nav>
 
     <div class="railfoot">
@@ -172,11 +186,15 @@
           </div>
         </div>
 
-        <div class="top-division-wrap">
-          <label>DIVISION</label>
-          <div class="top-division-toggle" role="group" aria-label="Company Division Selector">
-            <button type="button" class="top-div-btn active" data-entity="recycling" id="topDivRecycling" aria-pressed="true">♻️ Recycling</button>
-            <button type="button" class="top-div-btn" data-entity="healthcare" id="topDivHealthcare" aria-pressed="false">🏥 Healthcare</button>
+        <div class="top-division-wrap" id="topDivisionWrap">
+          <label for="topDivRecycling">DIVISION</label>
+          <div class="top-division-toggle" id="topDivisionToggle" role="group" aria-label="Business division selector">
+            <button type="button" class="top-div-btn active" data-entity="recycling" id="topDivRecycling" aria-pressed="true">Recycling</button>
+            <button type="button" class="top-div-btn" data-entity="healthcare" id="topDivHealthcare" aria-pressed="false">Healthcare</button>
+          </div>
+          <div class="top-division-static" id="topDivisionStatic" hidden>
+            <span class="dot" aria-hidden="true"></span>
+            <span id="topDivisionStaticLabel">—</span>
           </div>
         </div>
       </div>
@@ -533,10 +551,10 @@
   <div class="lbmeta" id="lbMeta"></div>
 </div>
 
-<script src="assets/api.js?v=20260901_230000"></script>
-<script src="assets/store.js?v=20260830_150000"></script>
-<script src="assets/photos.js?v=20260830_150000"></script>
-<script src="assets/app.js?v=20260901_230000"></script>
+<script src="assets/api.js?v=20260901_lumina"></script>
+<script src="assets/store.js?v=20260901_lumina"></script>
+<script src="assets/photos.js?v=20260901_lumina"></script>
+<script src="assets/app.js?v=20260901_lumina"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
