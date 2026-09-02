@@ -49,45 +49,93 @@ test.beforeAll(async () => {
   // public Customer Payment Page has something real to render for the
   // screenshot pass below (no UI invoice-builder walkthrough needed).
   const api = await pwRequest.newContext({ baseURL: API_BASE });
-  const loginRes = await api.post('/auth/login', {
-    data: { email: 'admin@greenwave.local', password: 'DevPassword123!' },
-  });
-  const { access_token } = await loginRes.json();
-  const authHeaders = { Authorization: `Bearer ${access_token}` };
+  let invoiceStatus;
+  let invoiceBody;
+  let linkStatus = null;
+  let linkBody = null;
 
-  const invoiceRes = await api.post('/invoices', {
-    headers: authHeaders,
-    data: {
-      invoiceDate: new Date().toISOString().slice(0, 10),
-      billTo: 'Visual QA Customer\n123 Test St, Calgary, AB',
-      warehouseId: '22222222-2222-4222-8222-222222222222',
-      items: [
-        {
-          description: 'Visual QA line item',
-          quantity: 1,
-          unitPrice: 100,
-        },
-      ],
-    },
-  });
-  if (invoiceRes.ok()) {
-    const invoice = await invoiceRes.json();
-    const linkRes = await api.post(`/payments/invoices/${invoice.id}/link`, {
-      headers: authHeaders,
+  try {
+    const loginRes = await api.post('/auth/login', {
+      data: { email: 'admin@greenwave.local', password: 'DevPassword123!' },
     });
-    if (linkRes.ok()) {
-      const link = await linkRes.json();
-      // Use the hash-route form (#pay/<token>), same as the app's own "Copy
-      // Payment Link" button builds: the hash never reaches the server, so
-      // it works when served by a plain static file server (serve.sh /
-      // python http.server has no SPA rewrite rule, unlike production
-      // nginx's `try_files ... /index.html`). The raw /pay/<token> path
-      // 404s in that environment even though the app supports it fine.
-      const token = String(link.paymentUrl || '').replace(/^\/?pay\//, '').split('?')[0];
-      invoicePaymentPath = '/#pay/' + token;
+    const { access_token } = await loginRes.json();
+    const authHeaders = { Authorization: `Bearer ${access_token}` };
+
+    const invoiceRes = await api.post('/invoices', {
+      headers: authHeaders,
+      data: {
+        invoiceDate: new Date().toISOString().slice(0, 10),
+        // REQUIRED, not optional, for this account. admin@greenwave.local
+        // holds *both* business divisions (migration 017 bootstraps every
+        // existing admin with greenwave + healthcare), and the invoice API
+        // refuses to guess for a multi-division actor — it answers
+        // 400 "division is required" rather than silently defaulting, so a
+        // typo can never widen access. GreenWave Recycling is the correct
+        // division for this fixture: it bills an ordinary recycling line
+        // item out of the Calgary warehouse, and every pre-existing invoice
+        // in the system is likewise recycling (migration 017 backfilled the
+        // column that way). `greenwave` is the canonical key the API
+        // accepts; it is persisted as the legacy storage value `recycling`
+        // by the boundary translation in divisions.constants.ts.
+        division: 'greenwave',
+        // Deliberately free-text billing details with no customerId, no
+        // materialId and no product reference, so this invoice owns every
+        // field the payment page renders and there is no second
+        // division-scoped record that could disagree with it. (The invoice
+        // API cross-checks a linked customer's division —
+        // assertCustomerInDivision — and the public /pay/:token payload
+        // renders the invoice's own billTo column, not a customer join.)
+        billTo: 'Visual QA Customer\n123 Test St, Calgary, AB',
+        // Calgary. Division-agnostic: every warehouse carries both
+        // divisions, so this only has to satisfy warehouse authorization,
+        // which this admin holds.
+        warehouseId: '22222222-2222-4222-8222-222222222222',
+        items: [
+          {
+            description: 'Visual QA line item',
+            quantity: 1,
+            unitPrice: 100,
+          },
+        ],
+      },
+    });
+    invoiceStatus = invoiceRes.status();
+    invoiceBody = await invoiceRes.text();
+
+    if (invoiceRes.ok()) {
+      const invoice = JSON.parse(invoiceBody);
+      const linkRes = await api.post(`/payments/invoices/${invoice.id}/link`, {
+        headers: authHeaders,
+      });
+      linkStatus = linkRes.status();
+      linkBody = await linkRes.text();
+
+      if (linkRes.ok()) {
+        const link = JSON.parse(linkBody);
+        // Use the hash-route form (#pay/<token>), same as the app's own "Copy
+        // Payment Link" button builds: the hash never reaches the server, so
+        // it works when served by a plain static file server (serve.sh /
+        // python http.server has no SPA rewrite rule, unlike production
+        // nginx's `try_files ... /index.html`). The raw /pay/<token> path
+        // 404s in that environment even though the app supports it fine.
+        const token = String(link.paymentUrl || '').replace(/^\/?pay\//, '').split('?')[0];
+        invoicePaymentPath = '/#pay/' + token;
+      }
     }
+  } finally {
+    await api.dispose();
   }
-  await api.dispose();
+
+  // Fail the setup loudly instead of leaving invoicePaymentPath null. The
+  // old version swallowed both non-2xx responses, which is how a real API
+  // contract change (division became mandatory for multi-division accounts)
+  // surfaced as five quietly *skipped* Customer payment page tests instead
+  // of a red suite.
+  expect(
+    invoicePaymentPath,
+    `payment-link fixture setup failed — POST /invoices -> ${invoiceStatus} ${invoiceBody}` +
+      (linkStatus === null ? '' : `; POST /payments/invoices/:id/link -> ${linkStatus} ${linkBody}`),
+  ).toBeTruthy();
 });
 
 for (const viewport of VIEWPORTS) {
@@ -143,7 +191,6 @@ for (const viewport of VIEWPORTS) {
     });
 
     test('Customer payment page renders without horizontal overflow', async ({ page }) => {
-      test.skip(!invoicePaymentPath, 'No payment link available (invoice/link API call failed in beforeAll)');
       // This test navigates straight to the payment route without going
       // through loginAs(), so (unlike every other test in this file) it
       // never gets the `greenwave.apiBase` localStorage override set. Each

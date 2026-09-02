@@ -28,6 +28,7 @@ import { AuthModule } from './auth.module';
  */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument */
 describe('Auth + RBAC (sqlite, no external infra)', () => {
+  jest.setTimeout(30000);
   let app: INestApplication;
   let usersService: UsersService;
   let adminToken: string;
@@ -90,6 +91,24 @@ describe('Auth + RBAC (sqlite, no external infra)', () => {
       password: hashedPassword,
       role: 'admin',
     });
+
+    // Obtain baseline admin token for authenticated admin operations
+    const adminLogin = await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: 'admin@greenwave.test', password: 'Password1' });
+    adminToken = adminLogin.body.access_token;
+
+    // Seed baseline staff account and token so staff tests can execute independently
+    await usersService.create({
+      fullName: 'Baseline Staff Person',
+      email: 'staff-base@greenwave.test',
+      password: hashedPassword,
+      role: 'staff',
+    });
+    const staffLogin = await request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: 'staff-base@greenwave.test', password: 'Password1' });
+    staffToken = staffLogin.body.access_token;
   });
 
   afterAll(async () => {
