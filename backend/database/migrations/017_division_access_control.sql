@@ -27,12 +27,16 @@
 -- ==============================================================================
 
 -- 1. Division grants -----------------------------------------------------------
+--
+-- NOTE: the accounts table is `"user"` (singular, quoted) — TypeORM's default
+-- name for the User entity, which predates the explicit @Entity({name}) used
+-- everywhere else. It must stay quoted; `users` does not exist.
 
 CREATE TABLE IF NOT EXISTS user_divisions (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
     division    VARCHAR(32) NOT NULL,
-    created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_by  INTEGER REFERENCES "user"(id) ON DELETE SET NULL,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT user_divisions_user_division_key UNIQUE (user_id, division),
     CONSTRAINT user_divisions_division_check
@@ -73,7 +77,7 @@ CREATE INDEX IF NOT EXISTS idx_invoices_division ON invoices (division);
 
 INSERT INTO user_divisions (user_id, division, created_by)
 SELECT u.id, d.division, NULL
-  FROM users u
+  FROM "user" u
  CROSS JOIN (VALUES ('greenwave'), ('healthcare')) AS d(division)
  WHERE u.role = 'admin'
 ON CONFLICT (user_id, division) DO NOTHING;
