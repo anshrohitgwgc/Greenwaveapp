@@ -662,12 +662,17 @@ h4 { font-size: 14px; line-height: 20px; }
 
 /* ------------------------------------------------- Staff table --------- */
 /* Nine columns have to sit inside the content width without a horizontal
-   scrollbar. `table-layout: fixed` plus a percentage budget makes the
-   columns divide the width they are given instead of being sized by their
-   longest cell, so a 60-character email can no longer widen the table (and
-   with it the page) beyond the viewport. Content is truncated only where a
-   full value stays reachable — the email keeps a `title`, and View/Edit open
-   the record itself. */
+   scrollbar, and the email — the one value an administrator reads character
+   by character, copies and compares — has to stay complete. Two rules do
+   that together:
+     * `table-layout: fixed` stops any single cell from sizing the table, so
+       a 60-character address can never widen the page;
+     * every column except the email is given the width its own content
+       actually measures, and the email column is left auto, so it absorbs
+       every pixel the other eight do not need.
+   The email then wraps inside its column instead of being ellipsised. It is
+   one line at 1920, and never more than the handful of lines its own text
+   requires below that. Nothing in this table is truncated to fit. */
 .tablewrap-fit { overflow-x: visible; }
 .table-staff { table-layout: fixed; width: 100%; }
 
@@ -680,15 +685,23 @@ h4 { font-size: 14px; line-height: 20px; }
 .table-staff th:last-child,
 .table-staff td:last-child { padding-right: var(--gutter); }
 
-.table-staff th:nth-child(1), .table-staff td:nth-child(1) { width: 12%; }  /* User */
-.table-staff th:nth-child(2), .table-staff td:nth-child(2) { width: 14%; }  /* Email */
-.table-staff th:nth-child(3), .table-staff td:nth-child(3) { width: 8%;  }  /* Role */
-.table-staff th:nth-child(4), .table-staff td:nth-child(4) { width: 8%;  }  /* Status */
-.table-staff th:nth-child(5), .table-staff td:nth-child(5) { width: 12%; }  /* Division */
-.table-staff th:nth-child(6), .table-staff td:nth-child(6) { width: 13%; }  /* Warehouse */
-.table-staff th:nth-child(7), .table-staff td:nth-child(7) { width: 10%; }  /* Created */
-.table-staff th:nth-child(8), .table-staff td:nth-child(8) { width: 9%;  }  /* Last login */
-.table-staff th:nth-child(9), .table-staff td:nth-child(9) { width: 14%; }  /* Actions */
+/* Content-sized columns, in px rather than a percentage budget: percentages
+   shrink a column below its own content as the viewport narrows, which is
+   what forced the email into an ellipsis in the first place. The percentage
+   Every width below is that column's own measured content width; the
+   breakpoints below re-measure them as the type and padding tighten, and
+   each band is sized so the eight of them always fit the table it applies
+   to. Column 2 is deliberately left with no width: it takes everything the
+   other eight do not use. */
+.table-staff th:nth-child(1), .table-staff td:nth-child(1) { width: 112px; }  /* User */
+/* (2) Email — no width: takes everything the others leave. */
+.table-staff th:nth-child(3), .table-staff td:nth-child(3) { width: 96px;  }  /* Role */
+.table-staff th:nth-child(4), .table-staff td:nth-child(4) { width: 84px;  }  /* Status */
+.table-staff th:nth-child(5), .table-staff td:nth-child(5) { width: 104px; }  /* Division */
+.table-staff th:nth-child(6), .table-staff td:nth-child(6) { width: 138px; }  /* Warehouse */
+.table-staff th:nth-child(7), .table-staff td:nth-child(7) { width: 122px; }  /* Created */
+.table-staff th:nth-child(8), .table-staff td:nth-child(8) { width: 116px; }  /* Last login */
+.table-staff th:nth-child(9), .table-staff td:nth-child(9) { width: 142px; }  /* Actions */
 
 /* Status and role pills are set one step tighter here than elsewhere so the
    whole word fits its column — a pill clipped to "MANAGE" is not a pill. */
@@ -710,19 +723,30 @@ h4 { font-size: 14px; line-height: 20px; }
 }
 .table-staff .audit-wh-badge { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Every cell is a truncation context; without min-width:0 a long unbroken
+/* Every cell is a wrapping context; without min-width:0 a long unbroken
    token still establishes the column's minimum size. */
 .table-staff td { min-width: 0; vertical-align: middle; padding-top: 12px; padding-bottom: 12px; }
-.table-staff th { white-space: normal; }
+/* Headers wrap between words, and — only when a single word such as
+   "WAREHOUSE" is itself wider than its column — inside one. Without the
+   second rule that word becomes the table's minimum width and pushes the
+   whole table out of a wrapper that then clips it. */
+.table-staff th { white-space: normal; overflow-wrap: anywhere; }
 
 .staff-name {
   display: block; min-width: 0;
   overflow-wrap: anywhere; word-break: break-word;
 }
+/* The address is never abbreviated. `overflow-wrap: anywhere` is what lets a
+   string with no spaces in it break, so the column can stay narrow enough
+   for the other eight without a single character being cut off — the
+   opposite of `text-overflow: ellipsis`, which hid the value it was applied
+   to. */
 .staff-email {
   display: block; min-width: 0; max-width: 100%;
-  font-size: 12.5px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12.5px; line-height: 1.45;
+  white-space: normal;
+  overflow: visible; text-overflow: clip;
+  overflow-wrap: anywhere; word-break: break-word;
 }
 /* Dates are short enough to fit once the padding is tightened, but the
    global `.table td.mono { white-space: nowrap }` would otherwise let them
@@ -732,9 +756,11 @@ h4 { font-size: 14px; line-height: 20px; }
 .staff-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: nowrap; }
 .staff-actions .btn { padding: 4px 10px; min-height: 30px; font-size: 12.5px; }
 
-/* Tablet: buy the columns room by tightening spacing and type before any
-   column is given up. */
-@media (max-width: 1360px) {
+/* Laptop: buy the columns room by tightening spacing and type before any
+   column is given up, and hand every pixel that frees to the email — at
+   1440 that is the difference between a one-line address and a three-line
+   one. Each width below is still the column's own measured content width. */
+@media (max-width: 1500px) {
   .table-staff { font-size: 12.5px; }
   .table-staff th, .table-staff td { padding-left: 8px; padding-right: 8px; }
   .table-staff th:first-child, .table-staff td:first-child { padding-left: 16px; }
@@ -742,25 +768,62 @@ h4 { font-size: 14px; line-height: 20px; }
   .table-staff td { padding-top: 12px; padding-bottom: 12px; }
   .staff-actions .btn { padding: 4px 8px; }
   .table-staff .badge { font-size: 9.5px; padding: 2px 6px; letter-spacing: 0; }
-  .table-staff th:nth-child(2), .table-staff td:nth-child(2) { width: 13%; }
-  .table-staff th:nth-child(6), .table-staff td:nth-child(6) { width: 12%; }
-  .table-staff th:nth-child(7), .table-staff td:nth-child(7) { width: 11%; }
-  .table-staff th:nth-child(8), .table-staff td:nth-child(8) { width: 10%; }
+  .table-staff th:nth-child(1), .table-staff td:nth-child(1) { width: 100px; }
+  .table-staff th:nth-child(3), .table-staff td:nth-child(3) { width: 68px;  }
+  .table-staff th:nth-child(4), .table-staff td:nth-child(4) { width: 76px;  }
+  .table-staff th:nth-child(5), .table-staff td:nth-child(5) { width: 94px;  }
+  .table-staff th:nth-child(6), .table-staff td:nth-child(6) { width: 110px; }
+  .table-staff th:nth-child(7), .table-staff td:nth-child(7) { width: 98px;  }
+  .table-staff th:nth-child(8), .table-staff td:nth-child(8) { width: 98px;  }
+  .table-staff th:nth-child(9), .table-staff td:nth-child(9) { width: 96px;  }
 }
 
-/* Narrow tablet: the two audit columns are the least load-bearing, and both
-   values remain in the View modal, so they collapse before anything the
-   administrator acts on. */
-@media (max-width: 1024px) {
+/* Narrow desktop and tablet: the two audit columns are the least
+   load-bearing, and both values remain in the View modal, so they collapse
+   before anything the administrator acts on. The width they release goes to
+   the email. The threshold is 1180 rather than 1024 because that is where
+   the remaining seven columns plus a readable email stop fitting — 1280
+   still carries all nine. */
+@media (max-width: 1180px) {
   .table-staff th:nth-child(7), .table-staff td:nth-child(7),
   .table-staff th:nth-child(8), .table-staff td:nth-child(8) { display: none; }
-  .table-staff th:nth-child(1), .table-staff td:nth-child(1) { width: 15%; }
-  .table-staff th:nth-child(2), .table-staff td:nth-child(2) { width: 18%; }
-  .table-staff th:nth-child(3), .table-staff td:nth-child(3) { width: 11%; }
+  .table-staff th:nth-child(1), .table-staff td:nth-child(1) { width: 96px;  }
+  .table-staff th:nth-child(3), .table-staff td:nth-child(3) { width: 68px;  }
+  .table-staff th:nth-child(4), .table-staff td:nth-child(4) { width: 76px;  }
+  .table-staff th:nth-child(5), .table-staff td:nth-child(5) { width: 92px;  }
+  .table-staff th:nth-child(6), .table-staff td:nth-child(6) { width: 112px; }
+  .table-staff th:nth-child(9), .table-staff td:nth-child(9) { width: 104px; }
+}
+
+/* Below ~1000px the content column is narrower than the sum of those
+   measured widths. px columns cannot shrink to fit, so the table would push
+   past its wrapper and the email column would be squeezed towards zero.
+   Percentages divide whatever width there actually is instead, so the table
+   still fits and the email still wraps in full. This band sits between the
+   desktop table and the ≤768px card layout; the required 1024px width is
+   above it and keeps the measured widths. */
+@media (max-width: 1000px) {
+  .table-staff th:nth-child(1), .table-staff td:nth-child(1) { width: 13%; }
+  .table-staff th:nth-child(2), .table-staff td:nth-child(2) { width: 27%; }
+  .table-staff th:nth-child(3), .table-staff td:nth-child(3) { width: 10%; }
   .table-staff th:nth-child(4), .table-staff td:nth-child(4) { width: 11%; }
-  .table-staff th:nth-child(5), .table-staff td:nth-child(5) { width: 14%; }
-  .table-staff th:nth-child(6), .table-staff td:nth-child(6) { width: 16%; }
-  .table-staff th:nth-child(9), .table-staff td:nth-child(9) { width: 15%; }
+  .table-staff th:nth-child(5), .table-staff td:nth-child(5) { width: 13%; }
+  .table-staff th:nth-child(6), .table-staff td:nth-child(6) { width: 15%; }
+  .table-staff th:nth-child(9), .table-staff td:nth-child(9) { width: 11%; }
+  /* Two buttons that refuse to wrap give the cell a min-content width wider
+     than its column, and that is what pushes the table past its wrapper down
+     here. Let them stack instead. */
+  .staff-actions { flex-wrap: wrap; justify-content: flex-end; }
+  /* Same problem one level down: a pill's longest word is its min-content
+     width, and at these column widths that is wider than the column. Letting
+     the word break keeps every character on screen — the alternative is the
+     table spilling out of a wrapper that clips it. */
+  .table-staff .badge,
+  .table-staff .division-badge,
+  .table-staff .audit-wh-badge {
+    white-space: normal; overflow-wrap: anywhere; min-width: 0;
+  }
+  .table-staff .division-badge-group { min-width: 0; }
 }
 
 /* ------------------------------------------------- Badges / chips ------- */

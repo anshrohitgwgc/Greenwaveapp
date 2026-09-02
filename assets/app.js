@@ -2965,7 +2965,7 @@
             '</div>' +
 
             '<div class="inv-1114-logo-wrap">' +
-              '<img src="assets/logo.png" alt="Greenwave Logo" class="inv-1114-logo-img">' +
+              '<img src="assets/logo.png?v=20260902_stafffix" alt="Greenwave Logo" class="inv-1114-logo-img">' +
               '<div class="inv-1114-logo-sub">greenwave recycling</div>' +
             '</div>' +
           '</div>' +
@@ -3091,7 +3091,7 @@
             '</div>' +
 
             '<div class="inv-1114-logo-wrap">' +
-              '<img src="assets/logo.png" alt="Greenwave Logo" class="inv-1114-logo-img">' +
+              '<img src="assets/logo.png?v=20260902_stafffix" alt="Greenwave Logo" class="inv-1114-logo-img">' +
               '<div class="inv-1114-logo-sub">greenwave recycling</div>' +
             '</div>' +
           '</div>' +

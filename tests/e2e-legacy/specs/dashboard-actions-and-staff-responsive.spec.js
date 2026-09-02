@@ -12,11 +12,60 @@ const { loginAs, goToView } = require('./helpers');
  */
 
 const VIEWPORTS = [
-  { name: '1440x900', width: 1440, height: 900 },
-  { name: '1280x800', width: 1280, height: 800 },
-  { name: '1024x768', width: 1024, height: 768 },
-  { name: '390x844',  width: 390,  height: 844 },
+  { name: '1920x1080', width: 1920, height: 1080 },
+  { name: '1440x900',  width: 1440, height: 900 },
+  { name: '1280x800',  width: 1280, height: 800 },
+  { name: '1024x768',  width: 1024, height: 768 },
+  { name: '768x1024',  width: 768,  height: 1024 },
+  { name: '390x844',   width: 390,  height: 844 },
 ];
+
+/** The widths at which Staff Management renders as a table, not as cards. */
+const DESKTOP_VIEWPORTS = VIEWPORTS.filter((v) => v.width > 768);
+
+/**
+ * Addresses long enough to have been ellipsised by the previous column
+ * budget. Written into already-rendered cells so the assertion does not
+ * depend on what the dev seed happens to contain.
+ */
+const LONG_EMAILS = [
+  'operations.manager@greenwaverecycling.com',
+  'warehouse.supervisor@greenwavehealthcare.com',
+  'warehouse.operations.supervisor@greenwave-recycling-holdings.com',
+];
+
+/** Replaces every rendered email with a long one and returns what was set. */
+async function useLongEmails(page) {
+  return page.evaluate((emails) => {
+    const cells = Array.from(document.querySelectorAll('#staffBody .staff-email'));
+    cells.forEach((el, i) => {
+      el.textContent = emails[i % emails.length];
+      el.setAttribute('title', emails[i % emails.length]);
+    });
+    return cells.length;
+  }, LONG_EMAILS);
+}
+
+/**
+ * An element is showing its whole value only if it is not scrolling its own
+ * content away in either axis. `textContent` alone proves nothing: an
+ * ellipsised cell still holds the full string in the DOM.
+ */
+async function emailVisibility(page) {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll('#staffBody .staff-email')).map((el) => {
+      const cs = getComputedStyle(el);
+      return {
+        text: el.textContent,
+        clippedX: el.scrollWidth - el.clientWidth,
+        clippedY: el.scrollHeight - el.clientHeight,
+        textOverflow: cs.textOverflow,
+        overflowX: cs.overflowX,
+        overflowY: cs.overflowY,
+      };
+    }),
+  );
+}
 
 /** Nothing may make the document wider than the viewport. */
 async function expectNoPageOverflow(page, width, context) {
@@ -200,6 +249,108 @@ test.describe('Staff Management table responsiveness', () => {
       wrap.scrollWidth,
       'a long email must not make the staff table scroll',
     ).toBeLessThanOrEqual(wrap.clientWidth + 2);
+  });
+
+  test('the full email is visible at every desktop width, never ellipsised', async ({ page }) => {
+    await loginAs(page, 'admin@greenwave.local');
+
+    for (const vp of DESKTOP_VIEWPORTS) {
+      await page.setViewportSize({ width: vp.width, height: vp.height });
+      await navigate(page, 'staff');
+      await page.waitForSelector('#staffBody .table', { timeout: 15000 });
+
+      const count = await useLongEmails(page);
+      expect(count, `no email cells rendered at ${vp.name}`).toBeGreaterThan(0);
+
+      const cells = await emailVisibility(page);
+      for (const cell of cells) {
+        // The address must not be cut off horizontally...
+        expect(
+          cell.clippedX,
+          `email "${cell.text}" is cut off horizontally at ${vp.name}`,
+        ).toBeLessThanOrEqual(1);
+        // ...nor vertically, which is how a wrapped value gets hidden instead.
+        expect(
+          cell.clippedY,
+          `email "${cell.text}" is cut off vertically at ${vp.name}`,
+        ).toBeLessThanOrEqual(1);
+        // And it must not be *hidden* rather than fitted: an ellipsis or a
+        // clipping overflow would conceal the problem instead of solving it.
+        expect(
+          cell.textOverflow,
+          `email is ellipsised at ${vp.name}`,
+        ).not.toBe('ellipsis');
+        expect(
+          [cell.overflowX, cell.overflowY],
+          `email cell hides its overflow at ${vp.name}`,
+        ).toEqual(['visible', 'visible']);
+      }
+
+      // Widening the email must not have been paid for by the page.
+      await expectNoPageOverflow(page, vp.width, `staff long emails ${vp.name}`);
+    }
+  });
+
+  test('no cell in the table truncates its own content at any desktop width', async ({ page }) => {
+    await loginAs(page, 'admin@greenwave.local');
+
+    for (const vp of DESKTOP_VIEWPORTS) {
+      await page.setViewportSize({ width: vp.width, height: vp.height });
+      await navigate(page, 'staff');
+      await page.waitForSelector('#staffBody .table', { timeout: 15000 });
+      await useLongEmails(page);
+
+      // Trading the email's truncation for another column's is not a fix, so
+      // assert on every visible cell rather than just the one that changed.
+      const truncated = await page.evaluate(() => {
+        const out = [];
+        document
+          .querySelectorAll('#staffBody thead th, #staffBody tbody td')
+          .forEach((cell) => {
+            if (getComputedStyle(cell).display === 'none') return;
+            for (const el of [cell, ...cell.querySelectorAll('*')]) {
+              const cs = getComputedStyle(el);
+              if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+              if (el.scrollWidth - el.clientWidth > 1) {
+                out.push({
+                  column: cell.getAttribute('data-label') || cell.textContent.trim(),
+                  text: (el.textContent || '').trim().slice(0, 40),
+                  by: el.scrollWidth - el.clientWidth,
+                });
+                break;
+              }
+            }
+          });
+        return out;
+      });
+
+      expect(
+        truncated,
+        `columns truncated at ${vp.name}: ${JSON.stringify(truncated)}`,
+      ).toEqual([]);
+    }
+  });
+
+  test('the mobile card still shows the whole email', async ({ page }) => {
+    await loginAs(page, 'admin@greenwave.local');
+
+    for (const vp of VIEWPORTS.filter((v) => v.width <= 768)) {
+      await page.setViewportSize({ width: vp.width, height: vp.height });
+      await navigate(page, 'staff');
+      await page.waitForSelector('#staffBody .table', { timeout: 15000 });
+      await useLongEmails(page);
+
+      const cells = await emailVisibility(page);
+      expect(cells.length, `no email cells at ${vp.name}`).toBeGreaterThan(0);
+      for (const cell of cells) {
+        expect(cell.clippedX, `mobile email clipped at ${vp.name}`).toBeLessThanOrEqual(1);
+        expect(cell.clippedY, `mobile email clipped at ${vp.name}`).toBeLessThanOrEqual(1);
+        expect(cell.textOverflow, `mobile email ellipsised at ${vp.name}`).not.toBe('ellipsis');
+        expect(cell.text).toContain('@');
+      }
+
+      await expectNoPageOverflow(page, vp.width, `staff mobile ${vp.name}`);
+    }
   });
 
   test('every staff row keeps its data reachable at mobile width', async ({ page }) => {
