@@ -131,7 +131,11 @@ test.describe('Division access — staff management', () => {
     expect(head).toContain('WAREHOUSE ACCESS');
 
     const gwRow = page.locator('#staffBody tr', { hasText: 'gw.only@greenwave.local' });
-    await expect(gwRow).toContainText('GreenWave Recycling');
+    // The chip is labelled compactly so nine columns fit without a horizontal
+    // scrollbar; the full division name is kept on the chip's title, so both
+    // the visible text and the accessible full name are asserted here.
+    await expect(gwRow.locator('.division-badge')).toHaveText(/GreenWave/);
+    await expect(gwRow.locator('.division-badge')).toHaveAttribute('title', 'GreenWave Recycling');
     await expect(gwRow).not.toContainText('Healthcare');
 
     const hcRow = page.locator('#staffBody tr', { hasText: 'hc.only@greenwave.local' });

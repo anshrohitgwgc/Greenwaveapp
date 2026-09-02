@@ -206,6 +206,10 @@
      is only honoured if the server still grants it.
      ---------------------------------------------------------------------- */
   var DIVISION_LABELS = { recycling: 'GreenWave Recycling', healthcare: 'Healthcare' };
+  /* The staff table gives division access its own narrow column. The full
+     label does not fit there, and truncating it mid-word ("GreenWave
+     Recyclin…") is worse than naming the division shortly and exactly. */
+  var DIVISION_LABELS_SHORT = { recycling: 'GreenWave', healthcare: 'Healthcare' };
   var myDivisions = [];
 
   function apiDivisionKey(ent) { return ent === 'healthcare' ? 'healthcare' : 'greenwave'; }
@@ -255,7 +259,7 @@
    * being left blank: an unassigned account is a real state an administrator
    * needs to notice and act on, not an empty cell.
    */
-  function divisionChips(divisions) {
+  function divisionChips(divisions, compact) {
     var list = (divisions || []).map(function (d) {
       return typeof d === 'string' ? d : entityFromApiKey(d.key);
     });
@@ -264,7 +268,9 @@
     }
     return '<span class="division-badge-group">' + list.map(function (ent) {
       var cls = ent === 'healthcare' ? 'division-badge healthcare' : 'division-badge';
-      return '<span class="' + cls + '"><span class="dot"></span>' + esc(divisionLabel(ent)) + '</span>';
+      var text = compact ? (DIVISION_LABELS_SHORT[ent] || divisionLabel(ent)) : divisionLabel(ent);
+      // The full division name stays available on hover even when compact.
+      return '<span class="' + cls + '" title="' + esc(divisionLabel(ent)) + '"><span class="dot"></span>' + esc(text) + '</span>';
     }).join('') + '</span>';
   }
 
@@ -3544,23 +3550,23 @@
         var lastLoginHtml = formatLastLogin(u.lastLoginAt);
 
         return '<tr data-user-id="' + esc(u.id) + '">' +
-          '<td data-label="User"><strong>' + esc(u.name || u.fullName) + '</strong></td>' +
-          '<td data-label="Email"><span class="mono" style="font-size:13px">' + esc(u.email) + '</span></td>' +
+          '<td data-label="User"><strong class="staff-name">' + esc(u.name || u.fullName) + '</strong></td>' +
+          '<td data-label="Email"><span class="mono staff-email" title="' + esc(u.email) + '">' + esc(u.email) + '</span></td>' +
           '<td data-label="Role"><span class="badge ' + (u.role === 'admin' ? 'badge-in' : (u.role === 'manager' ? 'badge-transit' : 'badge-received')) + '">' + esc(u.role) + '</span></td>' +
           '<td data-label="Status"><span class="badge ' + statusBadgeClass + '">' + statusLabel + '</span></td>' +
           // Division and warehouse are separate permissions and are shown as
           // separate columns on purpose — a user needs both to see anything.
-          '<td data-label="Division access">' + divisionChips(u.divisions) + '</td>' +
+          '<td data-label="Division access">' + divisionChips(u.divisions, true) + '</td>' +
           '<td data-label="Warehouse access"><div style="display:flex;flex-wrap:wrap;gap:4px">' + assignedWhNames + '</div></td>' +
           '<td data-label="Created" class="mono" style="font-size:12.5px">' + esc(createdDate) + '</td>' +
           '<td data-label="Last login" class="mono" style="font-size:12.5px">' + lastLoginHtml + '</td>' +
-          '<td><div style="display:flex;gap:6px;justify-content:flex-end">' +
+          '<td data-label="Actions" class="staff-actions-cell"><div class="staff-actions">' +
             '<button type="button" class="btn ghost btn-sm btn-view-user" data-user-id="' + esc(u.id) + '" title="View user details & permissions">View</button>' +
             '<button type="button" class="btn ghost btn-sm btn-edit-user" data-user-id="' + esc(u.id) + '" title="Edit user role, division and facility permissions">Edit</button>' +
           '</div></td></tr>';
       }).join('');
 
-      sBody.innerHTML = toolbarHtml + '<div class="card"><div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table class="table stack-mobile"><thead><tr>' +
+      sBody.innerHTML = toolbarHtml + '<div class="card"><div class="tablewrap tablewrap-fit"><table class="table table-staff stack-mobile"><thead><tr>' +
         '<th>User</th><th>Email</th><th>Role</th><th>Status</th><th>Division Access</th><th>Warehouse Access</th><th>Created</th><th>Last Login</th><th>Actions</th></tr></thead><tbody>' +
         (rowsHtml || '<tr><td colspan="9"><div class="empty"><div class="eico"><svg><use href="#i-users"></use></svg></div><h3>No matching staff accounts</h3><p>Try clearing the search or role filter, or create a new staff account.</p></div></td></tr>') +
         '</tbody></table></div></div>';

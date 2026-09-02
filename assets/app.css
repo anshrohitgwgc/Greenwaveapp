@@ -632,6 +632,109 @@ h4 { font-size: 14px; line-height: 20px; }
    let the table scroll rather than breaking them across lines. */
 .table td.mono { white-space: nowrap; }
 
+/* ------------------------------------------------- Staff table --------- */
+/* Nine columns have to sit inside the content width without a horizontal
+   scrollbar. `table-layout: fixed` plus a percentage budget makes the
+   columns divide the width they are given instead of being sized by their
+   longest cell, so a 60-character email can no longer widen the table (and
+   with it the page) beyond the viewport. Content is truncated only where a
+   full value stays reachable — the email keeps a `title`, and View/Edit open
+   the record itself. */
+.tablewrap-fit { overflow-x: visible; }
+.table-staff { table-layout: fixed; width: 100%; }
+
+/* The generous 24px gutter is what pushes nine columns over the edge; the
+   outer edges keep it, the inner ones tighten. */
+.table-staff th,
+.table-staff td { padding-left: 12px; padding-right: 12px; }
+.table-staff th:first-child,
+.table-staff td:first-child { padding-left: var(--gutter); }
+.table-staff th:last-child,
+.table-staff td:last-child { padding-right: var(--gutter); }
+
+.table-staff th:nth-child(1), .table-staff td:nth-child(1) { width: 12%; }  /* User */
+.table-staff th:nth-child(2), .table-staff td:nth-child(2) { width: 14%; }  /* Email */
+.table-staff th:nth-child(3), .table-staff td:nth-child(3) { width: 8%;  }  /* Role */
+.table-staff th:nth-child(4), .table-staff td:nth-child(4) { width: 8%;  }  /* Status */
+.table-staff th:nth-child(5), .table-staff td:nth-child(5) { width: 12%; }  /* Division */
+.table-staff th:nth-child(6), .table-staff td:nth-child(6) { width: 13%; }  /* Warehouse */
+.table-staff th:nth-child(7), .table-staff td:nth-child(7) { width: 10%; }  /* Created */
+.table-staff th:nth-child(8), .table-staff td:nth-child(8) { width: 9%;  }  /* Last login */
+.table-staff th:nth-child(9), .table-staff td:nth-child(9) { width: 14%; }  /* Actions */
+
+/* Status and role pills are set one step tighter here than elsewhere so the
+   whole word fits its column — a pill clipped to "MANAGE" is not a pill. */
+.table-staff .badge {
+  font-size: 10px; padding: 2px 7px; letter-spacing: 0.02em;
+}
+.table-staff .division-badge, .table-staff .audit-wh-badge { font-size: 10px; }
+.table-staff .division-badge { padding: 2px 8px; }
+
+/* Chip groups wrap inside their own column instead of running under the
+   next one. */
+.table-staff .division-badge-group { display: flex; flex-wrap: wrap; gap: 4px; }
+/* "No division access" is the one chip long enough to outgrow this column.
+   Let it wrap inside the cell instead of spilling under the next one — the
+   pill shape survives, and the wording stays intact. */
+.table-staff .division-badge {
+  max-width: 100%; min-width: 0;
+  white-space: normal; text-align: center; line-height: 1.35;
+}
+.table-staff .audit-wh-badge { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Every cell is a truncation context; without min-width:0 a long unbroken
+   token still establishes the column's minimum size. */
+.table-staff td { min-width: 0; vertical-align: middle; padding-top: 12px; padding-bottom: 12px; }
+.table-staff th { white-space: normal; }
+
+.staff-name {
+  display: block; min-width: 0;
+  overflow-wrap: anywhere; word-break: break-word;
+}
+.staff-email {
+  display: block; min-width: 0; max-width: 100%;
+  font-size: 12.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Dates are short enough to fit once the padding is tightened, but the
+   global `.table td.mono { white-space: nowrap }` would otherwise let them
+   spill out of a fixed column. */
+.table-staff td.mono { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.staff-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: nowrap; }
+.staff-actions .btn { padding: 4px 10px; min-height: 30px; font-size: 12.5px; }
+
+/* Tablet: buy the columns room by tightening spacing and type before any
+   column is given up. */
+@media (max-width: 1360px) {
+  .table-staff { font-size: 12.5px; }
+  .table-staff th, .table-staff td { padding-left: 8px; padding-right: 8px; }
+  .table-staff th:first-child, .table-staff td:first-child { padding-left: 16px; }
+  .table-staff th:last-child,  .table-staff td:last-child  { padding-right: 16px; }
+  .table-staff td { padding-top: 12px; padding-bottom: 12px; }
+  .staff-actions .btn { padding: 4px 8px; }
+  .table-staff .badge { font-size: 9.5px; padding: 2px 6px; letter-spacing: 0; }
+  .table-staff th:nth-child(2), .table-staff td:nth-child(2) { width: 13%; }
+  .table-staff th:nth-child(6), .table-staff td:nth-child(6) { width: 12%; }
+  .table-staff th:nth-child(7), .table-staff td:nth-child(7) { width: 11%; }
+  .table-staff th:nth-child(8), .table-staff td:nth-child(8) { width: 10%; }
+}
+
+/* Narrow tablet: the two audit columns are the least load-bearing, and both
+   values remain in the View modal, so they collapse before anything the
+   administrator acts on. */
+@media (max-width: 1024px) {
+  .table-staff th:nth-child(7), .table-staff td:nth-child(7),
+  .table-staff th:nth-child(8), .table-staff td:nth-child(8) { display: none; }
+  .table-staff th:nth-child(1), .table-staff td:nth-child(1) { width: 15%; }
+  .table-staff th:nth-child(2), .table-staff td:nth-child(2) { width: 18%; }
+  .table-staff th:nth-child(3), .table-staff td:nth-child(3) { width: 11%; }
+  .table-staff th:nth-child(4), .table-staff td:nth-child(4) { width: 11%; }
+  .table-staff th:nth-child(5), .table-staff td:nth-child(5) { width: 14%; }
+  .table-staff th:nth-child(6), .table-staff td:nth-child(6) { width: 16%; }
+  .table-staff th:nth-child(9), .table-staff td:nth-child(9) { width: 15%; }
+}
+
 /* ------------------------------------------------- Badges / chips ------- */
 .badge {
   display: inline-flex; align-items: center; gap: 5px;
@@ -1045,6 +1148,21 @@ h4 { font-size: 14px; line-height: 20px; }
     text-transform: uppercase; color: var(--muted);
   }
   .table.stack-mobile td:not([data-label]) { justify-content: flex-end; }
+
+  /* In card form every column has its own row, so the two audit columns the
+     tablet layout gave up come back, and the email no longer needs to be
+     clipped to a column width it no longer has. */
+  .table-staff { table-layout: auto; font-size: 13px; }
+  .table-staff th:nth-child(n), .table-staff td:nth-child(n) { width: auto; }
+  .table-staff td:nth-child(7), .table-staff td:nth-child(8) { display: flex; }
+  .table-staff th, .table-staff td { padding-left: 0; padding-right: 0; }
+  .table-staff td.mono { white-space: normal; overflow: visible; }
+  .staff-email {
+    white-space: normal; overflow: visible; text-overflow: clip;
+    overflow-wrap: anywhere; text-align: right;
+  }
+  .staff-actions { justify-content: flex-end; }
+  .staff-actions .btn { padding: 6px 14px; }
 }
 
 @media (max-width: 420px) {
