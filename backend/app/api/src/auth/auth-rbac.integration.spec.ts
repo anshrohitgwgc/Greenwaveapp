@@ -16,6 +16,7 @@ import { RolesModule } from '../roles/roles.module';
 import { User } from '../users/entities/user.entity';
 import { UsersModule } from '../users/users.module';
 import { UsersService } from '../users/users.service';
+import { UserDivision } from '../divisions/entities/user-division.entity';
 import { UserWarehouse } from '../warehouses/entities/user-warehouse.entity';
 import { Warehouse } from '../warehouses/entities/warehouse.entity';
 import { WarehousesModule } from '../warehouses/warehouses.module';
@@ -49,6 +50,7 @@ describe('Auth + RBAC (sqlite, no external infra)', () => {
             UserRole,
             Warehouse,
             UserWarehouse,
+            UserDivision,
           ],
           synchronize: true,
         }),

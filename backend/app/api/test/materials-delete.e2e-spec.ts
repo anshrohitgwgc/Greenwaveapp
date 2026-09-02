@@ -23,9 +23,11 @@ import { UserRole } from '../src/roles/entities/user-role.entity';
 import { RolesModule } from '../src/roles/roles.module';
 import { User } from '../src/users/entities/user.entity';
 import { UsersModule } from '../src/users/users.module';
+import { UserDivision } from '../src/divisions/entities/user-division.entity';
 import { UserWarehouse } from '../src/warehouses/entities/user-warehouse.entity';
 import { Warehouse } from '../src/warehouses/entities/warehouse.entity';
 import { WarehousesModule } from '../src/warehouses/warehouses.module';
+import { grantDivisions } from './fixtures/divisions-test.helper';
 
 /**
  * E2E acceptance for the safe Product/Material delete feature:
@@ -69,6 +71,7 @@ describe('E2E Acceptance: Safe Product Delete (DELETE /materials/:id)', () => {
             AuditEvent,
             Warehouse,
             UserWarehouse,
+            UserDivision,
             Material,
             Container,
             InventoryTransaction,
@@ -286,6 +289,14 @@ describe('E2E Acceptance: Safe Product Delete (DELETE /materials/:id)', () => {
         .send({ email, password: 'TestPass123!' });
       return res.body.access_token;
     };
+
+
+    // Hold division access constant: this suite asserts warehouse/role
+    // behaviour, and every seeded user predates division access control.
+    await grantDivisions(
+      dataSource,
+      (await dataSource.getRepository(User).find()).map((u) => u.id),
+    );
 
     adminToken = await login('admin@greenwave.test');
     managerToken = await login('manager@greenwave.test');

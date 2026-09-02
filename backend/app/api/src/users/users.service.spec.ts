@@ -4,6 +4,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { AuditService } from '../audit/audit.service';
 import { RolesService } from '../roles/roles.service';
 import { WarehousesService } from '../warehouses/warehouses.service';
+import { provideDivisionsService } from '../../test/fixtures/divisions-test.helper';
 import { User } from './entities/user.entity';
 import { UsersService } from './users.service';
 
@@ -46,6 +47,7 @@ describe('UsersService', () => {
             record: jest.fn().mockResolvedValue({}),
           },
         },
+        ...provideDivisionsService().providers,
       ],
     }).compile();
 

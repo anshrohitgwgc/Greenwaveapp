@@ -23,10 +23,12 @@ import { RolesModule } from '../src/roles/roles.module';
 import { StorageService } from '../src/storage/storage.service';
 import { User } from '../src/users/entities/user.entity';
 import { UsersModule } from '../src/users/users.module';
+import { UserDivision } from '../src/divisions/entities/user-division.entity';
 import { UserWarehouse } from '../src/warehouses/entities/user-warehouse.entity';
 import { Warehouse } from '../src/warehouses/entities/warehouse.entity';
 import { WarehousesModule } from '../src/warehouses/warehouses.module';
 import { createJpegWithGpsExif } from './fixtures/exif-jpeg';
+import { grantDivisions } from './fixtures/divisions-test.helper';
 
 /**
  * This suite deliberately does NOT mock StorageService — it uploads through
@@ -61,6 +63,7 @@ describe('E2E Security: Server-side EXIF/GPS stripping on photo upload', () => {
             AuditEvent,
             Warehouse,
             UserWarehouse,
+            UserDivision,
             PhotoAsset,
             Role,
             Permission,
@@ -140,6 +143,14 @@ describe('E2E Security: Server-side EXIF/GPS stripping on photo upload', () => {
         .send({ email, password: 'TestPass123!' });
       return res.body.access_token;
     };
+
+
+    // Hold division access constant: this suite asserts warehouse/role
+    // behaviour, and every seeded user predates division access control.
+    await grantDivisions(
+      dataSource,
+      (await dataSource.getRepository(User).find()).map((u) => u.id),
+    );
 
     staffToken = await login('photo-staff@greenwave.test');
     ontarioStaffToken = await login('photo-ontario-staff@greenwave.test');

@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 
 import { AuditService } from '../audit/audit.service';
 import { WarehousesService } from '../warehouses/warehouses.service';
+import { provideDivisionsService } from '../../test/fixtures/divisions-test.helper';
 import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 
@@ -20,6 +21,8 @@ describe('UsersController', () => {
             create: jest.fn(),
             update: jest.fn(),
             getUserWarehouses: jest.fn().mockResolvedValue([]),
+            getUserDivisions: jest.fn().mockResolvedValue([]),
+            assignUserDivisions: jest.fn().mockResolvedValue([]),
             getUserProfile: jest.fn(),
             assignUserWarehouses: jest.fn().mockResolvedValue([]),
           },
@@ -35,6 +38,7 @@ describe('UsersController', () => {
             getUserAuthorizedWarehouseIds: jest.fn().mockResolvedValue([]),
           },
         },
+        ...provideDivisionsService().providers,
       ],
     }).compile();
 

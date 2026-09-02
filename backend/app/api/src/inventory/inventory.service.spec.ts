@@ -14,6 +14,7 @@ import { Container } from './entities/container.entity';
 import { InventoryBalance } from './entities/inventory-balance.entity';
 import { InventoryTransaction } from './entities/inventory-transaction.entity';
 import { InventoryService } from './inventory.service';
+import { provideDivisionsService } from '../../test/fixtures/divisions-test.helper';
 
 describe('InventoryService', () => {
   let service: InventoryService;
@@ -51,6 +52,10 @@ describe('InventoryService', () => {
     email: 'staff@example.com',
     fullName: 'Staff',
     warehouseIds: ['w1'],
+    // Both divisions: these cases cover quantity/weight/unit-type rules, so
+    // division access must not be what makes them pass or fail. Cross-division
+    // denial is asserted separately.
+    divisions: ['greenwave', 'healthcare'],
   };
   const managerActor: AuthenticatedUser = {
     id: 2,
@@ -58,6 +63,7 @@ describe('InventoryService', () => {
     email: 'manager@example.com',
     fullName: 'Manager',
     warehouseIds: ['w1'],
+    divisions: ['greenwave', 'healthcare'],
   };
 
   beforeEach(async () => {
@@ -204,6 +210,10 @@ describe('InventoryService', () => {
         { provide: StorageService, useValue: storageService },
         { provide: AuditService, useValue: auditService },
         { provide: WarehousesService, useValue: warehousesService },
+        ...provideDivisionsService({
+          1: ['greenwave', 'healthcare'],
+          2: ['greenwave', 'healthcare'],
+        }).providers,
       ],
     }).compile();
 

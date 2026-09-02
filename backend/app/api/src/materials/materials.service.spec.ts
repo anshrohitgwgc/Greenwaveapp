@@ -6,6 +6,7 @@ import type { AuthenticatedUser } from '../common/decorators/current-user.decora
 import { Container } from '../inventory/entities/container.entity';
 import { InventoryTransaction } from '../inventory/entities/inventory-transaction.entity';
 import { WarehousesService } from '../warehouses/warehouses.service';
+import { provideDivisionsService } from '../../test/fixtures/divisions-test.helper';
 import { Material } from './entities/material.entity';
 import { MaterialsService } from './materials.service';
 
@@ -34,6 +35,10 @@ describe('MaterialsService — warehouse & division isolation', () => {
     email: 'staff@example.com',
     fullName: 'Staff',
     warehouseIds: ['maple-ridge'],
+    // Holds both divisions: these cases isolate *warehouse* behaviour, so
+    // division must not be the thing that fails them. Cross-division denial
+    // has its own dedicated cases below.
+    divisions: ['greenwave', 'healthcare'],
   };
 
   beforeEach(async () => {
@@ -80,6 +85,9 @@ describe('MaterialsService — warehouse & division isolation', () => {
         },
         { provide: getRepositoryToken(Container), useValue: containerRepo },
         { provide: WarehousesService, useValue: warehousesService },
+        ...provideDivisionsService({
+          1: ['greenwave', 'healthcare'],
+        }).providers,
       ],
     }).compile();
 
@@ -105,9 +113,58 @@ describe('MaterialsService — warehouse & division isolation', () => {
       division: 'healthcare',
     });
 
-    expect(qbAndWhere).toHaveBeenCalledWith('m.division = :division', {
-      division: 'healthcare',
-    });
+    // Division is now matched as a set, so a query for `greenwave` also
+    // matches the historical `recycling` storage value.
+    expect(qbAndWhere).toHaveBeenCalledWith(
+      'm.division IN (:...divisionValues)',
+      { divisionValues: ['healthcare'] },
+    );
+  });
+
+  it('restricts an unfiltered listing to the divisions the actor holds', async () => {
+    const greenwaveOnly: AuthenticatedUser = {
+      ...staffActor,
+      divisions: ['greenwave'],
+    };
+
+    await service.findAll(greenwaveOnly, { warehouseId: 'maple-ridge' });
+
+    expect(qbAndWhere).toHaveBeenCalledWith(
+      'm.division IN (:...divisionValues)',
+      { divisionValues: ['recycling', 'greenwave'] },
+    );
+  });
+
+  it('returns nothing at all for an actor with no division access', async () => {
+    const noDivisions: AuthenticatedUser = { ...staffActor, divisions: [] };
+
+    await expect(
+      service.findAll(noDivisions, { warehouseId: 'maple-ridge' }),
+    ).resolves.toEqual([]);
+  });
+
+  it('rejects a request for a division the actor does not hold (403)', async () => {
+    const greenwaveOnly: AuthenticatedUser = {
+      ...staffActor,
+      divisions: ['greenwave'],
+    };
+
+    await expect(
+      service.findAll(greenwaveOnly, { division: 'healthcare' }),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('blocks direct-UUID read of a Healthcare product by a GreenWave-only actor (403)', async () => {
+    const greenwaveOnly: AuthenticatedUser = {
+      ...staffActor,
+      divisions: ['greenwave'],
+    };
+
+    // materialRepo.findOne resolves a healthcare product; the warehouse check
+    // passes, so only the division boundary can stop this read.
+    await expect(service.findOne('mat-1', greenwaveOnly)).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 
   it('scopes results to global (warehouse-agnostic) or the requested warehouse only', async () => {

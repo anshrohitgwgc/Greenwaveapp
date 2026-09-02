@@ -21,9 +21,11 @@ import { RolesModule } from '../src/roles/roles.module';
 import { RedisService } from '../src/redis/redis.service';
 import { User } from '../src/users/entities/user.entity';
 import { UsersModule } from '../src/users/users.module';
+import { UserDivision } from '../src/divisions/entities/user-division.entity';
 import { UserWarehouse } from '../src/warehouses/entities/user-warehouse.entity';
 import { Warehouse } from '../src/warehouses/entities/warehouse.entity';
 import { WarehousesModule } from '../src/warehouses/warehouses.module';
+import { grantDivisions } from './fixtures/divisions-test.helper';
 
 /**
  * The Chat UI's real-time delivery depends on the browser's EventSource
@@ -52,6 +54,7 @@ describe('E2E Security: /chat/stream SSE authentication', () => {
             AuditEvent,
             Warehouse,
             UserWarehouse,
+            UserDivision,
             ChatMessage,
             Role,
             Permission,
@@ -99,6 +102,14 @@ describe('E2E Security: /chat/stream SSE authentication', () => {
       role: 'staff',
       status: 'active',
     });
+
+
+    // Hold division access constant: this suite asserts warehouse/role
+    // behaviour, and every seeded user predates division access control.
+    await grantDivisions(
+      dataSource,
+      (await dataSource.getRepository(User).find()).map((u) => u.id),
+    );
 
     const res = await request(app.getHttpServer())
       .post('/auth/login')

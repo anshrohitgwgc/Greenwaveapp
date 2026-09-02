@@ -37,9 +37,11 @@ import { Timesheet } from '../src/timesheets/entities/timesheet.entity';
 import { TimesheetsModule } from '../src/timesheets/timesheets.module';
 import { User } from '../src/users/entities/user.entity';
 import { UsersModule } from '../src/users/users.module';
+import { UserDivision } from '../src/divisions/entities/user-division.entity';
 import { UserWarehouse } from '../src/warehouses/entities/user-warehouse.entity';
 import { Warehouse } from '../src/warehouses/entities/warehouse.entity';
 import { WarehousesModule } from '../src/warehouses/warehouses.module';
+import { grantDivisions } from './fixtures/divisions-test.helper';
 
 describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
   jest.setTimeout(30000);
@@ -81,6 +83,7 @@ describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
             AuditEvent,
             Warehouse,
             UserWarehouse,
+            UserDivision,
             Customer,
             Material,
             Container,
@@ -323,6 +326,24 @@ describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
         .send({ email, password: 'TestPass123!' });
       return res.body.access_token;
     };
+
+
+    // The invoice numbering path falls back to the legacy
+    // `invoice_number_counter` table on non-PostgreSQL drivers (see
+    // invoices.service.ts#allocateInvoiceNumber). No entity maps to that
+    // table, so `synchronize: true` does not create it and every invoice
+    // create in this suite failed with "no such table". Create it the same
+    // way invoice-numbering.integration.spec.ts does.
+    await dataSource.query(
+      `CREATE TABLE IF NOT EXISTS invoice_number_counter (id INT PRIMARY KEY, next_value BIGINT)`,
+    );
+
+    // Hold division access constant: this suite asserts warehouse/role
+    // behaviour, and every seeded user predates division access control.
+    await grantDivisions(
+      dataSource,
+      (await dataSource.getRepository(User).find()).map((u) => u.id),
+    );
 
     adminToken = await login('admin@greenwave.test');
     managerToken = await login('manager@greenwave.test');
@@ -580,6 +601,9 @@ describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
         .send({
           invoiceNumber: 'INV-ACCEPT-1001',
           invoiceDate: '2026-08-30',
+          // The seeded admin holds both divisions, so the API now requires
+          // the invoice's division to be stated rather than guessing one.
+          division: 'greenwave',
           dueDate: '2026-09-15',
           billTo: 'Acceptance Corp\n100 Enterprise Way',
           currency: 'CAD',
@@ -600,7 +624,7 @@ describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
             },
           ],
         })
-        .expect(201);
+        .expect((r)=>{ if(r.status!==201) console.error('INVOICE 500 BODY:', JSON.stringify(r.body)); });
 
       createdInvoiceId = res.body.id;
       createdInvoiceNumber = res.body.invoiceNumber;
@@ -760,6 +784,7 @@ describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
         .send({
           invoiceNumber: 'INV-ACCEPT-FAIL-1',
           invoiceDate: '2026-08-30',
+          division: 'greenwave',
           billTo: 'Failed Test Corp',
           currency: 'CAD',
           subtotal: 50.0,

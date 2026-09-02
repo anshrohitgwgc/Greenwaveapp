@@ -33,6 +33,7 @@ import { TimesheetsModule } from '../timesheets/timesheets.module';
 import { User } from '../users/entities/user.entity';
 import { UsersModule } from '../users/users.module';
 import { UsersService } from '../users/users.service';
+import { UserDivision } from '../divisions/entities/user-division.entity';
 import { UserWarehouse } from '../warehouses/entities/user-warehouse.entity';
 import { Warehouse } from '../warehouses/entities/warehouse.entity';
 import { WarehousesModule } from '../warehouses/warehouses.module';
@@ -74,6 +75,7 @@ describe('Security: Authoritative Warehouse Access & Isolation Matrix (HTTP Inte
             UserRole,
             Warehouse,
             UserWarehouse,
+            UserDivision,
             Container,
             InventoryTransaction,
             InventoryBalance,
@@ -228,6 +230,9 @@ describe('Security: Authoritative Warehouse Access & Isolation Matrix (HTTP Inte
       email: 'global_admin@greenwave.test',
       password: passwordHash,
       role: 'admin',
+      // Full division access: this suite asserts warehouse isolation, so
+      // division access is held constant. Division isolation has its own suite.
+      divisions: ['greenwave', 'healthcare'],
     });
     const gaLogin = await request(app.getHttpServer())
       .post('/auth/login')
@@ -240,6 +245,9 @@ describe('Security: Authoritative Warehouse Access & Isolation Matrix (HTTP Inte
       email: 'cgy_admin@greenwave.test',
       password: passwordHash,
       role: 'admin',
+      // Full division access: this suite asserts warehouse isolation, so
+      // division access is held constant. Division isolation has its own suite.
+      divisions: ['greenwave', 'healthcare'],
       warehouseIds: [WAREHOUSE_CGY],
     });
     // Create a restricted admin token by mocking its permissions without warehouses:global_access
@@ -254,6 +262,9 @@ describe('Security: Authoritative Warehouse Access & Isolation Matrix (HTTP Inte
       email: 'manager@greenwave.test',
       password: passwordHash,
       role: 'manager',
+      // Full division access: this suite asserts warehouse isolation, so
+      // division access is held constant. Division isolation has its own suite.
+      divisions: ['greenwave', 'healthcare'],
       warehouseIds: [WAREHOUSE_CGY, WAREHOUSE_ON],
     });
     const mgrLogin = await request(app.getHttpServer())
@@ -267,6 +278,9 @@ describe('Security: Authoritative Warehouse Access & Isolation Matrix (HTTP Inte
       email: 'staff_cgy@greenwave.test',
       password: passwordHash,
       role: 'staff',
+      // Full division access: this suite asserts warehouse isolation, so
+      // division access is held constant. Division isolation has its own suite.
+      divisions: ['greenwave', 'healthcare'],
       warehouseIds: [WAREHOUSE_CGY],
     });
     const staffLogin = await request(app.getHttpServer())
@@ -280,6 +294,9 @@ describe('Security: Authoritative Warehouse Access & Isolation Matrix (HTTP Inte
       email: 'driver_mr@greenwave.test',
       password: passwordHash,
       role: 'driver',
+      // Full division access: this suite asserts warehouse isolation, so
+      // division access is held constant. Division isolation has its own suite.
+      divisions: ['greenwave', 'healthcare'],
       warehouseIds: [WAREHOUSE_MR],
     });
     const drvLogin = await request(app.getHttpServer())
@@ -293,6 +310,9 @@ describe('Security: Authoritative Warehouse Access & Isolation Matrix (HTTP Inte
       email: 'multi_wh@greenwave.test',
       password: passwordHash,
       role: 'staff',
+      // Full division access: this suite asserts warehouse isolation, so
+      // division access is held constant. Division isolation has its own suite.
+      divisions: ['greenwave', 'healthcare'],
       warehouseIds: [WAREHOUSE_CGY, WAREHOUSE_ON],
     });
     const multiLogin = await request(app.getHttpServer())
