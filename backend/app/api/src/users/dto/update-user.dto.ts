@@ -1,5 +1,11 @@
 import { PartialType, OmitType } from '@nestjs/mapped-types';
-import { IsArray, IsOptional, IsUUID } from 'class-validator';
+import {
+  ArrayUnique,
+  IsArray,
+  IsIn,
+  IsOptional,
+  IsUUID,
+} from 'class-validator';
 
 import { CreateUserDto } from './create-user.dto';
 
@@ -10,4 +16,10 @@ export class UpdateUserDto extends PartialType(
   @IsArray()
   @IsUUID('4', { each: true })
   warehouseIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(['greenwave', 'healthcare'], { each: true })
+  divisions?: string[];
 }

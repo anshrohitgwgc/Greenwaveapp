@@ -154,6 +154,15 @@ export class Invoice {
   @Column({ name: 'warehouse_id', type: 'uuid', nullable: true })
   warehouseId: string | null;
 
+  /**
+   * Business division this invoice belongs to. Storage value — `recycling`
+   * or `healthcare` — see src/divisions/divisions.constants.ts. Scoping only;
+   * it has no bearing on invoice numbering, which stays a single global
+   * PostgreSQL sequence (migration 016).
+   */
+  @Column({ type: 'varchar', length: 32, default: 'recycling' })
+  division: string;
+
   @Column({ name: 'created_by', type: 'int' })
   createdBy: number;
 

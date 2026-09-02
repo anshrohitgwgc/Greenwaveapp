@@ -9,6 +9,13 @@ export interface AuthenticatedUser {
   permissions?: string[];
   warehouseIds?: string[];
   hasGlobalAccess?: boolean;
+  /**
+   * Canonical division keys this user has been explicitly granted
+   * (`greenwave` / `healthcare`). Resolved server-side on every request by
+   * JwtStrategy — never read from the token body or the client. An empty
+   * array means no division-scoped data is readable at all.
+   */
+  divisions?: string[];
 }
 
 export const CurrentUser = createParamDecorator(

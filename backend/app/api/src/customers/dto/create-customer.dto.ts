@@ -1,6 +1,7 @@
 import { Transform } from 'class-transformer';
 import {
   IsEmail,
+  IsIn,
   IsObject,
   IsOptional,
   IsString,
@@ -47,4 +48,14 @@ export class CreateCustomerDto {
   @emptyStringToUndefined
   @IsUUID()
   warehouseId?: string;
+
+  /**
+   * Business division. Optional on the wire: a user who holds exactly one
+   * division does not have to restate it. It is never defaulted for a user
+   * who holds several — the service rejects that with a 400.
+   */
+  @IsOptional()
+  @emptyStringToUndefined
+  @IsIn(['greenwave', 'recycling', 'healthcare'])
+  division?: string;
 }

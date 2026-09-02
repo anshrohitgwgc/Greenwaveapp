@@ -32,6 +32,15 @@ export class Customer {
   @Column({ name: 'warehouse_id', type: 'uuid', nullable: true })
   warehouseId: string | null;
 
+  /**
+   * Business division this customer belongs to. Storage value — `recycling`
+   * or `healthcare` — see src/divisions/divisions.constants.ts. Non-null by
+   * migration 017 so a customer can never be implicitly visible to both
+   * divisions.
+   */
+  @Column({ type: 'varchar', length: 32, default: 'recycling' })
+  division: string;
+
   @Column({ name: 'created_by', type: 'int', nullable: true })
   createdBy: number | null;
 

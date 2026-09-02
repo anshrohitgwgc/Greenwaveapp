@@ -19,6 +19,9 @@ import type { AuthenticatedUser } from '../common/decorators/current-user.decora
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { AssignDivisionsDto } from '../divisions/dto/assign-divisions.dto';
+import { DIVISION_LABELS, Division } from '../divisions/divisions.constants';
+import { DivisionsService } from '../divisions/divisions.service';
 import { WarehousesService } from '../warehouses/warehouses.service';
 import { AssignWarehousesDto } from './dto/assign-warehouses.dto';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -52,7 +55,24 @@ export class UsersController {
     private readonly usersService: UsersService,
     private readonly auditService: AuditService,
     private readonly warehousesService: WarehousesService,
+    private readonly divisionsService: DivisionsService,
   ) {}
+
+  /**
+   * The divisions the acting admin is themselves allowed to hand out. An
+   * admin can never grant a division they do not hold — including to
+   * themselves — which is what stops a GreenWave-only admin from
+   * self-escalating into Healthcare.
+   */
+  private async assignableDivisions(
+    actor: AuthenticatedUser,
+  ): Promise<Division[]> {
+    return this.divisionsService.scopeDivisions(actor);
+  }
+
+  private divisionPayload(divisions: Division[]) {
+    return divisions.map((key) => ({ key, label: DIVISION_LABELS[key] }));
+  }
 
   @Post()
   @Roles('admin')
@@ -84,6 +104,18 @@ export class UsersController {
       }
     }
 
+    if (dto.divisions && dto.divisions.length > 0) {
+      const assignable = await this.assignableDivisions(actor);
+      const unauthorized = dto.divisions.filter(
+        (d) => !assignable.includes(d as Division),
+      );
+      if (unauthorized.length > 0) {
+        throw new ForbiddenException(
+          'Cannot assign a business division you are not authorized to manage',
+        );
+      }
+    }
+
     const user = await this.usersService.create(dto, actor.id);
     await this.auditService.record({
       actorUserId: actor.id,
@@ -91,9 +123,14 @@ export class UsersController {
       action: 'user.created',
       entityType: 'user',
       entityId: String(user.id),
-      summary: `${actor.email} created user ${user.email} (${user.role})`,
+      summary: `${actor.email} created user ${user.email} (${user.role}) with divisions [${(dto.divisions ?? []).join(', ') || 'none'}]`,
     });
-    return sanitize(user);
+    return {
+      ...sanitize(user),
+      divisions: this.divisionPayload(
+        await this.usersService.getUserDivisions(user.id),
+      ),
+    };
   }
 
   @Get()
@@ -111,6 +148,9 @@ export class UsersController {
           return {
             ...sanitize(u),
             warehouses,
+            divisions: this.divisionPayload(
+              await this.usersService.getUserDivisions(u.id),
+            ),
           };
         }),
       );
@@ -123,6 +163,9 @@ export class UsersController {
         return {
           ...sanitize(u),
           warehouses,
+          divisions: this.divisionPayload(
+            await this.usersService.getUserDivisions(u.id),
+          ),
         };
       }),
     );
@@ -142,6 +185,9 @@ export class UsersController {
         return {
           ...sanitize(u),
           warehouses,
+          divisions: this.divisionPayload(
+            await this.usersService.getUserDivisions(u.id),
+          ),
         };
       }),
     );
@@ -199,7 +245,18 @@ export class UsersController {
       }
     }
 
-    const user = await this.usersService.update(id, dto, actor.id);
+    // A staff member cannot grant themselves anything: this route is already
+    // @Roles('admin'), and an admin is further limited to the divisions they
+    // hold, so there is no path from "can edit a user" to "can widen division
+    // access beyond my own".
+    const assignable = await this.assignableDivisions(actor);
+
+    const user = await this.usersService.update(
+      id,
+      dto,
+      actor.id,
+      dto.divisions !== undefined ? assignable : undefined,
+    );
     if (!user) throw new NotFoundException('User not found');
     await this.auditService.record({
       actorUserId: actor.id,
@@ -207,9 +264,58 @@ export class UsersController {
       action: 'user.updated',
       entityType: 'user',
       entityId: String(user.id),
-      summary: `${actor.email} updated user ${user.email}`,
+      summary:
+        dto.divisions !== undefined
+          ? `${actor.email} updated user ${user.email}; division access -> [${dto.divisions.join(', ') || 'none'}]`
+          : `${actor.email} updated user ${user.email}`,
     });
-    return sanitize(user);
+    return {
+      ...sanitize(user),
+      divisions: this.divisionPayload(
+        await this.usersService.getUserDivisions(user.id),
+      ),
+    };
+  }
+
+  @Get(':id/divisions')
+  @Roles('admin', 'manager')
+  async getUserDivisionsRoute(@Param('id', ParseIntPipe) id: number) {
+    return this.divisionPayload(await this.usersService.getUserDivisions(id));
+  }
+
+  /**
+   * Replace a user's division access. Admin-only, and further constrained to
+   * the divisions the acting admin holds. Sending an empty array revokes all
+   * division access, which is a legitimate operation.
+   */
+  @Put(':id/divisions')
+  @Roles('admin')
+  async assignUserDivisions(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AssignDivisionsDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    const user = await this.usersService.findOne(id);
+    if (!user) throw new NotFoundException('User not found');
+
+    const assignable = await this.assignableDivisions(actor);
+    const updated = await this.usersService.assignUserDivisions(
+      id,
+      dto.divisions,
+      actor.id,
+      assignable,
+    );
+
+    await this.auditService.record({
+      actorUserId: actor.id,
+      actorRole: actor.role,
+      action: 'user.division_access_updated',
+      entityType: 'user',
+      entityId: String(user.id),
+      summary: `${actor.email} set division access for ${user.email} to [${dto.divisions.join(', ') || 'none'}]`,
+    });
+
+    return this.divisionPayload(updated);
   }
 
   @Get(':id/warehouses')

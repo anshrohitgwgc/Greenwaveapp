@@ -83,6 +83,15 @@ export class CreateInvoiceDto {
   @IsUUID()
   warehouseId?: string;
 
+  /**
+   * Business division. Optional on the wire — a user holding exactly one
+   * division does not restate it — but never defaulted for a user holding
+   * several; the service returns 400 in that case.
+   */
+  @IsOptional()
+  @IsIn(['greenwave', 'recycling', 'healthcare'])
+  division?: string;
+
   @IsOptional()
   @IsIn(['draft', 'final', 'paid'])
   status?: string;

@@ -10,6 +10,11 @@ import { FindOptionsWhere, In, Repository } from 'typeorm';
 
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import {
+  DIVISION_STORAGE_WRITE_VALUE,
+  normalizeDivision,
+} from '../divisions/divisions.constants';
+import { DivisionsService } from '../divisions/divisions.service';
 
 import { Material } from '../materials/entities/material.entity';
 import { PhotoAsset } from '../photos/entities/photo-asset.entity';
@@ -55,6 +60,7 @@ export class InventoryService {
     private readonly storageService: StorageService,
     private readonly auditService: AuditService,
     private readonly warehousesService: WarehousesService,
+    private readonly divisionsService: DivisionsService,
   ) {}
 
   private validateDivisionAndUnitType(
@@ -62,8 +68,17 @@ export class InventoryService {
     unitType?: string,
     hasSizes = false,
   ) {
-    const div = division
-      ? division.toLowerCase()
+    // Normalise first so the canonical `greenwave` key and the legacy
+    // `recycling` storage value are both accepted, then keep working in the
+    // storage vocabulary the rest of this method (and the columns) use.
+    const normalized = division ? normalizeDivision(division) : null;
+    if (division && !normalized) {
+      throw new BadRequestException(
+        'division must be either greenwave (recycling) or healthcare',
+      );
+    }
+    const div = normalized
+      ? DIVISION_STORAGE_WRITE_VALUE[normalized]
       : hasSizes || unitType === 'box'
         ? 'healthcare'
         : 'recycling';
@@ -152,8 +167,13 @@ export class InventoryService {
       dto.weightValue,
       dto.weightUnit,
     );
+    // `division` here has already been resolved by validateDivisionAndUnitType
+    // (which may have inferred it from unitType). Authorize the resolved
+    // value, not the raw input, so an inferred division cannot bypass the
+    // check.
+    await this.divisionsService.assertStoredDivisionAccess(actor, division);
 
-    if (dto.division === 'recycling' && hasSizes) {
+    if (normalizeDivision(dto.division) === 'greenwave' && hasSizes) {
       throw new BadRequestException(
         'Recycling division handles pallets only and does not use size breakdown (XL/L/M/S)',
       );
@@ -227,11 +247,10 @@ export class InventoryService {
       qb.andWhere('c.warehouseId IN (:...authorizedIds)', { authorizedIds });
     }
 
-    if (division) {
-      qb.andWhere('c.division = :division', {
-        division: division.toLowerCase(),
-      });
-    }
+    const divisionValues =
+      await this.divisionsService.scopeDivisionStorageValues(actor, division);
+    if (divisionValues.length === 0) return [];
+    qb.andWhere('c.division IN (:...divisionValues)', { divisionValues });
 
     if (search && search.trim()) {
       const q = `%${search.trim()}%`;
@@ -262,7 +281,9 @@ export class InventoryService {
       dto.weightUnit,
     );
 
-    if (dto.division === 'healthcare') {
+    await this.divisionsService.assertStoredDivisionAccess(actor, division);
+
+    if (normalizeDivision(dto.division) === 'healthcare') {
       if (weightValue !== null || weightUnit !== null) {
         throw new BadRequestException(
           'Healthcare division handles boxes only and does not use weight (kg/lb)',
@@ -270,7 +291,7 @@ export class InventoryService {
       }
     }
 
-    if (dto.division === 'recycling' && hasSizes) {
+    if (normalizeDivision(dto.division) === 'greenwave' && hasSizes) {
       throw new BadRequestException(
         'Recycling division handles pallets only and does not use size breakdown (XL/L/M/S)',
       );
@@ -396,6 +417,9 @@ export class InventoryService {
     }
 
     await this.warehousesService.assertWarehouseAccess(actor, tx.warehouseId);
+    // Direct-by-UUID lookup must clear the division boundary too, otherwise
+    // knowing a Healthcare transaction id would be enough to read it.
+    await this.divisionsService.assertStoredDivisionAccess(actor, tx.division);
 
     const [warehouse, material, creator, container] = await Promise.all([
       this.warehouseRepository.findOne({ where: { id: tx.warehouseId } }),
@@ -524,11 +548,13 @@ export class InventoryService {
       qb.andWhere('tx.warehouseId IN (:...authorizedIds)', { authorizedIds });
     }
 
-    if (filters?.division) {
-      qb.andWhere('tx.division = :division', {
-        division: filters.division.toLowerCase(),
-      });
-    }
+    const divisionValues =
+      await this.divisionsService.scopeDivisionStorageValues(
+        actor,
+        filters?.division,
+      );
+    if (divisionValues.length === 0) return [];
+    qb.andWhere('tx.division IN (:...divisionValues)', { divisionValues });
     if (filters?.materialId) {
       qb.andWhere('tx.materialId = :materialId', {
         materialId: filters.materialId,
@@ -573,12 +599,22 @@ export class InventoryService {
     division?: string,
   ) {
     const where: FindOptionsWhere<InventoryBalance> = {};
-    if (division) {
-      where.division = division.toLowerCase();
-    }
 
+    // Warehouse authorization is asserted first so an unauthorized facility
+    // still returns 403 rather than being masked by an empty division scope.
     if (warehouseId) {
       await this.warehousesService.assertWarehouseAccess(actor, warehouseId);
+    }
+
+    // warehouse + division together: the balances view is grouped by both, so
+    // scoping both here is what keeps e.g. "Calgary + Healthcare" invisible to
+    // a Calgary GreenWave-only user.
+    const divisionValues =
+      await this.divisionsService.scopeDivisionStorageValues(actor, division);
+    if (divisionValues.length === 0) return [];
+    where.division = In(divisionValues);
+
+    if (warehouseId) {
       where.warehouseId = warehouseId;
       return this.balanceRepository.find({ where });
     }
@@ -602,9 +638,19 @@ export class InventoryService {
     return this.balanceRepository.find({ where });
   }
 
-  async findContainer(id: string) {
+  async findContainer(id: string, actor?: AuthenticatedUser) {
     const container = await this.containerRepository.findOne({ where: { id } });
     if (!container) throw new NotFoundException('Container not found');
+    if (actor) {
+      await this.warehousesService.assertWarehouseAccess(
+        actor,
+        container.warehouseId,
+      );
+      await this.divisionsService.assertStoredDivisionAccess(
+        actor,
+        container.division,
+      );
+    }
     return container;
   }
 }

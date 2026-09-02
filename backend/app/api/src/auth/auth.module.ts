@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 
+import { DivisionsModule } from '../divisions/divisions.module';
 import { RedisModule } from '../redis/redis.module';
 import { RolesModule } from '../roles/roles.module';
 import { UsersModule } from '../users/users.module';
@@ -17,6 +18,7 @@ import { LoginRateLimitGuard } from './login-rate-limit.guard';
     UsersModule,
     RolesModule,
     WarehousesModule,
+    DivisionsModule,
     RedisModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
 

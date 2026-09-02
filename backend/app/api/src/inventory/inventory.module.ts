@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+import { DivisionsModule } from '../divisions/divisions.module';
 import { Material } from '../materials/entities/material.entity';
 import { PhotoAsset } from '../photos/entities/photo-asset.entity';
 import { StorageModule } from '../storage/storage.module';
@@ -26,6 +27,7 @@ import { InventoryService } from './inventory.service';
     ]),
     StorageModule,
     WarehousesModule,
+    DivisionsModule,
   ],
   controllers: [InventoryController],
   providers: [InventoryService],

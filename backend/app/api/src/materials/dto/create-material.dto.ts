@@ -28,7 +28,9 @@ export class CreateMaterialDto {
   @IsString()
   description?: string;
 
-  @IsIn(['recycling', 'healthcare'])
+  // Accepts the canonical `greenwave` and the legacy `recycling` alias;
+  // the service normalises before persisting. See divisions.constants.ts.
+  @IsIn(['greenwave', 'recycling', 'healthcare'])
   division: string;
 
   @IsOptional()

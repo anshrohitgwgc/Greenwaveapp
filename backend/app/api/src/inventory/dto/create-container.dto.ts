@@ -88,10 +88,10 @@ export class CreateContainerDto {
   unitType?: 'pallet' | 'box';
 
   @IsOptional()
-  @IsIn(['recycling', 'healthcare'], {
-    message: 'division must be either recycling or healthcare',
+  @IsIn(['greenwave', 'recycling', 'healthcare'], {
+    message: 'division must be either greenwave (recycling) or healthcare',
   })
-  division?: 'recycling' | 'healthcare';
+  division?: 'greenwave' | 'recycling' | 'healthcare';
 
   @IsOptional()
   @IsNumber({}, { message: 'weightValue must be a number' })

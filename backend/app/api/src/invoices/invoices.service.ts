@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
 import { DataSource, QueryRunner, Repository } from 'typeorm';
@@ -6,6 +11,12 @@ import { DataSource, QueryRunner, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { roundCurrency } from '../common/rounding';
+import { Customer } from '../customers/entities/customer.entity';
+import {
+  DIVISION_GREENWAVE,
+  normalizeDivision,
+} from '../divisions/divisions.constants';
+import { DivisionsService } from '../divisions/divisions.service';
 import { WarehousesService } from '../warehouses/warehouses.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { InvoiceItemDto } from './dto/invoice-item.dto';
@@ -96,6 +107,9 @@ export class InvoicesService {
     private readonly dataSource: DataSource,
     private readonly auditService: AuditService,
     private readonly warehousesService: WarehousesService,
+    private readonly divisionsService: DivisionsService,
+    @InjectRepository(Customer)
+    private readonly customerRepository: Repository<Customer>,
   ) {}
 
   /**
@@ -206,6 +220,13 @@ export class InvoicesService {
       );
     }
 
+    // Resolve and authorize the division *before* opening the transaction, so
+    // a rejected request never reaches allocateInvoiceNumber and therefore
+    // never burns a number from the sequence.
+    const division = await this.resolveCreateDivision(actor, dto.division);
+    const divisionStorage = this.divisionsService.storageValueFor(division);
+    await this.assertCustomerInDivision(dto.customerId, divisionStorage);
+
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -252,6 +273,7 @@ export class InvoicesService {
         paymentProvider: null,
         paymentReference: null,
         warehouseId: dto.warehouseId ?? null,
+        division: divisionStorage,
         createdBy: actor.id,
         updatedBy: actor.id,
       });
@@ -293,6 +315,10 @@ export class InvoicesService {
 
   async duplicate(id: string, actor: AuthenticatedUser): Promise<Invoice> {
     const source = await this.findOneInternal(id);
+    await this.divisionsService.assertStoredDivisionAccess(
+      actor,
+      source.division,
+    );
     if (source.warehouseId) {
       await this.warehousesService.assertWarehouseAccess(
         actor,
@@ -365,6 +391,27 @@ export class InvoicesService {
       );
     }
 
+    // Must hold the invoice's current division, and the target one if it is
+    // being moved. Re-pointing the invoice at a customer is checked against
+    // the division the invoice will end up in, closing the
+    // invoice -> customer cross-division read.
+    await this.divisionsService.assertStoredDivisionAccess(
+      actor,
+      existing.division,
+    );
+    let divisionStorage = existing.division;
+    if (dto.division !== undefined) {
+      const target = await this.divisionsService.assertDivisionAccess(
+        actor,
+        dto.division,
+      );
+      if (target)
+        divisionStorage = this.divisionsService.storageValueFor(target);
+    }
+    if (dto.customerId !== undefined) {
+      await this.assertCustomerInDivision(dto.customerId, divisionStorage);
+    }
+
     const items =
       dto.items ??
       existing.items.map((item) => ({
@@ -411,6 +458,7 @@ export class InvoicesService {
       currency: dto.currency ?? existing.currency,
       paymentStatus: dto.paymentStatus ?? existing.paymentStatus,
       warehouseId: dto.warehouseId ?? existing.warehouseId,
+      division: divisionStorage,
       updatedBy: actor.id,
     });
 
@@ -433,6 +481,7 @@ export class InvoicesService {
       customerId?: string;
       warehouseId?: string;
       status?: string;
+      division?: string;
     },
   ) {
     if (filters.warehouseId) {
@@ -442,9 +491,17 @@ export class InvoicesService {
       );
     }
 
+    const divisionValues =
+      await this.divisionsService.scopeDivisionStorageValues(
+        actor,
+        filters.division,
+      );
+    if (divisionValues.length === 0) return [];
+
     const qb = this.invoiceRepository
       .createQueryBuilder('inv')
       .leftJoinAndSelect('inv.items', 'items')
+      .andWhere('inv.division IN (:...divisionValues)', { divisionValues })
       .orderBy('inv.createdAt', 'DESC');
 
     if (filters.customerId) {
@@ -495,7 +552,62 @@ export class InvoicesService {
         invoice.warehouseId,
       );
     }
+    await this.divisionsService.assertStoredDivisionAccess(
+      actor,
+      invoice.division,
+    );
     return invoice;
+  }
+
+  /**
+   * A customer may only be billed by an invoice in the same division. Without
+   * this an authorized GreenWave user could attach a Healthcare customer to a
+   * GreenWave invoice and read that customer's billing details back out of
+   * the invoice payload.
+   */
+  private async assertCustomerInDivision(
+    customerId: string | null | undefined,
+    divisionStorage: string,
+  ): Promise<void> {
+    if (!customerId) return;
+    const customer = await this.customerRepository.findOne({
+      where: { id: customerId },
+    });
+    if (!customer) throw new NotFoundException('Customer not found');
+
+    const customerDivision =
+      normalizeDivision(customer.division) ?? DIVISION_GREENWAVE;
+    const invoiceDivision =
+      normalizeDivision(divisionStorage) ?? DIVISION_GREENWAVE;
+
+    if (customerDivision !== invoiceDivision) {
+      throw new ForbiddenException(
+        'This customer belongs to a different business division',
+      );
+    }
+  }
+
+  private async resolveCreateDivision(
+    actor: AuthenticatedUser,
+    requested?: string,
+  ) {
+    if (requested !== undefined && requested !== null && requested !== '') {
+      return (await this.divisionsService.assertDivisionAccess(
+        actor,
+        requested,
+      ))!;
+    }
+
+    const held = await this.divisionsService.scopeDivisions(actor);
+    if (held.length === 1) return held[0];
+    if (held.length === 0) {
+      throw new ForbiddenException(
+        'You are not authorized to access any business division',
+      );
+    }
+    throw new BadRequestException(
+      'division is required: your account has access to more than one business division',
+    );
   }
 
   private async findOneInternal(id: string): Promise<Invoice> {

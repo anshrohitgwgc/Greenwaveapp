@@ -43,11 +43,13 @@ export class InvoicesController {
     @Query('customerId') customerId?: string,
     @Query('warehouseId') warehouseId?: string,
     @Query('status') status?: string,
+    @Query('division') division?: string,
   ) {
     return this.invoicesService.findAll(actor, {
       customerId,
       warehouseId,
       status,
+      division,
     });
   }
 

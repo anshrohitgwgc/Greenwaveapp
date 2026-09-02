@@ -8,6 +8,7 @@ import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { ChatModule } from './chat/chat.module';
 import { CustomersModule } from './customers/customers.module';
+import { DivisionsModule } from './divisions/divisions.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { MaterialsModule } from './materials/materials.module';
@@ -66,6 +67,7 @@ import { WarehousesModule } from './warehouses/warehouses.module';
     PickupsModule,
 
     WarehousesModule,
+    DivisionsModule,
     CustomersModule,
     MaterialsModule,
     InventoryModule,

@@ -8,6 +8,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { Repository } from 'typeorm';
 
+import { DIVISION_LABELS, Division } from '../divisions/divisions.constants';
+import { DivisionsService } from '../divisions/divisions.service';
 import { RolesService } from '../roles/roles.service';
 import { WarehousesService } from '../warehouses/warehouses.service';
 import { User } from './entities/user.entity';
@@ -28,6 +30,7 @@ export class UsersService {
     private rolesService: RolesService,
     @Inject(forwardRef(() => WarehousesService))
     private warehousesService: WarehousesService,
+    private readonly divisionsService: DivisionsService,
     private readonly auditService: AuditService,
   ) {}
 
@@ -39,6 +42,7 @@ export class UsersService {
       role?: string;
       status?: string;
       warehouseIds?: string[];
+      divisions?: string[];
     },
     creatorId?: number,
   ): Promise<User> {
@@ -68,6 +72,17 @@ export class UsersService {
         saved.id,
         userData.warehouseIds,
         creatorId,
+      );
+    }
+
+    // Division access is only ever created from an explicit list. Omitting
+    // `divisions` leaves the account with none, which is the point: a new
+    // staff member sees no division-scoped data until an admin grants one.
+    if (userData.divisions && userData.divisions.length > 0) {
+      await this.divisionsService.assignUserDivisions(
+        saved.id,
+        userData.divisions,
+        creatorId ?? null,
       );
     }
 
@@ -126,8 +141,10 @@ export class UsersService {
     id: number,
     updates: Partial<Pick<User, 'fullName' | 'email' | 'role' | 'status'>> & {
       warehouseIds?: string[];
+      divisions?: string[];
     },
     actorId?: number,
+    allowedDivisionsForActor?: Division[],
   ): Promise<User | null> {
     const patch: Partial<User> = {};
     if (updates.fullName !== undefined) patch.fullName = updates.fullName;
@@ -158,6 +175,24 @@ export class UsersService {
       });
     }
 
+    if (updates.divisions !== undefined) {
+      await this.divisionsService.assignUserDivisions(
+        id,
+        updates.divisions,
+        actorId ?? null,
+        allowedDivisionsForActor,
+      );
+      await this.auditService.record({
+        actorUserId: actorId ?? null,
+        actorRole: null,
+        action: 'user.division_access_updated',
+        entityType: 'user',
+        entityId: id.toString(),
+        warehouseId: null,
+        summary: `Division access updated for user #${id} -> [${updates.divisions.join(', ') || 'none'}]`,
+      });
+    }
+
     return this.findOne(id);
   }
 
@@ -174,6 +209,7 @@ export class UsersService {
       user.role,
       permissions,
     );
+    const divisions = await this.divisionsService.getUserDivisions(user.id);
 
     return {
       id: user.id,
@@ -183,6 +219,10 @@ export class UsersService {
       status: user.status ?? 'active',
       permissions,
       warehouses,
+      divisions: divisions.map((key) => ({
+        key,
+        label: DIVISION_LABELS[key],
+      })),
       hasGlobalAccess,
       lastLoginAt: user.lastLoginAt ?? null,
       createdAt: user.createdAt,
@@ -191,6 +231,24 @@ export class UsersService {
 
   async getUserWarehouses(userId: number) {
     return this.warehousesService.getUserWarehouseAccess(userId);
+  }
+
+  async getUserDivisions(userId: number) {
+    return this.divisionsService.getUserDivisions(userId);
+  }
+
+  async assignUserDivisions(
+    userId: number,
+    divisions: string[],
+    actorId: number | null,
+    allowedForActor?: Division[],
+  ) {
+    return this.divisionsService.assignUserDivisions(
+      userId,
+      divisions,
+      actorId,
+      allowedForActor,
+    );
   }
 
   async assignUserWarehouses(

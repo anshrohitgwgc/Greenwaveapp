@@ -4,6 +4,7 @@ import { PassportStrategy } from '@nestjs/passport';
 import type { Request } from 'express';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 
+import { DivisionsService } from '../divisions/divisions.service';
 import { RolesService } from '../roles/roles.service';
 import { UsersService } from '../users/users.service';
 import { WarehousesService } from '../warehouses/warehouses.service';
@@ -21,6 +22,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private readonly usersService: UsersService,
     private readonly rolesService: RolesService,
     private readonly warehousesService: WarehousesService,
+    private readonly divisionsService: DivisionsService,
   ) {
     super({
       // The `/chat/stream` SSE endpoint is consumed via the browser
@@ -58,6 +60,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         user.role,
         permissions,
       );
+    // Division grants are read fresh here for the same reason the role is:
+    // revoking a division takes effect on the next request, not whenever the
+    // token happens to expire.
+    const divisions = await this.divisionsService.getUserDivisions(user.id);
 
     return {
       id: user.id,
@@ -67,6 +73,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       permissions,
       warehouseIds,
       hasGlobalAccess,
+      divisions,
     };
   }
 }

@@ -51,8 +51,9 @@ export class CustomersController {
   findAll(
     @CurrentUser() actor: AuthenticatedUser,
     @Query('warehouseId') warehouseId?: string,
+    @Query('division') division?: string,
   ) {
-    return this.customersService.findAll(actor, warehouseId);
+    return this.customersService.findAll(actor, warehouseId, division);
   }
 
   @Get(':id')

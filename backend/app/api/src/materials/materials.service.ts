@@ -8,6 +8,7 @@ import { randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
 
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { DivisionsService } from '../divisions/divisions.service';
 import { Container } from '../inventory/entities/container.entity';
 import { InventoryTransaction } from '../inventory/entities/inventory-transaction.entity';
 import { WarehousesService } from '../warehouses/warehouses.service';
@@ -31,15 +32,24 @@ export class MaterialsService {
     @InjectRepository(Container)
     private readonly containerRepository: Repository<Container>,
     private readonly warehousesService: WarehousesService,
+    private readonly divisionsService: DivisionsService,
   ) {}
 
   async create(dto: CreateMaterialDto, actor: AuthenticatedUser) {
     await this.warehousesService.assertWarehouseAccess(actor, dto.warehouseId);
 
+    // A product is created *into* a division, so the division must be stated
+    // and the actor must hold it. There is no default: creating without a
+    // division would otherwise silently mint a GreenWave product, which is
+    // exactly the implicit-recycling behaviour this feature removes.
+    const division = this.divisionsService.requireValidDivision(dto.division);
+    await this.divisionsService.assertDivisionAccess(actor, division);
+
     const material = this.materialRepository.create({
       id: randomUUID(),
       unit: 'kg',
       ...dto,
+      division: this.divisionsService.storageValueFor(division),
       defaultPrice: dto.defaultPrice != null ? String(dto.defaultPrice) : null,
     });
     return this.materialRepository.save(material);
@@ -58,11 +68,16 @@ export class MaterialsService {
       qb.andWhere('m.active = true');
     }
 
-    if (division) {
-      qb.andWhere('m.division = :division', {
-        division: division.toLowerCase(),
-      });
+    // Division scope is resolved server-side from the actor's grants. A
+    // caller asking for a division they do not hold gets a 403 from
+    // scopeDivisionStorageValues; a caller asking for nothing gets exactly
+    // the divisions they do hold — never the whole catalogue.
+    const divisionValues =
+      await this.divisionsService.scopeDivisionStorageValues(actor, division);
+    if (divisionValues.length === 0) {
+      return [];
     }
+    qb.andWhere('m.division IN (:...divisionValues)', { divisionValues });
 
     if (warehouseId) {
       const resolvedWarehouseId =
@@ -107,14 +122,18 @@ export class MaterialsService {
 
   // Single-record lookup - same warehouse-scoping rule as findAll: a material
   // with no warehouseId is global (shared) and readable by anyone, otherwise
-  // the actor must be authorized for the material's warehouse. There is no
-  // separate division-level permission in this app; division is a data
-  // attribute, not an authorization boundary.
+  // the actor must be authorized for the material's warehouse. Division is
+  // now an authorization boundary too, checked against the *stored* row so
+  // knowing a Healthcare product's UUID is not enough to read it.
   async findOne(id: string, actor: AuthenticatedUser) {
     const material = await this.findMaterialOrFail(id);
     await this.warehousesService.assertWarehouseAccess(
       actor,
       material.warehouseId,
+    );
+    await this.divisionsService.assertStoredDivisionAccess(
+      actor,
+      material.division,
     );
     return material;
   }
@@ -136,8 +155,27 @@ export class MaterialsService {
       );
     }
 
+    // Same two-sided check for division: the actor must hold the product's
+    // current division *and* whatever division they are moving it into, so a
+    // product cannot be walked across the boundary one edit at a time.
+    await this.divisionsService.assertStoredDivisionAccess(
+      actor,
+      existing.division,
+    );
+    let divisionPatch: string | undefined;
+    if (dto.division !== undefined) {
+      const target = await this.divisionsService.assertDivisionAccess(
+        actor,
+        dto.division,
+      );
+      divisionPatch = target
+        ? this.divisionsService.storageValueFor(target)
+        : undefined;
+    }
+
     await this.materialRepository.update(id, {
       ...dto,
+      ...(divisionPatch !== undefined ? { division: divisionPatch } : {}),
       defaultPrice:
         dto.defaultPrice != null ? String(dto.defaultPrice) : undefined,
     });
@@ -154,10 +192,14 @@ export class MaterialsService {
     const existing = await this.findMaterialOrFail(id);
 
     // Same IDOR guard as findOne/update — a caller must be authorized for
-    // the product's warehouse, not just hold the admin role.
+    // the product's warehouse and its division, not just hold the admin role.
     await this.warehousesService.assertWarehouseAccess(
       actor,
       existing.warehouseId,
+    );
+    await this.divisionsService.assertStoredDivisionAccess(
+      actor,
+      existing.division,
     );
 
     const [inventoryReferenceCount, containerReferenceCount] =

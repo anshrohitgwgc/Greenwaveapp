@@ -1,4 +1,5 @@
 import {
+  ArrayUnique,
   IsArray,
   IsEmail,
   IsIn,
@@ -46,4 +47,15 @@ export class CreateUserDto {
   @IsArray()
   @IsUUID('4', { each: true })
   warehouseIds?: string[];
+
+  /**
+   * Business divisions to grant. Omitted or empty means **no division
+   * access** — the deliberate default for every new account. There is no
+   * implicit GreenWave grant.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsIn(['greenwave', 'healthcare'], { each: true })
+  divisions?: string[];
 }
