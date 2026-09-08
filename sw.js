@@ -1,15 +1,15 @@
 /* Offline cache for Greenwave Ops */
-var CACHE = 'greenwave-v21';
+var CACHE = 'greenwave-v22';
 var FILES = [
   '/',
   '/index.html',
-  '/manifest.webmanifest?v=20260907_purchaseorders',
-  '/assets/app.css?v=20260907_purchaseorders',
-  '/assets/api.js?v=20260907_purchaseorders',
-  '/assets/app.js?v=20260907_purchaseorders',
-  '/assets/store.js?v=20260907_purchaseorders',
-  '/assets/photos.js?v=20260907_purchaseorders',
-  '/assets/logo.png?v=20260907_purchaseorders',
+  '/manifest.webmanifest?v=20260908_invoiceredesign',
+  '/assets/app.css?v=20260908_invoiceredesign',
+  '/assets/api.js?v=20260908_invoiceredesign',
+  '/assets/app.js?v=20260908_invoiceredesign',
+  '/assets/store.js?v=20260908_invoiceredesign',
+  '/assets/photos.js?v=20260908_invoiceredesign',
+  '/assets/logo.png?v=20260908_invoiceredesign',
   '/assets/icon-192.png',
   '/assets/icon-512.png'
 ];
