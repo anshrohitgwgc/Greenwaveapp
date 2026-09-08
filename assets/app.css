@@ -1392,20 +1392,272 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
    ========================================================================== */
 
 .invoice-doc-container {
-  max-width: 860px;
-  margin: 0 auto 40px auto;
+  display: flex;
+  justify-content: center;
+  padding: 24px 16px;
+  background: var(--bg, #f1f5f9);
+  min-height: 100%;
 }
 
 .invoice-page-1114 {
+  width: 210mm;
+  min-height: 297mm;
+  box-sizing: border-box;
   background: #ffffff;
-  border: 1px solid #D8E0DC;
-  border-radius: 8px;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.05);
-  padding: 40px 48px;
-  position: relative;
   color: #222222;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  line-height: 1.45;
+  padding: 12mm 14mm;
+  position: relative;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
+}
+
+.invoice-page-1114.inv-editor-page {
+  padding: 24px 28px;
+}
+
+/* Header */
+.inv-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 22px;
+}
+
+.inv-header-left {
+  flex: 1;
+}
+
+.inv-title {
+  font-size: 22pt;
+  font-weight: 800;
+  color: #79bd58;
+  letter-spacing: 0.5px;
+  margin: 0 0 10px 0;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.inv-co-grid {
+  display: flex;
+  gap: 36px;
+  font-size: 9pt;
+  line-height: 1.4;
+  color: #222222;
+}
+
+.inv-co-name {
+  font-weight: 700;
+  color: #111111;
+}
+
+.inv-co-sub {
+  color: #666666;
+  margin-top: 4px;
+  font-size: 8.5pt;
+}
+
+.inv-logo-wrap {
+  flex-shrink: 0;
+  margin-left: 20px;
+}
+
+.inv-logo-img {
+  width: 200px;
+  height: auto;
+  display: block;
+}
+
+/* Tinted Info Box */
+.inv-tint-box {
+  background: #f4faf2;
+  padding: 16px 20px;
+  margin-bottom: 22px;
+  font-size: 9pt;
+  line-height: 1.4;
+  border-radius: 4px;
+}
+
+.inv-tint-row {
+  display: flex;
+  justify-content: space-between;
+}
+
+.inv-tint-col {
+  width: 48%;
+}
+
+.inv-tint-lbl {
+  font-weight: 700;
+  color: #222222;
+  margin-bottom: 5px;
+}
+
+.inv-tint-divider {
+  border-top: 1px dashed #d4d7dc;
+  margin: 14px 0 14px 0;
+}
+
+.inv-detail-row {
+  display: flex;
+  margin-bottom: 3px;
+}
+
+.inv-detail-k {
+  width: 90px;
+  color: #222222;
+}
+
+.inv-detail-v {
+  font-weight: 500;
+  color: #111111;
+}
+
+/* Line Items Table */
+.inv-table-wrap {
+  margin-bottom: 24px;
+}
+
+.inv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 8.5pt;
+}
+
+.inv-table th {
+  text-align: left;
+  font-size: 8.5pt;
+  font-weight: 600;
+  color: #222222;
+  padding: 8px 6px;
+  border-bottom: 1px solid #222222;
+  vertical-align: top;
+  line-height: 1.25;
+}
+
+.inv-table td {
+  padding: 10px 6px;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: top;
+  color: #222222;
+}
+
+.inv-table th.num, .inv-table td.num {
+  text-align: right;
+}
+
+/* Bottom Area: Ways to Pay & Totals */
+.inv-bottom-area {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-top: 8px;
+}
+
+.inv-pay-col {
+  flex: 1;
+}
+
+.inv-pay-title {
+  font-size: 11pt;
+  font-weight: 700;
+  color: #79bd58;
+  margin-bottom: 10px;
+}
+
+.inv-pay-icons {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 22px;
+}
+
+.inv-pay-icon {
+  height: 19px;
+  width: auto;
+  display: block;
+}
+
+.inv-view-pay-btn {
+  display: inline-block;
+  background: #79bd58;
+  color: #ffffff !important;
+  font-size: 10pt;
+  font-weight: 600;
+  padding: 10px 32px;
+  border-radius: 9999px;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(121, 189, 88, 0.2);
+}
+
+.inv-view-pay-btn:hover {
+  background: #6aad4b;
+}
+
+.inv-totals-col {
+  width: 250px;
+  font-size: 9pt;
+}
+
+.inv-tot-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  color: #222222;
+}
+
+.inv-tot-divider {
+  border-top: 1px solid #222222;
+  margin: 8px 0;
+}
+
+.inv-total-due {
+  font-size: 13pt;
+  font-weight: 800;
+  color: #111111;
+  padding-top: 4px;
+}
+
+/* Screen responsive adjustments for Invoice Document */
+@media screen and (max-width: 850px) {
+  .invoice-page-1114 {
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: auto !important;
+    padding: 16px 14px !important;
+  }
+  .inv-header {
+    flex-direction: column !important;
+    gap: 16px !important;
+  }
+  .inv-co-grid {
+    flex-direction: column !important;
+    gap: 12px !important;
+  }
+  .inv-logo-wrap {
+    margin-left: 0 !important;
+    align-self: flex-start !important;
+  }
+  .inv-tint-row {
+    flex-direction: column !important;
+    gap: 12px !important;
+  }
+  .inv-tint-col {
+    width: 100% !important;
+  }
+  .inv-table-wrap {
+    overflow-x: auto !important;
+  }
+  .inv-bottom-area {
+    flex-direction: column !important;
+    gap: 20px !important;
+  }
+  .inv-totals-col {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
 }
 
 /* Header Grid */
@@ -1919,34 +2171,43 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
   .invoice-doc-container {
     max-width: 100% !important;
     margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
   }
   .invoice-page-1114 {
+    width: 210mm !important;
+    min-height: 297mm !important;
     box-shadow: none !important;
     border: none !important;
     border-radius: 0 !important;
-    padding: 0 !important;
+    padding: 12mm 14mm !important;
+    background: #ffffff !important;
     page-break-after: avoid !important;
     break-after: avoid !important;
+    margin: 0 !important;
   }
-  /* No form chrome should ever reach paper/PDF, even if printed while the
-     record is still open in edit mode. */
-  .invoice-page-1114 input,
-  .invoice-page-1114 textarea {
-    border: none !important;
-    outline: none !important;
-    background: transparent !important;
-    resize: none !important;
-    padding: 0 !important;
-    box-shadow: none !important;
+  body.printing-invoice .inv-editor-form {
+    display: none !important;
   }
-  .invoice-page-1114 table input {
-    padding: 4px 2px !important;
+  body.printing-invoice .inv-print-document {
+    display: block !important;
   }
-  .invoice-doc-container, .invoice-page-1114 { break-inside: avoid; }
-  .inv-1114-table-wrap { break-inside: avoid; }
+  .inv-table thead, .inv-1114-table thead {
+    display: table-header-group;
+  }
+  .inv-table tr, .inv-1114-table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .inv-header, .inv-1114-header,
+  .inv-tint-box, .inv-1114-banner,
+  .inv-bottom-area, .inv-1114-bottom-grid {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
   @page {
-    margin: 10mm 15mm;
-    size: letter portrait;
+    size: A4 portrait;
+    margin: 0;
   }
 }
 
@@ -2503,32 +2764,61 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
 .po-letterhead {
   display: flex;
   align-items: flex-start;
-  gap: 16px;
+  gap: 20px;
   padding-bottom: 14px;
 }
 
 .po-logo {
-  width: 62px;
+  width: 165px;
+  max-width: 175px;
   height: auto;
   flex: none;
+  object-fit: contain;
+}
+
+.po-letterhead-text {
+  flex: 1;
+  min-width: 0;
 }
 
 .po-co-name {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 700;
   color: var(--po-navy);
   letter-spacing: 0.2px;
+  margin-bottom: 3px;
 }
 
 .po-co-line {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--po-ink);
+  line-height: 1.45;
+}
+
+.po-co-contact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.po-co-tel {
+  white-space: nowrap;
+}
+
+.po-co-email {
+  white-space: nowrap;
+}
+
+.po-co-dot {
+  color: var(--po-muted);
 }
 
 /* ---- Title ---- */
-/* 16pt, navy, left-aligned — the reference document's own treatment. */
+/* Navy corporate heading, left-aligned — matching PURCHASE.docx. */
 .po-title {
-  margin: 12px 0 16px;
+  margin: 12px 0 14px;
   font-size: 22px;
   font-weight: 700;
   letter-spacing: 0.6px;
@@ -2540,17 +2830,19 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
 /* ---- Bordered header box (PO # / dates | currency) ---- */
 .po-infobox {
   display: grid;
-  grid-template-columns: 1.6fr 1fr;
-  gap: 16px;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 12px;
   border: 1.5px solid var(--po-navy);
-  padding: 14px 18px;
-  margin-bottom: 20px;
+  padding: 8px 14px;
+  margin-bottom: 14px;
+  height: auto;
+  box-sizing: border-box;
 }
 
 .po-infobox-col {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -2570,7 +2862,7 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
   color: var(--po-navy);
   font-size: 12px;
   flex: none;
-  min-width: 92px;
+  min-width: 88px;
 }
 
 .po-v {
@@ -2583,20 +2875,19 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
 .po-section-bar {
   background: var(--po-navy);
   color: #ffffff;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.8px;
-  padding: 6px 12px;
-  margin-bottom: 10px;
-  /* The filled bar is a defining feature of the document, so it must survive
-     the browser's default "don't print backgrounds" behaviour. */
+  padding: 5px 12px;
+  margin-bottom: 8px;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
 
 .po-supplier {
-  margin-bottom: 20px;
-  font-size: 11.5px;
+  margin-bottom: 16px;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .po-supplier-name {
@@ -2630,14 +2921,14 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
   font-size: 11px;
 }
 
-.po-table th:nth-child(1), .po-table td:nth-child(1) { width: 7.8%; }
-.po-table th:nth-child(2), .po-table td:nth-child(2) { width: 9.4%; }
-.po-table th:nth-child(3), .po-table td:nth-child(3) { width: 17.1%; }
-.po-table th:nth-child(4), .po-table td:nth-child(4) { width: 10.5%; }
-.po-table th:nth-child(5), .po-table td:nth-child(5) { width: 11.2%; }
-.po-table th:nth-child(6), .po-table td:nth-child(6) { width: 7.8%; }
-.po-table th:nth-child(7), .po-table td:nth-child(7) { width: 19.0%; }
-.po-table th:nth-child(8), .po-table td:nth-child(8) { width: 17.2%; }
+.po-table th:nth-child(1), .po-table td:nth-child(1) { width: 8%; }
+.po-table th:nth-child(2), .po-table td:nth-child(2) { width: 9%; }
+.po-table th:nth-child(3), .po-table td:nth-child(3) { width: 24%; }
+.po-table th:nth-child(4), .po-table td:nth-child(4) { width: 9%; }
+.po-table th:nth-child(5), .po-table td:nth-child(5) { width: 11%; }
+.po-table th:nth-child(6), .po-table td:nth-child(6) { width: 7%; }
+.po-table th:nth-child(7), .po-table td:nth-child(7) { width: 16%; }
+.po-table th:nth-child(8), .po-table td:nth-child(8) { width: 16%; }
 
 .po-table thead th {
   background: var(--po-navy);
@@ -2645,26 +2936,22 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
   font-weight: 700;
   font-size: 10.5px;
   text-align: left;
-  padding: 9px 7px;
+  padding: 8px 6px;
   border: 0;
   vertical-align: middle;
-  /* The navy header is the document's defining feature; it must survive the
-     browser's default "don't print backgrounds" behaviour. */
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
 
 .po-table tbody td {
   border: 1px solid var(--po-rule);
-  padding: 8px 7px;
+  padding: 7px 6px;
   vertical-align: middle;
-  /* Long descriptions wrap inside the cell instead of forcing the table wide
-     or clipping — a PO line can be a full resin specification. */
   overflow-wrap: anywhere;
 }
 
 .po-table .po-c { text-align: center; }
-.po-table .po-r { text-align: right; }
+.po-table .po-r { text-align: right; font-variant-numeric: tabular-nums; }
 .po-table thead .po-c { text-align: center; }
 
 /* ---- Notes ---- */
@@ -2681,12 +2968,12 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
   align-items: flex-end;
   justify-content: space-between;
   gap: 24px;
-  margin-top: 46px;
+  margin-top: 36px;
 }
 
 .po-foot-date {
-  font-size: 11px;
-  color: var(--po-muted);
+  font-size: 11.5px;
+  color: var(--po-ink);
   white-space: nowrap;
 }
 
@@ -2698,13 +2985,21 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
   white-space: nowrap;
 }
 
+.po-doc-footer {
+  text-align: center;
+  margin-top: 36px;
+  font-size: 11px;
+  color: #64748b;
+  letter-spacing: 0.2px;
+}
+
 /* --------------------------------------------------------------------------
    Editor workspace — editor on the left, live document preview on the right
    -------------------------------------------------------------------------- */
 
 .po-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 420px);
   gap: 24px;
   align-items: start;
 }
@@ -2735,13 +3030,14 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
    editor having to give up half the screen to it. */
 .po-preview-pane .po-page {
   font-size: 11px;
-  padding: 26px 28px 30px;
+  padding: 24px 26px 28px;
 }
-.po-preview-pane .po-title { font-size: 21px; }
+.po-preview-pane .po-title { font-size: 20px; }
 .po-preview-pane .po-table { font-size: 10px; }
 .po-preview-pane .po-table thead th { font-size: 9.5px; padding: 7px 5px; }
 .po-preview-pane .po-table tbody td { padding: 6px 5px; }
-.po-preview-pane .po-foot { margin-top: 30px; }
+.po-preview-pane .po-foot { margin-top: 24px; }
+.po-preview-pane .po-doc-footer { margin-top: 24px; }
 
 .po-card { padding: 20px 22px; }
 
@@ -2803,20 +3099,42 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
 }
 
 /* ---- Line item table in the editor ---- */
-.po-items-table { table-layout: auto; }
-.po-items-table th { white-space: nowrap; }
-.po-items-table td { padding: 6px 8px; vertical-align: middle; }
+.po-items-table {
+  table-layout: fixed;
+  width: 100%;
+}
+.po-items-table th {
+  white-space: normal;
+  line-height: 1.15;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--muted);
+  padding: 6px 4px;
+}
+.po-items-table th.num { text-align: right; }
+.po-items-table td { padding: 5px 3px; vertical-align: middle; }
+
+.po-items-table th:nth-child(1), .po-items-table td:nth-child(1) { width: 8.5%; }
+.po-items-table th:nth-child(2), .po-items-table td:nth-child(2) { width: 8.5%; }
+.po-items-table th:nth-child(3), .po-items-table td:nth-child(3) { width: 27%; }
+.po-items-table th:nth-child(4), .po-items-table td:nth-child(4) { width: 8.5%; }
+.po-items-table th:nth-child(5), .po-items-table td:nth-child(5) { width: 11%; }
+.po-items-table th:nth-child(6), .po-items-table td:nth-child(6) { width: 6.5%; }
+.po-items-table th:nth-child(7), .po-items-table td:nth-child(7) { width: 12%; }
+.po-items-table th:nth-child(8), .po-items-table td:nth-child(8) { width: 12%; }
+.po-items-table th:nth-child(9), .po-items-table td:nth-child(9) { width: 6%; }
 
 .po-in {
   width: 100%;
-  min-width: 62px;
-  padding: 7px 9px;
+  min-width: 0;
+  padding: 5px 6px;
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--ink);
   background: var(--panel);
   border: 1px solid var(--line-2);
   border-radius: var(--r);
+  box-sizing: border-box;
 }
 .po-in:hover { border-color: var(--line-2); }
 .po-in:focus {
@@ -2824,37 +3142,47 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
   border-color: var(--acc);
   box-shadow: 0 0 0 3px var(--acc-ring);
 }
-.po-in.num { text-align: right; }
+.po-in.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 
-.po-items-table td { padding: 6px 5px; }
-.po-items-table .po-f-desc { min-width: 150px; }
-.po-items-table .po-f-qty,
-.po-items-table .po-f-price { min-width: 84px; }
-.po-items-table .po-f-code,
-.po-items-table .po-f-resin,
-.po-items-table .po-f-color,
-.po-items-table .po-f-unit { min-width: 68px; }
-
-/* A scrollable region needs to look scrollable. */
-.po-items-wrap { scrollbar-width: thin; }
+.po-items-wrap {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
 .po-items-hint {
   margin: 8px 0 0;
   font-size: 11.5px;
   color: var(--muted);
 }
 
-.po-line-amount { white-space: nowrap; font-weight: 600; }
+.po-line-amount {
+  text-align: right;
+  white-space: nowrap;
+  font-weight: 600;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 4px;
+}
 
 .po-line-actions {
   white-space: nowrap;
   display: flex;
-  gap: 2px;
+  gap: 1px;
   align-items: center;
+  justify-content: center;
 }
 .po-line-actions .iconbtn {
-  font-size: 10px;
+  font-size: 8px;
   line-height: 1;
-  min-width: 28px;
+  min-width: 18px;
+  width: 18px;
+  height: 22px;
+  padding: 2px;
 }
 
 /* ---- Summary ---- */
@@ -2932,8 +3260,6 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
    Responsive
    -------------------------------------------------------------------------- */
 
-/* Below this the two panes stop being readable side by side, so the preview
-   moves under the editor rather than being squeezed. */
 @media (max-width: 1280px) {
   .po-workspace { grid-template-columns: minmax(0, 1fr); }
   .po-preview-pane { position: static; }
@@ -2945,45 +3271,41 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
 }
 
 @media (max-width: 768px) {
-  .po-page { padding: 22px 18px 26px; }
-  .po-title { font-size: 20px; letter-spacing: 1px; }
-  .po-infobox { grid-template-columns: 1fr; gap: 10px; padding: 12px 14px; }
-  .po-letterhead { gap: 12px; }
-  .po-logo { width: 48px; }
-  .po-foot { flex-direction: column; align-items: flex-start; gap: 14px; margin-top: 28px; }
+  .po-page { padding: 20px 16px 24px; }
+  .po-title { font-size: 19px; letter-spacing: 0.5px; }
+  .po-infobox { grid-template-columns: 1fr; gap: 8px; padding: 10px 12px; }
+  .po-letterhead { gap: 12px; flex-direction: column; align-items: flex-start; }
+  .po-logo { width: 130px; max-width: 140px; }
+  .po-foot { flex-direction: column; align-items: flex-start; gap: 12px; margin-top: 24px; }
   .po-grid-2, .po-grid-4 { grid-template-columns: minmax(0, 1fr); }
 
-  /* The line-item table becomes one card per line; each input keeps its
-     column name from the `data-label` the renderer emits. */
-  /* In card form each field is on its own row, so there is nothing to scroll
-     sideways and the hint would be actively misleading. */
+  /* Mobile card layout for line items */
   .po-items-hint { display: none; }
   .po-items-table.stack-mobile td { padding: 8px 0; }
   .po-items-table.stack-mobile .po-in { max-width: 60%; }
   .po-items-table.stack-mobile .po-line-actions { justify-content: flex-end; width: 100%; }
   .po-items-table.stack-mobile td.po-line-actions::before { content: "Actions"; }
 
-  /* The document itself stays desktop-proportioned and scrolls horizontally
-     rather than reflowing into something that no longer matches the print
-     output the admin is about to produce. */
   .po-table-wrap { -webkit-overflow-scrolling: touch; }
-  .po-table { min-width: 620px; }
+  .po-table { min-width: 580px; }
 }
 
 /* --------------------------------------------------------------------------
-   Print — the PDF.
-
-   The browser renders `.po-page` itself, so the output is real selectable,
-   vector text at the printer's resolution. Everything that is application
-   chrome (navigation, the editor form, the preview label) is removed, and the
-   document is promoted to the full page.
+   Print & Controlled PDF Generation — Strictly A4 Portrait.
    -------------------------------------------------------------------------- */
+@page po-page {
+  size: A4 portrait;
+  margin: 0;
+}
+
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
   .po-workspace {
     display: block !important;
   }
-  /* Only the document prints. In the split editor that means the preview
-     pane; in the read-only view it is the only thing on screen anyway. */
   .po-edit-pane,
   .po-preview-label {
     display: none !important;
@@ -2998,15 +3320,20 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
     margin: 0 !important;
   }
   .po-page {
+    page: po-page;
+    width: 210mm !important;
+    min-height: 297mm !important;
+    box-sizing: border-box !important;
     border: none !important;
     border-radius: 0 !important;
     box-shadow: none !important;
-    padding: 0 !important;
+    padding: 12mm 14mm !important;
     font-size: 10.5pt;
   }
-  /* The preview's reduced type is a screen affordance; on paper the document
-     returns to its true proportions. */
-  .po-preview-pane .po-page { font-size: 10.5pt; padding: 0 !important; }
+  .po-preview-pane .po-page {
+    font-size: 10.5pt;
+    padding: 12mm 14mm !important;
+  }
   .po-preview-pane .po-title { font-size: 20pt; }
   .po-preview-pane .po-table { font-size: 8.5pt; }
   .po-preview-pane .po-table thead th { font-size: 8pt; padding: 7px 6px; }
@@ -3016,12 +3343,10 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
   .po-table { font-size: 8.5pt; min-width: 0 !important; }
   .po-table-wrap { overflow: visible !important; }
 
-  /* A long order may legitimately run to several pages. Repeat the navy
-     header on each one and never split a line across the fold. */
+  /* Repeat table header on multi-page documents, avoid splitting rows */
   .po-table thead { display: table-header-group; }
   .po-table tr { break-inside: avoid; page-break-inside: avoid; }
   .po-letterhead, .po-infobox, .po-supplier { break-inside: avoid; }
   .po-foot { break-inside: avoid; margin-top: 32px; }
-
-  @page { margin: 12mm 14mm; size: letter portrait; }
+  .po-doc-footer { break-inside: avoid; margin-top: 32px; font-size: 9pt; }
 }

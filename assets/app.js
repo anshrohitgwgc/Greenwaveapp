@@ -2518,25 +2518,36 @@
   }
 
   function printInvoiceDocument() {
+    if (!draft) return;
+    if (!editorViewMode && typeof syncInvoiceDraftFromForm === 'function') {
+      syncInvoiceDraftFromForm();
+    }
     var previousTitle = document.title;
     var restored = false;
+    var mql = null;
+    var invStyle = null;
+
     function restore() {
       if (restored) return;
       restored = true;
       document.title = previousTitle;
+      document.body.classList.remove('printing-invoice');
+      if (invStyle && invStyle.parentNode) invStyle.parentNode.removeChild(invStyle);
       window.removeEventListener('afterprint', restore);
-      if (mql && mql.removeListener) mql.removeListener(onMqlChange); 
+      if (mql && mql.removeListener) mql.removeListener(onMqlChange);
     }
-
-    // The title must already be in place when the print dialog is created,
-    // because that is the moment the browser snapshots the filename.
-    document.title = printDocumentName(draft);
-
-    // Restore as soon as the dialog closes. afterprint is the reliable
-    // signal in Chrome/Edge/Firefox; the matchMedia fallback covers Safari,
-    // which historically did not fire afterprint.
-    var mql = null;
     function onMqlChange(e) { if (!e.matches) restore(); }
+
+    document.title = printDocumentName(draft);
+    document.body.classList.add('printing-invoice');
+
+    try {
+      invStyle = document.createElement('style');
+      invStyle.id = 'invPrintPageRule';
+      invStyle.textContent = '@page { size: A4 portrait !important; margin: 0 !important; }';
+      document.head.appendChild(invStyle);
+    } catch (e) { /* ignore */ }
+
     window.addEventListener('afterprint', restore);
     try {
       mql = window.matchMedia('print');
@@ -2544,11 +2555,38 @@
     } catch (e) { /* matchMedia('print') unsupported -- afterprint covers us */ }
 
     window.print();
-
-    // Last-resort safety net so the tab is never left renamed if neither
-    // signal arrives. Long enough that it cannot win the race against the
-    // dialog snapshotting the filename.
     setTimeout(restore, 60000);
+  }
+
+  function downloadInvoicePdf() {
+    if (!draft) return;
+    if (!editorViewMode && typeof syncInvoiceDraftFromForm === 'function') {
+      syncInvoiceDraftFromForm();
+    }
+    var num = draft.invoiceNumber ? String(draft.invoiceNumber).replace(/[^A-Za-z0-9._-]/g, '') : 'Draft';
+    var filename = 'Invoice-' + num + '.pdf';
+    toast('Generating clean A4 PDF...', 'info');
+
+    Api.renderInvoicePdf({
+      html: invoiceDocumentHtml(draft),
+      invoiceNumber: num
+    }).then(function (blob) {
+      var url = window.URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () {
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      }, 1000);
+      toast('Downloaded ' + filename, 'success');
+    }).catch(function (err) {
+      console.error('Download Invoice PDF error:', err);
+      toast('Failed to generate PDF: ' + (err.message || 'Unknown error'), 'error');
+    });
   }
 
   function newDraft() {
@@ -2913,6 +2951,27 @@
     var edPrint = $('#edPrint');
     if (edPrint) edPrint.onclick = function () { printInvoiceDocument(); };
 
+    var edPdf = $('#edPdf');
+    if (edPdf) edPdf.onclick = function () { downloadInvoicePdf(); };
+
+    var edPreview = $('#edPreview');
+    if (edPreview) {
+      if (editorViewMode) {
+        edPreview.innerHTML = '<svg><use href="#i-edit"></use></svg>Edit Form';
+        edPreview.onclick = function () {
+          editorViewMode = false;
+          renderEditor();
+        };
+      } else {
+        edPreview.innerHTML = '<svg><use href="#i-doc"></use></svg>Preview';
+        edPreview.onclick = function () {
+          syncInvoiceDraftFromForm();
+          editorViewMode = true;
+          renderEditor();
+        };
+      }
+    }
+
     var canShowInvoiceActions = editorViewMode && !!draft.id;
     var edPayLink = $('#edPayLink');
     if (edPayLink) {
@@ -2942,144 +3001,231 @@
     }
   }
 
-  /* Read-only, professional invoice document — used for the "View" flow
-     and for print/PDF output. No inputs, textareas, or edit affordances. */
-  function renderInvoiceDocumentView() {
-    var co = draft.companyInfo || {};
-    var tot = totalsLocal(draft);
-    var pStatus = paymentStatusMeta(draft.paymentStatus);
+  /* Authoritative Invoice 1114 Document HTML generator.
+     Used across Document Preview, Print, and Playwright PDF Generation. */
+  function invoiceDocumentHtml(d) {
+    if (!d) d = {};
+    var co = d.companyInfo || {};
+    var coName = co.name || 'Greenwave Recycling Inc.';
+    var coBn = co.bn || 'BN 751161951BC0001';
+    var coGst = co.gst || '751161951RT0001';
+    var coLine1 = co.line1 || '23394 Fisherman Rd,';
+    var coLine2 = co.line2 || 'Maple Ridge, BC V2W 1B9';
+    var coEmail = co.email || 'sales@greenwaverecycling.ca';
+    var coPhone = co.phone || '6724720423';
 
-    var itemsHtml = draft.items.map(function (it, idx) {
+    var tot = totalsLocal(d);
+    var pStatus = paymentStatusMeta(d.paymentStatus);
+
+    var billLines = (d.billTo || '').split('\n').filter(Boolean).map(esc).join('<br>');
+    var shipLines = (d.shipTo || '').split('\n').filter(Boolean).map(esc).join('<br>');
+
+    var itemsHtml = (d.items || []).map(function (it, idx) {
       var lineAmt = lineAmountDollars(it);
       return '<tr>' +
-        '<td class="mono" style="font-size:12px;color:var(--muted)">' + (idx + 1) + '</td>' +
-        '<td class="mono">' + esc(it.serviceDate || draft.invoiceDate) + '</td>' +
-        '<td>' + esc(it.productService || '—') + '</td>' +
-        '<td>' + esc(it.unit || '—') + '</td>' +
+        '<td class="mono">' + (idx + 1) + '.</td>' +
+        '<td class="mono">' + esc(it.serviceDate || d.invoiceDate || '—') + '</td>' +
+        '<td>' + esc(it.productService || 'supply') + '</td>' +
+        '<td>' + esc(it.unit || '') + '</td>' +
         '<td>' + esc(it.description || '—') + '</td>' +
         '<td class="num mono">' + num(it.quantity, 3) + '</td>' +
         '<td class="num mono">' + moneyDollars(it.unitPrice) + '</td>' +
         '<td class="num mono" style="font-weight:600">' + moneyDollars(lineAmt) + '</td>' +
-        '<td class="inv-doc-tax">' + esc(it.taxRateLabel || 'GST') + '</td>' +
+        '<td class="num">' + esc(it.taxRateLabel || 'GST') + '</td>' +
       '</tr>';
     }).join('');
 
-    var html =
-      '<div class="invoice-doc-container">' +
-        '<div class="invoice-page-1114 invoice-doc-readonly">' +
+    if (!itemsHtml) {
+      itemsHtml = '<tr><td colspan="9" style="text-align:center;padding:16px;color:#888;">No line items</td></tr>';
+    }
 
-          '<div class="inv-1114-header">' +
-            '<div class="inv-1114-co-left">' +
-              '<h1 class="inv-1114-title">INVOICE</h1>' +
-              '<div class="inv-doc-text" style="font-weight:700">' + esc(co.name || 'Greenwave Recycling Inc.') + '</div>' +
-              '<div class="inv-doc-text">' + esc(co.bn || '') + '</div>' +
-              '<div style="font-size:11.5px;color:#666666;margin-top:3px">GST/HST Registration No.</div>' +
-              '<div class="inv-doc-text">' + esc(co.gst || '') + '</div>' +
-            '</div>' +
+    var payLinkUrl = d.id ? ('#pay/' + d.id) : '#';
+    var invNumStr = (d && d.invoiceNumber) ? String(d.invoiceNumber) : (nextInvoiceNumberHint || '—');
 
-            '<div class="inv-1114-co-mid">' +
-              '<div style="height:34px"></div>' +
-              '<div class="inv-doc-text">' + esc(co.line1 || '') + '</div>' +
-              '<div class="inv-doc-text">' + esc(co.line2 || '') + '</div>' +
-              '<div class="inv-doc-text">' + esc(co.email || '') + '</div>' +
-              '<div class="inv-doc-text">' + esc(co.phone || '') + '</div>' +
-            '</div>' +
+    var taxLabel = d.taxLabel || 'GST @ 5%';
+    var taxLabelStr = taxLabel.indexOf('@') >= 0
+      ? (esc(taxLabel) + ' on ' + moneyDollars(tot.subtotal))
+      : (esc(taxLabel) + ' on ' + moneyDollars(tot.subtotal));
 
-            '<div class="inv-1114-logo-wrap">' +
-              '<img src="assets/logo.png?v=20260907_purchaseorders" alt="Greenwave Logo" class="inv-1114-logo-img">' +
-              '<div class="inv-1114-logo-sub">greenwave recycling</div>' +
+    return '<div class="invoice-page-1114">' +
+      '<div class="inv-header">' +
+        '<div class="inv-header-left">' +
+          '<h1 class="inv-title">INVOICE</h1>' +
+          '<div class="inv-co-grid">' +
+            '<div>' +
+              '<div class="inv-co-name">' + esc(coName) + '</div>' +
+              '<div>' + esc(coBn) + '</div>' +
+              '<div class="inv-co-sub">GST/HST Registration No.</div>' +
+              '<div>' + esc(coGst) + '</div>' +
             '</div>' +
-          '</div>' +
-
-          '<div class="inv-1114-banner">' +
-            '<div class="inv-1114-banner-col">' +
-              '<label>Bill to</label>' +
-              '<div class="inv-doc-address">' + (draft.billTo ? esc(draft.billTo) : '<span class="inv-doc-muted">—</span>') + '</div>' +
-            '</div>' +
-            '<div class="inv-1114-banner-col">' +
-              '<label>Ship to</label>' +
-              '<div class="inv-doc-address">' + (draft.shipTo ? esc(draft.shipTo) : '<span class="inv-doc-muted">—</span>') + '</div>' +
+            '<div>' +
+              '<div>' + esc(coLine1) + '</div>' +
+              '<div>' + esc(coLine2) + '</div>' +
+              '<div>' + esc(coEmail) + '</div>' +
+              '<div>' + esc(coPhone) + '</div>' +
             '</div>' +
           '</div>' +
-
-          '<div class="inv-1114-meta-grid">' +
-            '<div class="inv-1114-meta-block">' +
-              '<h4>Shipping info</h4>' +
-              '<div class="inv-1114-meta-row"><label>Ship via:</label><span>' + esc(draft.shipVia || '—') + '</span></div>' +
-              '<div class="inv-1114-meta-row"><label>Ship date:</label><span>' + esc(draft.shipDate || '—') + '</span></div>' +
-            '</div>' +
-
-            '<div class="inv-1114-meta-block">' +
-              '<h4>Invoice details</h4>' +
-              '<div class="inv-1114-meta-row"><label>Invoice no.:</label><span class="mono" style="font-weight:700">' + esc(draft.invoiceNumber || '—') + '</span></div>' +
-              '<div class="inv-1114-meta-row"><label>Terms:</label><span>' + esc(draft.paymentTerms || '—') + '</span></div>' +
-              '<div class="inv-1114-meta-row"><label>Invoice date:</label><span>' + esc(draft.invoiceDate || '—') + '</span></div>' +
-              '<div class="inv-1114-meta-row"><label>Due date:</label><span>' + esc(draft.dueDate || '—') + '</span></div>' +
-              (draft.id ? (
-                '<div class="inv-1114-meta-row"><label>Status:</label><span class="badge ' + pStatus.cls + '">' + pStatus.label + '</span></div>' +
-                (draft.paymentStatus === 'paid' && draft.paidAt ? '<div class="inv-1114-meta-row"><label></label><span class="inv-doc-paid-date">Paid on: ' + ddmmyyyy(draft.paidAt) + '</span></div>' : '')
-              ) : '') +
-            '</div>' +
-          '</div>' +
-
-          '<div class="inv-1114-table-wrap">' +
-            '<table class="inv-1114-table">' +
-              '<thead>' +
-                '<tr>' +
-                  '<th style="width:30px">#</th>' +
-                  '<th style="width:110px">Service Date</th>' +
-                  '<th style="width:120px">Product/service</th>' +
-                  '<th style="width:60px">Unit</th>' +
-                  '<th>Description</th>' +
-                  '<th class="num" style="width:65px">Qty</th>' +
-                  '<th class="num" style="width:85px">Rate ($)</th>' +
-                  '<th class="num" style="width:90px">Amount ($)</th>' +
-                  '<th style="width:60px">Tax</th>' +
-                '</tr>' +
-              '</thead>' +
-              '<tbody>' + (itemsHtml || '<tr><td colspan="9" style="text-align:center;color:var(--muted)">No line items</td></tr>') + '</tbody>' +
-            '</table>' +
-          '</div>' +
-
-          '<div class="inv-1114-bottom-grid">' +
-            '<div class="inv-1114-instructions-col">' +
-              '<h4>Payment instructions</h4>' +
-              '<div class="inv-doc-text-block">' + (draft.paymentInstructions ? esc(draft.paymentInstructions) : '<span class="inv-doc-muted">—</span>') + '</div>' +
-              '<h4 style="margin-top:18px">Additional notes / memo</h4>' +
-              '<div class="inv-doc-text-block">' + (draft.notes ? esc(draft.notes) : '<span class="inv-doc-muted">—</span>') + '</div>' +
-            '</div>' +
-
-            '<div class="inv-1114-totals-col">' +
-              '<div class="inv-1114-totals-row">' +
-                '<span>Subtotal</span>' +
-                '<span class="mono">' + moneyDollars(tot.subtotal) + '</span>' +
-              '</div>' +
-              '<div class="inv-1114-totals-row">' +
-                '<span>' + esc(draft.taxLabel || 'GST @ 5%') + '</span>' +
-                '<span class="mono">' + moneyDollars(tot.tax) + '</span>' +
-              '</div>' +
-              '<div class="inv-1114-totals-row inv-1114-total-due-row">' +
-                '<span>TOTAL</span>' +
-                '<span class="mono">' + moneyDollars(tot.total) + '</span>' +
-              '</div>' +
-            '</div>' +
-          '</div>' +
-
-          '<div class="inv-1114-footer">' +
-            '<div class="inv-1114-footer-name">' + esc(co.name || 'Greenwave Recycling Inc.') + '</div>' +
-            '<div class="inv-1114-footer-contact">' +
-              esc(co.line1 || '') + (co.line2 ? ', ' + esc(co.line2) : '') +
-              (co.email ? ' &middot; ' + esc(co.email) : '') +
-              (co.phone ? ' &middot; ' + esc(co.phone) : '') +
-            '</div>' +
-          '</div>' +
-
         '</div>' +
-      '</div>';
+        '<div class="inv-logo-wrap">' +
+          '<img src="assets/logo-invoice.png" class="inv-logo-img" alt="' + esc(coName) + '">' +
+        '</div>' +
+      '</div>' +
 
+      '<div class="inv-tint-box">' +
+        '<div class="inv-tint-row">' +
+          '<div class="inv-tint-col">' +
+            '<div class="inv-tint-lbl">Bill to</div>' +
+            '<div>' + (billLines || '<span style="color:#888">—</span>') + '</div>' +
+          '</div>' +
+          '<div class="inv-tint-col">' +
+            '<div class="inv-tint-lbl">Ship to</div>' +
+            '<div>' + (shipLines || '<span style="color:#888">—</span>') + '</div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="inv-tint-divider"></div>' +
+
+        '<div class="inv-tint-row">' +
+          '<div class="inv-tint-col">' +
+            '<div class="inv-tint-lbl">Shipping info</div>' +
+            '<div class="inv-detail-row"><span class="inv-detail-k">Ship via:</span><span class="inv-detail-v">' + esc(d.shipVia || 'Greenwave Recycling Truck') + '</span></div>' +
+            '<div class="inv-detail-row"><span class="inv-detail-k">Ship date:</span><span class="inv-detail-v">' + esc(d.shipDate || d.invoiceDate || '—') + '</span></div>' +
+          '</div>' +
+          '<div class="inv-tint-col">' +
+            '<div class="inv-tint-lbl">Invoice details</div>' +
+            '<div class="inv-detail-row"><span class="inv-detail-k">Invoice no.:</span><span class="inv-detail-v mono" style="font-weight:700">' + esc(invNumStr) + '</span></div>' +
+            '<div class="inv-detail-row"><span class="inv-detail-k">Terms:</span><span class="inv-detail-v">' + esc(d.paymentTerms || 'Net 15') + '</span></div>' +
+            '<div class="inv-detail-row"><span class="inv-detail-k">Invoice date:</span><span class="inv-detail-v">' + esc(d.invoiceDate || '—') + '</span></div>' +
+            '<div class="inv-detail-row"><span class="inv-detail-k">Due date:</span><span class="inv-detail-v">' + esc(d.dueDate || '—') + '</span></div>' +
+            (d.id && d.paymentStatus ? (
+              '<div class="inv-detail-row"><span class="inv-detail-k">Status:</span><span class="badge ' + pStatus.cls + '">' + pStatus.label + '</span></div>' +
+              (d.paymentStatus === 'paid' && d.paidAt ? '<div class="inv-detail-row"><span class="inv-detail-k"></span><span style="font-size:12px;color:#0F7A4C;font-weight:600">Paid on: ' + ddmmyyyy(d.paidAt) + '</span></div>' : '')
+            ) : '') +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="inv-table-wrap">' +
+        '<table class="inv-table">' +
+          '<thead>' +
+            '<tr>' +
+              '<th style="width:25px">#</th>' +
+              '<th style="width:75px">Service Date</th>' +
+              '<th style="width:95px">Product/service</th>' +
+              '<th style="width:45px">Unit.</th>' +
+              '<th>Description</th>' +
+              '<th class="num" style="width:55px">Qty</th>' +
+              '<th class="num" style="width:70px">Rate</th>' +
+              '<th class="num" style="width:80px">Amount</th>' +
+              '<th class="num" style="width:45px">Tax</th>' +
+            '</tr>' +
+          '</thead>' +
+          '<tbody>' + itemsHtml + '</tbody>' +
+        '</table>' +
+      '</div>' +
+
+      '<div class="inv-bottom-area">' +
+        '<div class="inv-pay-col">' +
+          '<div class="inv-pay-title">Ways to pay</div>' +
+          '<div class="inv-pay-icons">' +
+            '<img src="assets/pay-visa.png" class="inv-pay-icon" alt="Visa">' +
+            '<img src="assets/pay-mc.png" class="inv-pay-icon" alt="Mastercard">' +
+            '<img src="assets/pay-discover.png" class="inv-pay-icon" alt="Discover">' +
+            '<img src="assets/pay-amex.png" class="inv-pay-icon" alt="Amex">' +
+            '<img src="assets/pay-jcb.png" class="inv-pay-icon" alt="JCB">' +
+            '<img src="assets/pay-bank.png" class="inv-pay-icon" alt="Bank">' +
+          '</div>' +
+          '<div>' +
+            '<a href="' + payLinkUrl + '" class="inv-view-pay-btn" target="_blank" rel="noopener">View and pay</a>' +
+          '</div>' +
+          (d.paymentInstructions ? ('<div class="inv-instructions-note" style="margin-top:14px;font-size:8.5pt;color:#555;white-space:pre-line;">' + esc(d.paymentInstructions) + '</div>') : '') +
+          (d.notes ? ('<div class="inv-notes-note" style="margin-top:8px;font-size:8.5pt;color:#666;white-space:pre-line;">' + esc(d.notes) + '</div>') : '') +
+        '</div>' +
+
+        '<div class="inv-totals-col">' +
+          '<div class="inv-tot-row">' +
+            '<span>Subtotal</span>' +
+            '<span class="mono">' + moneyDollars(tot.subtotal) + '</span>' +
+          '</div>' +
+          '<div class="inv-tot-row">' +
+            '<span>' + taxLabelStr + '</span>' +
+            '<span class="mono">' + moneyDollars(tot.tax) + '</span>' +
+          '</div>' +
+          '<div class="inv-tot-divider"></div>' +
+          '<div class="inv-tot-row inv-total-due">' +
+            '<span>Total</span>' +
+            '<span class="mono">' + moneyDollars(tot.total) + '</span>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /* Read-only, professional invoice document view */
+  function renderInvoiceDocumentView() {
     var edBody = $('#editorBody');
     if (!edBody) return;
-    edBody.innerHTML = html;
+    edBody.innerHTML = '<div class="invoice-doc-container">' + invoiceDocumentHtml(draft) + '</div>';
+  }
+
+  function syncInvoiceDraftFromForm() {
+    if (!draft) return;
+    var billEl = $('#edBill'); if (billEl) draft.billTo = billEl.value;
+    var shipEl = $('#edShip'); if (shipEl) draft.shipTo = shipEl.value;
+    var shipViaEl = $('#edShipVia'); if (shipViaEl) draft.shipVia = shipViaEl.value;
+    var shipDateEl = $('#edShipDate'); if (shipDateEl) draft.shipDate = shipDateEl.value;
+    var termsEl = $('#edTerms'); if (termsEl) draft.paymentTerms = termsEl.value;
+    var dateEl = $('#edDate'); if (dateEl) draft.invoiceDate = dateEl.value;
+    var dueEl = $('#edDueDate'); if (dueEl) draft.dueDate = dueEl.value;
+    var payInstEl = $('#edPayInst'); if (payInstEl) draft.paymentInstructions = payInstEl.value;
+    var notesEl = $('#edNotes'); if (notesEl) draft.notes = notesEl.value;
+
+    var coName = ($('#edCoName') || {}).value;
+    var coBn = ($('#edCoBn') || {}).value;
+    var coGst = ($('#edCoGst') || {}).value;
+    var coLine1 = ($('#edCoLine1') || {}).value;
+    var coLine2 = ($('#edCoLine2') || {}).value;
+    var coEmail = ($('#edCoEmail') || {}).value;
+    var coPhone = ($('#edCoPhone') || {}).value;
+
+    draft.companyInfo = {
+      name: coName || 'Greenwave Recycling Inc.',
+      bn: coBn || 'BN 751161951BC0001',
+      gst: coGst || '751161951RT0001',
+      line1: coLine1 || '23394 Fisherman Rd,',
+      line2: coLine2 || 'Maple Ridge, BC V2W 1B9',
+      email: coEmail || 'sales@greenwaverecycling.ca',
+      phone: coPhone || '6724720423'
+    };
+
+    $$('#edLinesWrap tr').forEach(function (row) {
+      var idx = Number(row.dataset.line);
+      if (draft.items[idx]) {
+        draft.items[idx].serviceDate = (row.querySelector('.ed-sdate') || {}).value || draft.invoiceDate;
+        draft.items[idx].productService = (row.querySelector('.ed-pservice') || {}).value || 'supply';
+        draft.items[idx].unit = (row.querySelector('.ed-unit') || {}).value || '';
+        draft.items[idx].description = (row.querySelector('.ed-desc') || {}).value || '';
+        draft.items[idx].quantity = parseQty((row.querySelector('.ed-qty') || {}).value);
+        draft.items[idx].unitPrice = parseQty((row.querySelector('.ed-price') || {}).value);
+        draft.items[idx].taxRateLabel = (row.querySelector('.ed-taxlabel') || {}).value || 'GST';
+
+        var amtEl = row.querySelector('.ed-line-amount');
+        if (amtEl) amtEl.textContent = moneyDollars(lineAmountDollars(draft.items[idx]));
+      }
+    });
+
+    var currentTot = totalsLocal(draft);
+    var subEl = $('#edSubtotalVal');
+    if (subEl) subEl.textContent = moneyDollars(currentTot.subtotal);
+    var taxLabelStr = $('#edTaxLabelStr');
+    if (taxLabelStr) taxLabelStr.textContent = esc(draft.taxLabel || 'GST') + ' on ' + moneyDollars(currentTot.subtotal) + ':';
+    var taxEl = $('#edTaxVal');
+    if (taxEl) taxEl.textContent = moneyDollars(currentTot.tax);
+    var totEl = $('#edTotalVal');
+    if (totEl) totEl.textContent = moneyDollars(currentTot.total);
+
+    var pDoc = $('#invPrintDoc');
+    if (pDoc) pDoc.innerHTML = invoiceDocumentHtml(draft);
   }
 
   /* Editable invoice form — inputs/textareas live here only, never in the
@@ -3218,63 +3364,11 @@
 
     var edBody = $('#editorBody');
     if (!edBody) return;
-    edBody.innerHTML = html;
+    edBody.innerHTML =
+      '<div class="inv-editor-form">' + html + '</div>' +
+      '<div class="inv-print-document" id="invPrintDoc" style="display:none">' + invoiceDocumentHtml(draft) + '</div>';
 
-    var syncDraftValues = function () {
-      draft.billTo = ($('#edBill') || {}).value || '';
-      draft.shipTo = ($('#edShip') || {}).value || '';
-      draft.shipVia = ($('#edShipVia') || {}).value || 'Greenwave Recycling Truck';
-      draft.shipDate = ($('#edShipDate') || {}).value || today();
-      draft.paymentTerms = ($('#edTerms') || {}).value || 'Net 15';
-      draft.invoiceDate = ($('#edDate') || {}).value || today();
-      draft.dueDate = ($('#edDueDate') || {}).value || today();
-      draft.paymentInstructions = ($('#edPayInst') || {}).value || '';
-      draft.notes = ($('#edNotes') || {}).value || '';
-
-      var coName = ($('#edCoName') || {}).value;
-      var coBn = ($('#edCoBn') || {}).value;
-      var coGst = ($('#edCoGst') || {}).value;
-      var coLine1 = ($('#edCoLine1') || {}).value;
-      var coLine2 = ($('#edCoLine2') || {}).value;
-      var coEmail = ($('#edCoEmail') || {}).value;
-      var coPhone = ($('#edCoPhone') || {}).value;
-
-      draft.companyInfo = {
-        name: coName || 'Greenwave Recycling Inc.',
-        bn: coBn || 'BN 751161951BC0001',
-        gst: coGst || '751161951RT0001',
-        line1: coLine1 || '23394 Fisherman Rd',
-        line2: coLine2 || 'Maple Ridge, BC V2W 1B9',
-        email: coEmail || 'sales@greenwaverecycling.ca',
-        phone: coPhone || '6724720423'
-      };
-
-      $$('#edLinesWrap tr').forEach(function (row) {
-        var idx = Number(row.dataset.line);
-        if (draft.items[idx]) {
-          draft.items[idx].serviceDate = (row.querySelector('.ed-sdate') || {}).value || draft.invoiceDate;
-          draft.items[idx].productService = (row.querySelector('.ed-pservice') || {}).value || 'supply';
-          draft.items[idx].unit = (row.querySelector('.ed-unit') || {}).value || '';
-          draft.items[idx].description = (row.querySelector('.ed-desc') || {}).value || '';
-          draft.items[idx].quantity = parseQty((row.querySelector('.ed-qty') || {}).value);
-          draft.items[idx].unitPrice = parseQty((row.querySelector('.ed-price') || {}).value);
-          draft.items[idx].taxRateLabel = (row.querySelector('.ed-taxlabel') || {}).value || 'GST';
-
-          var amtEl = row.querySelector('.ed-line-amount');
-          if (amtEl) amtEl.textContent = moneyDollars(lineAmountDollars(draft.items[idx]));
-        }
-      });
-
-      var currentTot = totalsLocal(draft);
-      var subEl = $('#edSubtotalVal');
-      if (subEl) subEl.textContent = moneyDollars(currentTot.subtotal);
-      var taxLabelStr = $('#edTaxLabelStr');
-      if (taxLabelStr) taxLabelStr.textContent = esc(draft.taxLabel || 'GST') + ' on ' + moneyDollars(currentTot.subtotal) + ':';
-      var taxEl = $('#edTaxVal');
-      if (taxEl) taxEl.textContent = moneyDollars(currentTot.tax);
-      var totEl = $('#edTotalVal');
-      if (totEl) totEl.textContent = moneyDollars(currentTot.total);
-    };
+    var syncDraftValues = syncInvoiceDraftFromForm;
 
     $$('#editorBody input, #editorBody textarea').forEach(function (inp) {
       inp.addEventListener('input', syncDraftValues);
@@ -3619,6 +3713,19 @@
     };
   }
 
+  function poFormatDate(val) {
+    if (!val || typeof val !== 'string') return '';
+    var trimmed = val.trim();
+    if (!trimmed) return '';
+    var m = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return '';
+    var y = parseInt(m[1], 10);
+    var mo = parseInt(m[2], 10);
+    var d = parseInt(m[3], 10);
+    if (y < 2000 || y > 2099 || mo < 1 || mo > 12 || d < 1 || d > 31) return '';
+    return trimmed;
+  }
+
   function poDocumentHtml(d) {
     var co = d.companyInfo || poCompanyDefaults();
     var cur = poCurrency(d);
@@ -3645,11 +3752,13 @@
         '<div class="po-letterhead">' +
           '<img src="assets/logo.png?v=20260907_purchaseorders" alt="GreenWave Recycling Inc." class="po-logo">' +
           '<div class="po-letterhead-text">' +
-            '<div class="po-co-name">' + esc(co.name || '') + '</div>' +
-            '<div class="po-co-line">' + esc(co.line1 || '') + '</div>' +
-            '<div class="po-co-line">' + esc(co.line2 || '') +
-              (co.phone ? '&nbsp;&nbsp;Tel: ' + esc(co.phone) : '') +
-              (co.email ? '&nbsp;&nbsp;' + esc(co.email) : '') +
+            '<div class="po-co-name">' + esc(co.name || 'GreenWave Recycling Inc.') + '</div>' +
+            '<div class="po-co-line">' + esc(co.line1 || '23394, Fisherman Rd') + '</div>' +
+            '<div class="po-co-line">' + esc(co.line2 || 'Maple Ridge, BC, V3W 1B9, CANADA') + '</div>' +
+            '<div class="po-co-contact">' +
+              (co.phone ? '<span class="po-co-tel">Tel: ' + esc(co.phone) + '</span>' : '') +
+              (co.phone && co.email ? '<span class="po-co-dot">&nbsp;&bull;&nbsp;</span>' : '') +
+              (co.email ? '<span class="po-co-email">' + esc(co.email) + '</span>' : '') +
             '</div>' +
           '</div>' +
         '</div>' +
@@ -3660,8 +3769,8 @@
         '<div class="po-infobox">' +
           '<div class="po-infobox-col">' +
             '<div class="po-kv"><span class="po-k">PO #:</span><span class="po-v mono" id="poDocNumber">' + esc(poNumberDisplay(d)) + '</span></div>' +
-            '<div class="po-kv"><span class="po-k">Order Date:</span><span class="po-v">' + esc(d.orderDate || '') + '</span></div>' +
-            '<div class="po-kv"><span class="po-k">Expected Date:</span><span class="po-v">' + esc(d.expectedDate || '') + '</span></div>' +
+            '<div class="po-kv"><span class="po-k">Order Date:</span><span class="po-v">' + esc(poFormatDate(d.orderDate)) + '</span></div>' +
+            '<div class="po-kv"><span class="po-k">Expected Date:</span><span class="po-v">' + esc(poFormatDate(d.expectedDate)) + '</span></div>' +
           '</div>' +
           '<div class="po-infobox-col po-infobox-col-right">' +
             '<div class="po-kv"><span class="po-k">Currency:</span><span class="po-v">' + esc(cur) + '</span></div>' +
@@ -3698,9 +3807,11 @@
 
         /* Signature date and total */
         '<div class="po-foot">' +
-          '<div class="po-foot-date">Date: ' + (d.footerDate ? esc(d.footerDate) : '____________________') + '</div>' +
+          '<div class="po-foot-date">Date: ' + (poFormatDate(d.footerDate) ? esc(poFormatDate(d.footerDate)) : '____________________') + '</div>' +
           '<div class="po-foot-total">TOTAL: ' + esc(poMoney(totalCents)) + ' ' + esc(cur) + '</div>' +
         '</div>' +
+
+        '<div class="po-doc-footer">greenwaverecycling.ca</div>' +
 
       '</div>';
   }
@@ -3716,17 +3827,20 @@
   function poPrintDocumentName(d) {
     var n = d && d.poNumber ? String(d.poNumber) : '';
     n = n.replace(/[^A-Za-z0-9._-]/g, '');
-    return n || 'PurchaseOrder-Draft';
+    return n || 'Purchase-Order';
   }
 
   function printPurchaseOrderDocument() {
     var previousTitle = document.title;
     var restored = false;
     var mql = null;
+    var poStyle = null;
     function restore() {
       if (restored) return;
       restored = true;
       document.title = previousTitle;
+      document.body.classList.remove('printing-po');
+      if (poStyle && poStyle.parentNode) poStyle.parentNode.removeChild(poStyle);
       window.removeEventListener('afterprint', restore);
       if (mql && mql.removeListener) mql.removeListener(onMqlChange);
     }
@@ -3734,7 +3848,15 @@
 
     // Must be set before the dialog opens -- that is when the browser
     // snapshots the default filename.
-    document.title = poPrintDocumentName(poDraft);
+    document.title = (poDraft && poDraft.poNumber) ? poDraft.poNumber : 'PURCHASE ORDER';
+    document.body.classList.add('printing-po');
+
+    try {
+      poStyle = document.createElement('style');
+      poStyle.id = 'poPrintPageRule';
+      poStyle.textContent = '@page { size: A4 portrait !important; margin: 0 !important; }';
+      document.head.appendChild(poStyle);
+    } catch (e) { /* ignore */ }
 
     window.addEventListener('afterprint', restore);
     try {
@@ -3744,6 +3866,35 @@
 
     window.print();
     setTimeout(restore, 60000);
+  }
+
+  function downloadPurchaseOrderPdf() {
+    if (!poDraft) return;
+    var d = poDraft;
+    var num = d.poNumber ? String(d.poNumber).replace(/[^A-Za-z0-9._-]/g, '') : 'Purchase-Order';
+    var filename = num + '.pdf';
+    toast('Generating clean A4 PDF...', 'info');
+
+    Api.renderPurchaseOrderPdf({
+      html: poDocumentHtml(d),
+      poNumber: num
+    }).then(function (blob) {
+      var url = window.URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () {
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      }, 1000);
+      toast('Downloaded ' + filename, 'success');
+    }).catch(function (err) {
+      console.error('Download PDF error:', err);
+      toast('Failed to generate PDF: ' + (err.message || 'Unknown error'), 'error');
+    });
   }
 
   /* --------------------------------------------------------------------
@@ -3936,6 +4087,9 @@
     var printBtn = $('#poEdPrint');
     if (printBtn) printBtn.onclick = function () { printPurchaseOrderDocument(); };
 
+    var pdfBtn = $('#poEdPdf');
+    if (pdfBtn) pdfBtn.onclick = function () { downloadPurchaseOrderPdf(); };
+
     var delBtn = $('#poEdDelete');
     if (delBtn) {
       delBtn.hidden = !poDraft.id;
@@ -4021,9 +4175,9 @@
                 '<span class="po-hint">' + (d.poNumber ? 'Assigned — cannot be changed' : 'Assigned by the server on save') + '</span>' +
               '</div>' +
               '<div class="field"><label for="poOrderDate">Order date</label>' +
-                '<input type="date" id="poOrderDate" value="' + esc(d.orderDate || '') + '" required></div>' +
+                '<input type="date" id="poOrderDate" min="2000-01-01" max="2099-12-31" value="' + esc(poFormatDate(d.orderDate)) + '" required></div>' +
               '<div class="field"><label for="poExpectedDate">Expected date</label>' +
-                '<input type="date" id="poExpectedDate" value="' + esc(d.expectedDate || '') + '"></div>' +
+                '<input type="date" id="poExpectedDate" min="2000-01-01" max="2099-12-31" value="' + esc(poFormatDate(d.expectedDate)) + '"></div>' +
               '<div class="field"><label for="poCurrencySel">Currency</label>' +
                 '<select id="poCurrencySel">' +
                   '<option value="USD"' + (cur === 'USD' ? ' selected' : '') + '>USD</option>' +
@@ -4039,7 +4193,7 @@
                   }).join('') +
                 '</select></div>' +
               '<div class="field"><label for="poFooterDate">Signature date <span class="po-hint-inline">(the &ldquo;Date:&rdquo; line on the document)</span></label>' +
-                '<input type="date" id="poFooterDate" value="' + esc(d.footerDate || '') + '"></div>' +
+                '<input type="date" id="poFooterDate" min="2000-01-01" max="2099-12-31" value="' + esc(poFormatDate(d.footerDate)) + '"></div>' +
             '</div>' +
           '</section>' +
 
@@ -4070,18 +4224,22 @@
               '<h2 class="po-card-title">Line items</h2>' +
               '<button type="button" class="btn ghost btn-sm" id="poAddLine"><svg><use href="#i-plus"></use></svg>Add item</button>' +
             '</div>' +
-            '<div class="tablewrap po-items-wrap" tabindex="0" role="region" aria-label="Line items, scrollable">' +
+            '<div class="tablewrap po-items-wrap" tabindex="0" role="region" aria-label="Line items">' +
               '<table class="table po-items-table stack-mobile" id="poItemsTable"><thead><tr>' +
-                '<th>Code</th><th>Resin</th><th>Description</th><th>Color</th>' +
-                '<th class="num">Quantity</th><th>Unit</th>' +
-                '<th class="num">Unit Price (<span class="po-cur-label">' + esc(cur) + '</span>)</th>' +
-                '<th class="num">Amount (<span class="po-cur-label">' + esc(cur) + '</span>)</th>' +
-                '<th></th>' +
+                '<th style="width:8.5%">Code</th>' +
+                '<th style="width:8.5%">Resin</th>' +
+                '<th style="width:27%">Description</th>' +
+                '<th style="width:8.5%">Color</th>' +
+                '<th class="num" style="width:11%">Quantity</th>' +
+                '<th style="width:6.5%">Unit</th>' +
+                '<th class="num" style="width:12%">Unit Price (<span class="po-cur-label">' + esc(cur) + '</span>)</th>' +
+                '<th class="num" style="width:12%">Amount (<span class="po-cur-label">' + esc(cur) + '</span>)</th>' +
+                '<th style="width:6%"></th>' +
               '</tr></thead><tbody id="poLinesWrap">' +
                 d.items.map(poLineRowHtml).join('') +
               '</tbody></table>' +
             '</div>' +
-            '<p class="po-items-hint noprint">Amounts update as you type. Scroll the table sideways to reach every column, or use Tab.</p>' +
+            '<p class="po-items-hint noprint">Amounts update automatically as you edit quantities and prices.</p>' +
           '</section>' +
 
           '<section class="card po-card">' +
@@ -4113,9 +4271,9 @@
 
         '</div>' +
 
-        /* ---------------- Live preview pane ---------------- */
-        '<aside class="po-preview-pane" aria-label="Document preview">' +
-          '<div class="po-preview-label noprint">Live preview</div>' +
+        /* ---------------- Preview pane (right) ---------------- */
+        '<aside class="po-preview-pane" aria-label="Purchase order preview">' +
+          '<div class="po-preview-label">Live document preview</div>' +
           '<div class="po-doc-container" id="poPreview">' + poDocumentHtml(d) + '</div>' +
         '</aside>' +
 
@@ -4129,11 +4287,11 @@
     function val(id) { var el = $(id); return el ? el.value : ''; }
 
     function syncPoDraft() {
-      d.orderDate = val('#poOrderDate');
-      d.expectedDate = val('#poExpectedDate');
+      d.orderDate = poFormatDate(val('#poOrderDate')) || val('#poOrderDate');
+      d.expectedDate = poFormatDate(val('#poExpectedDate'));
       d.currency = val('#poCurrencySel') === 'CAD' ? 'CAD' : 'USD';
       d.status = val('#poStatusSel') || 'draft';
-      d.footerDate = val('#poFooterDate');
+      d.footerDate = poFormatDate(val('#poFooterDate'));
 
       d.supplierName = val('#poSupName');
       d.supplierAddress = val('#poSupAddress');
@@ -5637,5 +5795,29 @@
       showGate();
     }
   });
+
+  global.__PO__ = {
+    poDocumentHtml: poDocumentHtml,
+    poLineAmountCents: poLineAmountCents,
+    poMoney: poMoney,
+    poTotalCents: poTotalCents,
+    poFormatDate: poFormatDate,
+    openNewPurchaseOrder: openNewPurchaseOrder,
+    renderPoEditor: renderPoEditor,
+    newPoDraft: newPoDraft,
+    show: show,
+    setMe: function (user) { me = user; }
+  };
+
+  global.__INVOICE__ = {
+    invoiceDocumentHtml: invoiceDocumentHtml,
+    downloadInvoicePdf: downloadInvoicePdf,
+    printInvoiceDocument: printInvoiceDocument,
+    renderInvoiceDocumentView: renderInvoiceDocumentView,
+    newDraft: newDraft,
+    totalsLocal: totalsLocal,
+    setDraft: function (d) { draft = d; },
+    getDraft: function () { return draft; }
+  };
 
 })(window);

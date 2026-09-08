@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -6,6 +7,7 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 
@@ -23,6 +25,25 @@ import { InvoicesService } from './invoices.service';
 @Roles('admin', 'manager')
 export class InvoicesController {
   constructor(private readonly invoicesService: InvoicesService) {}
+
+  @Post('render-pdf')
+  async renderPdf(
+    @Body() body: { html: string; invoiceNumber?: string },
+    @Res() res: any,
+  ) {
+    if (!body || !body.html) {
+      throw new BadRequestException('html is required for PDF rendering');
+    }
+    const pdfBuffer = await this.invoicesService.generatePdf(body.html);
+    const safeNumber = body.invoiceNumber
+      ? String(body.invoiceNumber).replace(/[^A-Za-z0-9._-]/g, '')
+      : 'Invoice';
+    const filename = `${safeNumber}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    return res.end(pdfBuffer);
+  }
 
   @Post()
   create(

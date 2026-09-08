@@ -77,6 +77,29 @@
     }).then(handleResponse, networkError);
   }
 
+  function requestBlob(method, path, body) {
+    var headers = { 'Content-Type': 'application/json' };
+    var token = getToken();
+    if (token) headers.Authorization = 'Bearer ' + token;
+
+    return global.fetch(baseUrl() + path, {
+      method: method,
+      headers: headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined
+    }).then(function (res) {
+      if (!res.ok) {
+        return res.text().then(function (text) {
+          var data = null;
+          try { data = text ? JSON.parse(text) : null; } catch (e) {}
+          var err = new Error((data && data.message) || ('PDF request failed (' + res.status + ')'));
+          err.status = res.status;
+          throw err;
+        });
+      }
+      return res.blob();
+    }, networkError);
+  }
+
   var Api = {
     isAuthenticated: function () { return !!getToken(); },
     clearSession: function () { setToken(null); },
@@ -190,6 +213,7 @@
     nextInvoiceNumber: function () { return request('GET', '/invoices/next-number'); },
     updateInvoice: function (id, data) { return request('PATCH', '/invoices/' + id, data); },
     duplicateInvoice: function (id) { return request('POST', '/invoices/' + id + '/duplicate'); },
+    renderInvoicePdf: function (data) { return requestBlob('POST', '/invoices/render-pdf', data); },
     getPaymentLink: function (invoiceId) { return request('POST', '/payments/invoices/' + invoiceId + '/link'); },
     sendInvoiceEmail: function (invoiceId, recipientEmail, customMessage) {
       return request('POST', '/payments/invoices/' + invoiceId + '/send', {
@@ -212,6 +236,7 @@
     updatePurchaseOrder: function (id, data) { return request('PATCH', '/purchase-orders/' + id, data); },
     deletePurchaseOrder: function (id) { return request('DELETE', '/purchase-orders/' + id); },
     nextPurchaseOrderNumber: function () { return request('GET', '/purchase-orders/next-number'); },
+    renderPurchaseOrderPdf: function (data) { return requestBlob('POST', '/purchase-orders/render-pdf', data); },
 
     getPublicInvoice: function (token) {
       return request('GET', '/pay/' + token);

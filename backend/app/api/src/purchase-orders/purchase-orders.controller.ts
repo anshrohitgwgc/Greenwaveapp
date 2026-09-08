@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -8,6 +9,7 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 
@@ -45,6 +47,25 @@ export class PurchaseOrdersController {
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     return this.purchaseOrdersService.create(dto, actor);
+  }
+
+  @Post('render-pdf')
+  async renderPdf(
+    @Body() body: { html: string; poNumber?: string },
+    @Res() res: any,
+  ) {
+    if (!body || !body.html) {
+      throw new BadRequestException('html is required for PDF rendering');
+    }
+    const pdfBuffer = await this.purchaseOrdersService.generatePdf(body.html);
+    const safePoNumber = body.poNumber
+      ? String(body.poNumber).replace(/[^A-Za-z0-9._-]/g, '')
+      : 'Purchase-Order';
+    const filename = `${safePoNumber}.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    return res.end(pdfBuffer);
   }
 
   @Get()

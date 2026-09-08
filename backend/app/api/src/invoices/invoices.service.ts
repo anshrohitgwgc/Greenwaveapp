@@ -619,4 +619,151 @@ export class InvoicesService {
     invoice.items.sort((a, b) => a.sortOrder - b.sortOrder);
     return invoice;
   }
+
+  /**
+   * Generates a clean vector A4 PDF using Playwright Chromium.
+   * Enforces exact A4 portrait dimensions, zero browser headers/footers,
+   * embedded logo and CSS, and selectable text.
+   */
+  async generatePdf(docHtml: string): Promise<Buffer> {
+    const fs = require('fs');
+    const path = require('path');
+
+    // 1. Resolve and embed logo
+    let logoDataUri = '';
+    const logoCandidates = [
+      path.resolve(process.cwd(), '../../assets/logo-invoice.png'),
+      path.resolve(process.cwd(), 'assets/logo-invoice.png'),
+      '/home/ansh/Greenwaveapp/assets/logo-invoice.png',
+      '/var/www/greenwave-app/dist/assets/logo-invoice.png',
+      path.resolve(process.cwd(), '../../assets/logo.png'),
+      path.resolve(process.cwd(), 'assets/logo.png'),
+      '/home/ansh/Greenwaveapp/assets/logo.png',
+      '/var/www/greenwave-app/dist/assets/logo.png',
+    ];
+    for (const p of logoCandidates) {
+      try {
+        if (fs.existsSync(p)) {
+          const buf = fs.readFileSync(p);
+          logoDataUri = `data:image/png;base64,${buf.toString('base64')}`;
+          break;
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    let processedHtml = docHtml;
+    if (logoDataUri) {
+      processedHtml = processedHtml.replace(
+        /src=["']assets\/logo(?:-invoice)?\.png[^"']*["']/g,
+        `src="${logoDataUri}"`,
+      );
+    }
+
+    // 2. Resolve and embed payment icons
+    const payIcons = ['visa', 'mc', 'discover', 'amex', 'jcb', 'bank'];
+    for (const icon of payIcons) {
+      const iconCandidates = [
+        path.resolve(process.cwd(), `../../assets/pay-${icon}.png`),
+        path.resolve(process.cwd(), `assets/pay-${icon}.png`),
+        `/home/ansh/Greenwaveapp/assets/pay-${icon}.png`,
+        `/var/www/greenwave-app/dist/assets/pay-${icon}.png`,
+      ];
+      for (const p of iconCandidates) {
+        try {
+          if (fs.existsSync(p)) {
+            const buf = fs.readFileSync(p);
+            const dataUri = `data:image/png;base64,${buf.toString('base64')}`;
+            const re = new RegExp(`src=["']assets/pay-${icon}\\.png[^"']*["']`, 'g');
+            processedHtml = processedHtml.replace(re, `src="${dataUri}"`);
+            break;
+          }
+        } catch (e) { /* ignore */ }
+      }
+    }
+
+    // 3. Resolve stylesheet
+    let appCss = '';
+    const cssCandidates = [
+      path.resolve(process.cwd(), '../../assets/app.css'),
+      path.resolve(process.cwd(), 'assets/app.css'),
+      '/home/ansh/Greenwaveapp/assets/app.css',
+      '/var/www/greenwave-app/dist/assets/app.css',
+    ];
+    for (const p of cssCandidates) {
+      try {
+        if (fs.existsSync(p)) {
+          appCss = fs.readFileSync(p, 'utf8');
+          break;
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    const fullHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>INVOICE</title>
+  <style>
+    ${appCss}
+    @page {
+      size: A4 portrait;
+      margin: 0;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #ffffff;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .invoice-page-1114 {
+      width: 210mm !important;
+      min-height: 297mm !important;
+      box-sizing: border-box !important;
+      border: none !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+      padding: 12mm 14mm !important;
+      background: #ffffff !important;
+    }
+    .inv-1114-table thead, .inv-table thead {
+      display: table-header-group;
+    }
+    .inv-1114-table tr, .inv-table tr {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+    .inv-1114-header, .inv-header,
+    .inv-1114-banner, .inv-tint-box,
+    .inv-1114-meta-grid,
+    .inv-1114-bottom-grid, .inv-bottom-area {
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+  </style>
+</head>
+<body>
+  ${processedHtml}
+</body>
+</html>`;
+
+    const { chromium } = require('playwright');
+    const browser = await chromium.launch({
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    });
+
+    try {
+      const page = await browser.newPage();
+      await page.setContent(fullHtml, { waitUntil: 'load' });
+      const pdfBuffer = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        displayHeaderFooter: false,
+        margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
+      });
+      return pdfBuffer;
+    } finally {
+      await browser.close();
+    }
+  }
 }
