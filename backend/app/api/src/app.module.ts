@@ -15,6 +15,7 @@ import { MaterialsModule } from './materials/materials.module';
 import { PaymentsModule } from './payments/payments.module';
 import { PhotosModule } from './photos/photos.module';
 import { PickupsModule } from './pickups/pickups.module';
+import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { RedisModule } from './redis/redis.module';
 import { RolesModule } from './roles/roles.module';
 import { StorageModule } from './storage/storage.module';
@@ -72,6 +73,7 @@ import { WarehousesModule } from './warehouses/warehouses.module';
     MaterialsModule,
     InventoryModule,
     InvoicesModule,
+    PurchaseOrdersModule,
     PaymentsModule,
     PhotosModule,
     TimesheetsModule,

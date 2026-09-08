@@ -32,7 +32,10 @@
   // withholding the whole view — otherwise a manager or staff member has no
   // way to see what they have been granted.
   var ROLES = {
-    admin:   { label: 'Administrator', sees: ['dashboard','inventory','photos','timeclock','chat','invoices','editor','customers','products','staff','history','settings'] },
+    /* `purchaseorders` / `poeditor` are admin-only, matching @Roles('admin')
+       on PurchaseOrdersController. Leaving them off the manager row is the
+       point: managers may work invoices but not purchase orders. */
+    admin:   { label: 'Administrator', sees: ['dashboard','inventory','photos','timeclock','chat','invoices','editor','purchaseorders','poeditor','customers','products','staff','history','settings'] },
     manager: { label: 'Manager',       sees: ['dashboard','inventory','photos','timeclock','chat','invoices','editor','customers','products','history','settings'] },
     staff:   { label: 'Staff',         sees: ['dashboard','inventory','photos','timeclock','chat','settings'] },
     driver:  { label: 'Driver',        sees: ['dashboard','inventory','photos','timeclock','chat','settings'] }
@@ -229,6 +232,15 @@
   var draft = null;
   var editorViewMode = false;
   var invoiceListCache = [];
+
+  /* Purchase orders. Mirrors the invoice editor's shape -- one draft object
+     rendered either as an editable form or as the read-only document. */
+  var poDraft = null;
+  var poViewMode = false;
+  var poListCache = [];
+  var poFilter = 'all';
+  var poSearchQuery = '';
+  var nextPoNumberHint = null;
 
   var chatMessages = [];
   var chatSseSource = null;
@@ -530,7 +542,7 @@
     // be able to reach Staff Management to grant themselves or others access.
     var DIVISION_SCOPED_VIEWS = [
       'dashboard', 'inventory', 'photos', 'timeclock', 'chat',
-      'invoices', 'customers', 'products', 'history'
+      'invoices', 'purchaseorders', 'customers', 'products', 'history'
     ];
     if (!hasAnyDivision()) {
       $$('.navitem').forEach(function (b) {
@@ -653,8 +665,14 @@
 
   function show(next) {
     if (next === 'invoices' && !isRecycling()) next = 'inventory';
+    if (next === 'purchaseorders' && !isRecycling()) next = 'inventory';
     if (!can(next) && next !== 'editor') next = 'dashboard';
     if (next === 'editor' && !can('invoices')) next = 'inventory';
+    // The PO editor is reachable only by someone who may see purchase orders
+    // at all, so a non-admin deep-linking to it lands somewhere they can use.
+    if (next === 'poeditor' && !(can('purchaseorders') && isRecycling())) {
+      next = can('invoices') ? 'invoices' : 'dashboard';
+    }
     // A session with no division has no operational views to land on; keep it
     // on the administrative ones rather than bouncing to a dashboard that
     // would render empty.
@@ -668,7 +686,9 @@
     if (el) el.classList.add('active');
 
     $$('.navitem').forEach(function (b) {
-      var on = b.dataset.view === view || (view === 'editor' && b.dataset.view === 'invoices');
+      var on = b.dataset.view === view ||
+        (view === 'editor' && b.dataset.view === 'invoices') ||
+        (view === 'poeditor' && b.dataset.view === 'purchaseorders');
       if (on) b.classList.add('active'); else b.classList.remove('active');
     });
     var app = $('#app');
@@ -2454,6 +2474,7 @@
 
   var ACTIONS = {
     newInvoice: openNewInvoice,
+    newPurchaseOrder: function () { openNewPurchaseOrder(); },
     newCustomer: openAddCustomerModal,
     newProduct: openAddProductModal,
     goProducts: function () { show('products'); },
@@ -2965,7 +2986,7 @@
             '</div>' +
 
             '<div class="inv-1114-logo-wrap">' +
-              '<img src="assets/logo.png?v=20260902_stafffix" alt="Greenwave Logo" class="inv-1114-logo-img">' +
+              '<img src="assets/logo.png?v=20260907_purchaseorders" alt="Greenwave Logo" class="inv-1114-logo-img">' +
               '<div class="inv-1114-logo-sub">greenwave recycling</div>' +
             '</div>' +
           '</div>' +
@@ -3091,7 +3112,7 @@
             '</div>' +
 
             '<div class="inv-1114-logo-wrap">' +
-              '<img src="assets/logo.png?v=20260902_stafffix" alt="Greenwave Logo" class="inv-1114-logo-img">' +
+              '<img src="assets/logo.png?v=20260907_purchaseorders" alt="Greenwave Logo" class="inv-1114-logo-img">' +
               '<div class="inv-1114-logo-sub">greenwave recycling</div>' +
             '</div>' +
           '</div>' +
@@ -3335,6 +3356,995 @@
     };
 
     var edSave = $('#edSave'); if (edSave) edSave.onclick = doSave;
+  }
+
+  /* ==========================================================================
+     PURCHASE ORDERS
+
+     A purchase order is a distinct document type from an invoice: money going
+     out rather than in, its own `PO-0001` numbering series, and resin-trading
+     line items (code / resin / colour). The layout below reproduces the
+     supplied PURCHASE.docx -- navy section rules, bordered header box, wide
+     line-item table, strong TOTAL -- and is the SAME markup for the live
+     preview, the read-only document view and the printed PDF, so what the
+     admin sees while typing is exactly what comes out of the printer.
+
+     Administrator-only. Everything here is gated by can('purchaseorders'),
+     which is a convenience: the real control is @Roles('admin') on
+     PurchaseOrdersController, and every call below 403s for anyone else.
+     ========================================================================== */
+
+  /* --------------------------------------------------------------------
+     Exact money arithmetic.
+
+     The document must agree with the server to the cent, and the server
+     computes in exact fixed-point (see api/src/common/decimal.ts). Doing the
+     preview in floats would make it disagree on values like 10 x 1.0005, so
+     the same integer-scaled arithmetic is mirrored here with BigInt. Scales
+     match the NUMERIC columns in migration 018.
+     -------------------------------------------------------------------- */
+  var PO_QTY_SCALE = 3;
+  var PO_PRICE_SCALE = 4;
+  var PO_MONEY_SCALE = 2;
+
+  function poToScaled(value, scale) {
+    var text = String(value == null || value === '' ? '0' : value).trim();
+    // Expand exponent notation before the digit-slicing below.
+    if (/[eE]/.test(text)) {
+      var n = Number(text);
+      if (!isFinite(n)) return BigInt(0);
+      text = n.toFixed(Math.min(20, scale + 6));
+    }
+    var m = /^([+-]?)(\d*)(?:\.(\d*))?$/.exec(text);
+    if (!m || (m[2] === '' && !m[3])) return BigInt(0);
+
+    var frac = m[3] || '';
+    var kept = frac.slice(0, scale);
+    while (kept.length < scale) kept += '0';
+
+    var units = BigInt((m[2] || '0') + kept);
+    var dropped = frac.slice(scale);
+    if (dropped.length && dropped.charCodeAt(0) >= 53 /* '5' */) {
+      units += BigInt(1);
+    }
+    return m[1] === '-' ? -units : units;
+  }
+
+  function poDivideRounded(numerator, denominator) {
+    var negative = numerator < BigInt(0);
+    var abs = negative ? -numerator : numerator;
+    var two = BigInt(2);
+    var rounded = (abs * two + denominator) / (denominator * two);
+    return negative ? -rounded : rounded;
+  }
+
+  /** quantity x unitPrice, exact, in cents. Mirrors lineAmountCents() server-side. */
+  function poLineAmountCents(quantity, unitPrice) {
+    var qty = poToScaled(quantity, PO_QTY_SCALE);
+    var price = poToScaled(unitPrice, PO_PRICE_SCALE);
+    var excess = PO_QTY_SCALE + PO_PRICE_SCALE - PO_MONEY_SCALE;
+    var divisor = BigInt(1);
+    for (var i = 0; i < excess; i++) divisor *= BigInt(10);
+    return poDivideRounded(qty * price, divisor);
+  }
+
+  function poTotalCents(items) {
+    var sum = BigInt(0);
+    (items || []).forEach(function (it) {
+      sum += poLineAmountCents(it.quantity, it.unitPrice);
+    });
+    return sum;
+  }
+
+  /** Cents -> "21940.00". Plain 2dp, matching the reference document. */
+  function poMoney(cents) {
+    var negative = cents < BigInt(0);
+    var digits = (negative ? -cents : cents).toString();
+    while (digits.length <= PO_MONEY_SCALE) digits = '0' + digits;
+    var whole = digits.slice(0, digits.length - PO_MONEY_SCALE);
+    var frac = digits.slice(digits.length - PO_MONEY_SCALE);
+    return (negative ? '-' : '') + whole + '.' + frac;
+  }
+
+  /** Unit price as shown in the table: 2dp minimum, up to 4 when finer. */
+  function poPrice(value) {
+    var n = Number(value);
+    if (!isFinite(n)) return '0.00';
+    var s = n.toFixed(4).replace(/(\.\d\d)0+$/, '$1');
+    return s;
+  }
+
+  /**
+   * Quantity as the reference renders it -- space-grouped thousands and no
+   * trailing zeros ("54 850", not "54,850.000").
+   */
+  function poQty(value) {
+    var n = Number(value);
+    if (!isFinite(n)) return '0';
+    var s = n.toFixed(3).replace(/\.?0+$/, '');
+    var parts = s.split('.');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    return parts.join('.');
+  }
+
+  function poCurrency(d) {
+    return (d && d.currency) === 'CAD' ? 'CAD' : 'USD';
+  }
+
+  /* --------------------------------------------------------------------
+     Draft model
+     -------------------------------------------------------------------- */
+
+  /**
+   * Company letterhead for the PO.
+   *
+   * The reference document's own header differs from the invoice letterhead
+   * (comma after the street number, full "CANADA", dashed phone), so it is
+   * seeded from the reference rather than reusing the invoice defaults --
+   * and every line stays editable.
+   */
+  function poCompanyDefaults() {
+    var co = db.company || {};
+    return {
+      name: 'GreenWave Recycling Inc.',
+      line1: '23394, Fisherman Rd',
+      line2: 'Maple Ridge, BC, V3W 1B9, CANADA',
+      phone: '1-672-472-0423',
+      email: co.email || 'sales@greenwaverecycling.ca'
+    };
+  }
+
+  function blankPoLine() {
+    return {
+      code: '', resin: '', description: '', color: '',
+      quantity: 0, unit: 'lbs', unitPrice: 0
+    };
+  }
+
+  function newPoDraft() {
+    var w = warehouse();
+    return {
+      id: null,
+      poNumber: '',
+      orderDate: today(),
+      expectedDate: '',
+      currency: 'USD',
+      supplierName: '',
+      supplierAddress: '',
+      supplierCity: '',
+      supplierProvince: '',
+      supplierPostalCode: '',
+      supplierCountry: '',
+      supplierPhone: '',
+      supplierEmail: '',
+      companyInfo: poCompanyDefaults(),
+      notes: '',
+      footerDate: '',
+      status: 'draft',
+      warehouseId: w ? w.id : null,
+      items: [blankPoLine()]
+    };
+  }
+
+  function poToDraft(po) {
+    var co = po.companyInfo || poCompanyDefaults();
+    var items = (po.items || []).map(function (it) {
+      return {
+        code: it.code || '',
+        resin: it.resin || '',
+        description: it.description || '',
+        color: it.color || '',
+        quantity: Number(it.quantity) || 0,
+        unit: it.unit || '',
+        unitPrice: Number(it.unitPrice) || 0
+      };
+    });
+    if (!items.length) items = [blankPoLine()];
+    return {
+      id: po.id,
+      poNumber: po.poNumber || '',
+      orderDate: po.orderDate || today(),
+      expectedDate: po.expectedDate || '',
+      currency: po.currency === 'CAD' ? 'CAD' : 'USD',
+      supplierName: po.supplierName || '',
+      supplierAddress: po.supplierAddress || '',
+      supplierCity: po.supplierCity || '',
+      supplierProvince: po.supplierProvince || '',
+      supplierPostalCode: po.supplierPostalCode || '',
+      supplierCountry: po.supplierCountry || '',
+      supplierPhone: po.supplierPhone || '',
+      supplierEmail: po.supplierEmail || '',
+      companyInfo: {
+        name: co.name || 'GreenWave Recycling Inc.',
+        line1: co.line1 || '23394, Fisherman Rd',
+        line2: co.line2 || 'Maple Ridge, BC, V3W 1B9, CANADA',
+        phone: co.phone || '1-672-472-0423',
+        email: co.email || 'sales@greenwaverecycling.ca'
+      },
+      notes: po.notes || '',
+      footerDate: po.footerDate || '',
+      status: po.status || 'draft',
+      warehouseId: po.warehouseId || null,
+      items: items
+    };
+  }
+
+  function poNumberDisplay(d) {
+    if (d && d.poNumber) return String(d.poNumber);
+    if (nextPoNumberHint) return nextPoNumberHint;
+    return 'Assigned on save';
+  }
+
+  /* Refreshes the next-number hint from the backend. Purely a hint: the
+     authoritative number is the one create() returns, and if another admin
+     saves first they take this one. */
+  function refreshNextPoNumber() {
+    if (!Api || typeof Api.nextPurchaseOrderNumber !== 'function') return;
+    Api.nextPurchaseOrderNumber().then(function (res) {
+      if (!res || !res.nextNumber) return;
+      nextPoNumberHint = String(res.nextNumber);
+      var kpi = $('#kpiPoNext');
+      if (kpi) kpi.textContent = nextPoNumberHint;
+      if (poDraft && !poDraft.poNumber) {
+        var el = $('#poEdNumber');
+        if (el) el.textContent = nextPoNumberHint;
+        var docEl = $('#poDocNumber');
+        if (docEl) docEl.textContent = nextPoNumberHint;
+      }
+    }).catch(function () { /* hint only -- the editor stays usable without it */ });
+  }
+
+  /* --------------------------------------------------------------------
+     The document itself.
+
+     One function, used by the live preview, the read-only view and print.
+     There is deliberately no second "print template" that could drift.
+     -------------------------------------------------------------------- */
+  function poSupplierLines(d) {
+    var locality = [d.supplierCity, d.supplierProvince, d.supplierPostalCode]
+      .filter(function (x) { return x && String(x).trim(); })
+      .join(', ');
+    if (d.supplierCountry && String(d.supplierCountry).trim()) {
+      locality = locality ? locality + ', ' + d.supplierCountry : d.supplierCountry;
+    }
+    var contact = [];
+    if (d.supplierPhone) contact.push('Tel: ' + d.supplierPhone);
+    if (d.supplierEmail) contact.push(d.supplierEmail);
+
+    return {
+      name: d.supplierName || '',
+      address: d.supplierAddress || '',
+      locality: locality,
+      contact: contact.join('  ')
+    };
+  }
+
+  function poDocumentHtml(d) {
+    var co = d.companyInfo || poCompanyDefaults();
+    var cur = poCurrency(d);
+    var sup = poSupplierLines(d);
+    var totalCents = poTotalCents(d.items);
+
+    var rows = (d.items || []).map(function (it) {
+      return '<tr>' +
+        '<td>' + esc(it.code || '') + '</td>' +
+        '<td class="po-c">' + esc(it.resin || '') + '</td>' +
+        '<td>' + esc(it.description || '') + '</td>' +
+        '<td class="po-c">' + esc(it.color || '') + '</td>' +
+        '<td class="po-c">' + esc(poQty(it.quantity)) + '</td>' +
+        '<td class="po-c">' + esc(it.unit || '') + '</td>' +
+        '<td class="po-r">' + esc(poPrice(it.unitPrice)) + '</td>' +
+        '<td class="po-r">' + esc(poMoney(poLineAmountCents(it.quantity, it.unitPrice))) + '</td>' +
+      '</tr>';
+    }).join('');
+
+    return '' +
+      '<div class="po-page">' +
+
+        /* Letterhead */
+        '<div class="po-letterhead">' +
+          '<img src="assets/logo.png?v=20260907_purchaseorders" alt="GreenWave Recycling Inc." class="po-logo">' +
+          '<div class="po-letterhead-text">' +
+            '<div class="po-co-name">' + esc(co.name || '') + '</div>' +
+            '<div class="po-co-line">' + esc(co.line1 || '') + '</div>' +
+            '<div class="po-co-line">' + esc(co.line2 || '') +
+              (co.phone ? '&nbsp;&nbsp;Tel: ' + esc(co.phone) : '') +
+              (co.email ? '&nbsp;&nbsp;' + esc(co.email) : '') +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+
+        '<h1 class="po-title">PURCHASE ORDER</h1>' +
+
+        /* Bordered header box: PO # / dates on the left, currency on the right */
+        '<div class="po-infobox">' +
+          '<div class="po-infobox-col">' +
+            '<div class="po-kv"><span class="po-k">PO #:</span><span class="po-v mono" id="poDocNumber">' + esc(poNumberDisplay(d)) + '</span></div>' +
+            '<div class="po-kv"><span class="po-k">Order Date:</span><span class="po-v">' + esc(d.orderDate || '') + '</span></div>' +
+            '<div class="po-kv"><span class="po-k">Expected Date:</span><span class="po-v">' + esc(d.expectedDate || '') + '</span></div>' +
+          '</div>' +
+          '<div class="po-infobox-col po-infobox-col-right">' +
+            '<div class="po-kv"><span class="po-k">Currency:</span><span class="po-v">' + esc(cur) + '</span></div>' +
+          '</div>' +
+        '</div>' +
+
+        /* Supplier */
+        '<div class="po-section-bar">SUPPLIER</div>' +
+        '<div class="po-supplier">' +
+          '<div class="po-supplier-name">' + (sup.name ? esc(sup.name) : '<span class="po-placeholder">Supplier name</span>') + '</div>' +
+          (sup.address ? '<div class="po-supplier-line">' + esc(sup.address) + '</div>' : '') +
+          (sup.locality ? '<div class="po-supplier-line">' + esc(sup.locality) + '</div>' : '') +
+          (sup.contact ? '<div class="po-supplier-line">' + esc(sup.contact) + '</div>' : '') +
+        '</div>' +
+
+        /* Line items */
+        '<div class="po-table-wrap">' +
+          '<table class="po-table">' +
+            '<thead><tr>' +
+              '<th>Code</th>' +
+              '<th class="po-c">Resin</th>' +
+              '<th class="po-c">Description</th>' +
+              '<th class="po-c">Color</th>' +
+              '<th class="po-c">Quantity</th>' +
+              '<th class="po-c">Unit</th>' +
+              '<th class="po-c">Unit Price (' + esc(cur) + ')</th>' +
+              '<th class="po-c">Amount (' + esc(cur) + ')</th>' +
+            '</tr></thead>' +
+            '<tbody>' + (rows || '<tr><td colspan="8" class="po-c po-placeholder">No line items</td></tr>') + '</tbody>' +
+          '</table>' +
+        '</div>' +
+
+        (d.notes ? '<div class="po-notes"><span class="po-k">Notes:</span> ' + esc(d.notes) + '</div>' : '') +
+
+        /* Signature date and total */
+        '<div class="po-foot">' +
+          '<div class="po-foot-date">Date: ' + (d.footerDate ? esc(d.footerDate) : '____________________') + '</div>' +
+          '<div class="po-foot-total">TOTAL: ' + esc(poMoney(totalCents)) + ' ' + esc(cur) + '</div>' +
+        '</div>' +
+
+      '</div>';
+  }
+
+  /* --------------------------------------------------------------------
+     Printing / Save as PDF.
+
+     Same approach as the invoice: the browser renders the document element
+     itself to PDF via the print pipeline, so the output is real selectable,
+     vector text -- not a screenshot of the UI. The tab title is swapped for
+     the duration so the saved file is named after the PO rather than the app.
+     -------------------------------------------------------------------- */
+  function poPrintDocumentName(d) {
+    var n = d && d.poNumber ? String(d.poNumber) : '';
+    n = n.replace(/[^A-Za-z0-9._-]/g, '');
+    return n || 'PurchaseOrder-Draft';
+  }
+
+  function printPurchaseOrderDocument() {
+    var previousTitle = document.title;
+    var restored = false;
+    var mql = null;
+    function restore() {
+      if (restored) return;
+      restored = true;
+      document.title = previousTitle;
+      window.removeEventListener('afterprint', restore);
+      if (mql && mql.removeListener) mql.removeListener(onMqlChange);
+    }
+    function onMqlChange(e) { if (!e.matches) restore(); }
+
+    // Must be set before the dialog opens -- that is when the browser
+    // snapshots the default filename.
+    document.title = poPrintDocumentName(poDraft);
+
+    window.addEventListener('afterprint', restore);
+    try {
+      mql = window.matchMedia('print');
+      if (mql && mql.addListener) mql.addListener(onMqlChange);
+    } catch (e) { /* afterprint covers us */ }
+
+    window.print();
+    setTimeout(restore, 60000);
+  }
+
+  /* --------------------------------------------------------------------
+     List / management view
+     -------------------------------------------------------------------- */
+  function openNewPurchaseOrder() {
+    if (!can('purchaseorders')) { toast('Only administrators can create purchase orders.'); return; }
+    poDraft = newPoDraft();
+    poViewMode = false;
+    show('poeditor');
+    refreshNextPoNumber();
+  }
+
+  function poStatusBadge(status) {
+    var s = String(status || 'draft').toLowerCase();
+    if (s === 'issued') return '<span class="badge badge-received">Issued</span>';
+    if (s === 'closed') return '<span class="badge badge-paid">Closed</span>';
+    if (s === 'cancelled') return '<span class="badge badge-failed">Cancelled</span>';
+    return '<span class="badge badge-transit">Draft</span>';
+  }
+
+  function updatePoMetrics(list) {
+    var usd = BigInt(0), cad = BigInt(0);
+    (list || []).forEach(function (po) {
+      // NUMERIC comes back as a string from PostgreSQL and a number from the
+      // sqlite test driver; poToScaled handles both without going via a float.
+      var cents = poToScaled(po.total, PO_MONEY_SCALE);
+      if (po.currency === 'CAD') cad += cents; else usd += cents;
+    });
+    var cEl = $('#kpiPoCount'); if (cEl) cEl.textContent = String((list || []).length);
+    var uEl = $('#kpiPoUsd'); if (uEl) uEl.textContent = poMoney(usd);
+    var dEl = $('#kpiPoCad'); if (dEl) dEl.textContent = poMoney(cad);
+  }
+
+  function renderPurchaseOrderList() {
+    var host = $('#poList');
+    if (host) {
+      host.innerHTML =
+        '<div class="card"><div class="po-skeleton-wrap">' +
+        '<div class="po-skeleton po-skeleton-row"></div>'.repeat(5) +
+        '</div></div>';
+    }
+    refreshNextPoNumber();
+
+    Api.listPurchaseOrders({ warehouseId: warehouseId }).then(function (list) {
+      poListCache = list || [];
+      updatePoMetrics(poListCache);
+
+      var el = $('#poList');
+      if (!el) return;
+
+      var filtered = poListCache.filter(function (po) {
+        if (poFilter !== 'all' && String(po.status || 'draft').toLowerCase() !== poFilter) return false;
+        if (poSearchQuery) {
+          var q = poSearchQuery.toLowerCase();
+          var hit = String(po.poNumber || '').toLowerCase().indexOf(q) >= 0 ||
+                    String(po.supplierName || '').toLowerCase().indexOf(q) >= 0;
+          if (!hit) return false;
+        }
+        return true;
+      });
+
+      if (!filtered.length) {
+        el.innerHTML = poListCache.length
+          ? emptyState('po', 'No matching purchase orders',
+              'No purchase orders match the current filter or search.', null, null)
+          : emptyState('po', 'No purchase orders yet',
+              'Create a purchase order to send to a supplier. Numbers are assigned automatically, starting at PO-0001.',
+              'Create Purchase Order', 'newPurchaseOrder');
+        return;
+      }
+
+      el.innerHTML = '<div class="card"><div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table">' +
+        '<table class="table stack-mobile" id="poTable"><thead><tr>' +
+          '<th>PO #</th><th>Supplier</th><th>Order Date</th><th>Expected</th>' +
+          '<th>Currency</th><th class="num">Total</th><th>Created By</th>' +
+          '<th>Status</th><th>Created</th><th>Actions</th>' +
+        '</tr></thead><tbody>' +
+        filtered.map(function (po) {
+          var cents = poToScaled(po.total, PO_MONEY_SCALE);
+          return '<tr data-po-row="' + esc(po.id) + '">' +
+            '<td data-label="PO #" class="mono"><strong>' + esc(po.poNumber) + '</strong></td>' +
+            '<td data-label="Supplier">' + esc(po.supplierName || '—') + '</td>' +
+            '<td data-label="Order Date" class="mono" style="font-size:13px">' + esc(po.orderDate || '—') + '</td>' +
+            '<td data-label="Expected" class="mono" style="font-size:13px">' + esc(po.expectedDate || '—') + '</td>' +
+            '<td data-label="Currency" class="mono" style="font-size:12.5px;font-weight:600">' + esc(poCurrency(po)) + '</td>' +
+            '<td data-label="Total" class="num"><strong>' + esc(poMoney(cents)) + '</strong></td>' +
+            '<td data-label="Created By"><span class="po-cell-clip" title="' + esc(userName(po.createdBy) || '') + '">' + esc(userName(po.createdBy) || '—') + '</span></td>' +
+            '<td data-label="Status">' + poStatusBadge(po.status) + '</td>' +
+            '<td data-label="Created" class="mono" style="font-size:12.5px">' + esc(po.createdAt ? String(po.createdAt).slice(0, 10) : '—') + '</td>' +
+            '<td data-label="Actions">' +
+              '<div style="display:flex;gap:6px;flex-wrap:nowrap">' +
+                '<button type="button" class="btn ghost btn-sm po-btn-view" data-po-view="' + esc(po.id) + '">View</button>' +
+                '<button type="button" class="btn ghost btn-sm po-btn-edit" data-po-edit="' + esc(po.id) + '" title="Edit"><svg style="width:13px;height:13px"><use href="#i-edit"></use></svg></button>' +
+                '<button type="button" class="btn ghost btn-sm po-btn-print" data-po-print="' + esc(po.id) + '" title="Print / download PDF"><svg style="width:13px;height:13px"><use href="#i-print"></use></svg></button>' +
+                '<button type="button" class="btn ghost btn-sm po-btn-del" data-po-del="' + esc(po.id) + '" title="Delete"><svg style="width:13px;height:13px"><use href="#i-trash"></use></svg></button>' +
+              '</div>' +
+            '</td></tr>';
+        }).join('') + '</tbody></table></div></div>';
+
+      function openPo(id, viewMode, thenPrint) {
+        return Api.getPurchaseOrder(id).then(function (po) {
+          poDraft = poToDraft(po);
+          poViewMode = viewMode;
+          show('poeditor');
+          if (thenPrint) setTimeout(printPurchaseOrderDocument, 120);
+        }).catch(function (err) {
+          toast(err.message || 'Could not open that purchase order.');
+        });
+      }
+
+      $$('.po-btn-view').forEach(function (b) {
+        b.addEventListener('click', function () { openPo(b.dataset.poView, true, false); });
+      });
+      $$('.po-btn-edit').forEach(function (b) {
+        b.addEventListener('click', function () { openPo(b.dataset.poEdit, false, false); });
+      });
+      $$('.po-btn-print').forEach(function (b) {
+        b.addEventListener('click', function () { openPo(b.dataset.poPrint, true, true); });
+      });
+      $$('.po-btn-del').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var po = poListCache.filter(function (x) { return x.id === b.dataset.poDel; })[0];
+          confirmDeletePurchaseOrder(po);
+        });
+      });
+    }).catch(function (err) { apiErrorState('#poList', err); });
+  }
+
+  function confirmDeletePurchaseOrder(po) {
+    if (!po || !po.id) return;
+    var bodyHtml =
+      '<div class="delete-confirm">' +
+        '<p class="delete-confirm-lead">This permanently removes the purchase order and all of its line items. This cannot be undone.</p>' +
+        '<dl class="delete-confirm-details">' +
+          '<div><dt>Purchase order</dt><dd>' + esc(po.poNumber || '') + '</dd></div>' +
+          '<div><dt>Supplier</dt><dd>' + esc(po.supplierName || '—') + '</dd></div>' +
+        '</dl>' +
+        '<div class="global-access-warning">' +
+          '<svg style="width:14px;height:14px;flex:none"><use href="#i-alert"></use></svg>' +
+          'The number stays consumed &mdash; it is never reissued to a later purchase order.' +
+        '</div>' +
+      '</div>';
+
+    openModal('Delete Purchase Order?', bodyHtml, function () {
+      return Api.deletePurchaseOrder(po.id).then(function () {
+        toast('Purchase order ' + po.poNumber + ' deleted.');
+        if (poDraft && poDraft.id === po.id) poDraft = null;
+        show('purchaseorders');
+      });
+    }, { okLabel: 'Delete Purchase Order', okClass: 'danger', savingLabel: 'Deleting…' });
+  }
+
+  function setupPurchaseOrderFilters() {
+    $$('#poFilterTabs [data-po-filter]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        $$('#poFilterTabs [data-po-filter]').forEach(function (b) {
+          b.classList.remove('active');
+          b.setAttribute('aria-selected', 'false');
+        });
+        btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
+        poFilter = btn.dataset.poFilter;
+        renderPurchaseOrderList();
+      });
+    });
+
+    var s = $('#poSearch');
+    if (s) {
+      s.addEventListener('input', function () {
+        poSearchQuery = s.value.trim();
+        renderPurchaseOrderList();
+      });
+    }
+  }
+
+  /* --------------------------------------------------------------------
+     Editor
+     -------------------------------------------------------------------- */
+  function renderPoEditor() {
+    if (!poDraft) poDraft = newPoDraft();
+
+    var title = $('#poEdTitle');
+    if (title) {
+      title.textContent = poViewMode
+        ? 'Purchase order ' + (poDraft.poNumber || '')
+        : (poDraft.poNumber ? 'Edit purchase order ' + poDraft.poNumber : 'New purchase order');
+    }
+
+    var printBtn = $('#poEdPrint');
+    if (printBtn) printBtn.onclick = function () { printPurchaseOrderDocument(); };
+
+    var delBtn = $('#poEdDelete');
+    if (delBtn) {
+      delBtn.hidden = !poDraft.id;
+      delBtn.onclick = function () {
+        confirmDeletePurchaseOrder({
+          id: poDraft.id,
+          poNumber: poDraft.poNumber,
+          supplierName: poDraft.supplierName
+        });
+      };
+    }
+
+    var previewBtn = $('#poEdPreview');
+    if (previewBtn) {
+      previewBtn.hidden = false;
+      previewBtn.textContent = poViewMode ? 'Back to editor' : 'Preview';
+      previewBtn.onclick = function () {
+        poViewMode = !poViewMode;
+        renderPoEditor();
+      };
+    }
+
+    var saveBtn = $('#poEdSave');
+    if (poViewMode) {
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<svg><use href="#i-edit"></use></svg>Edit purchase order';
+        saveBtn.onclick = function () { poViewMode = false; renderPoEditor(); };
+      }
+      renderPoDocumentView();
+    } else {
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<svg><use href="#i-check"></use></svg>' +
+          (poDraft.id ? 'Save changes' : 'Save purchase order');
+      }
+      renderPoEditorForm();
+    }
+  }
+
+  /** Read-only, full-width document — the "View" flow and the print target. */
+  function renderPoDocumentView() {
+    var body = $('#poEditorBody');
+    if (!body) return;
+    body.innerHTML = '<div class="po-doc-container po-doc-standalone">' +
+      poDocumentHtml(poDraft) + '</div>';
+  }
+
+  function poLineRowHtml(it, idx) {
+    return '<tr data-po-line="' + idx + '">' +
+      '<td data-label="Code"><input type="text" class="po-in po-f-code" value="' + esc(it.code || '') + '" placeholder="UTL"></td>' +
+      '<td data-label="Resin"><input type="text" class="po-in po-f-resin" value="' + esc(it.resin || '') + '" placeholder="HDPE"></td>' +
+      '<td data-label="Description"><input type="text" class="po-in po-f-desc" value="' + esc(it.description || '') + '" placeholder="PE100 REPRO" required></td>' +
+      '<td data-label="Color"><input type="text" class="po-in po-f-color" value="' + esc(it.color || '') + '" placeholder="Noir"></td>' +
+      '<td data-label="Quantity"><input type="number" step="any" min="0" class="po-in num po-f-qty" value="' + esc(it.quantity != null ? it.quantity : '') + '" placeholder="0"></td>' +
+      '<td data-label="Unit"><input type="text" class="po-in po-f-unit" value="' + esc(it.unit || '') + '" placeholder="lbs"></td>' +
+      '<td data-label="Unit Price"><input type="number" step="0.0001" min="0" class="po-in num po-f-price" value="' + esc(it.unitPrice != null ? it.unitPrice : '') + '" placeholder="0.00"></td>' +
+      '<td data-label="Amount" class="num mono po-line-amount">' + esc(poMoney(poLineAmountCents(it.quantity, it.unitPrice))) + '</td>' +
+      '<td data-label="" class="po-line-actions">' +
+        '<button type="button" class="iconbtn po-line-up" title="Move line up" aria-label="Move line up">&#9650;</button>' +
+        '<button type="button" class="iconbtn po-line-down" title="Move line down" aria-label="Move line down">&#9660;</button>' +
+        '<button type="button" class="iconbtn po-line-del" title="Remove line" aria-label="Remove line"><svg><use href="#i-trash"></use></svg></button>' +
+      '</td>' +
+    '</tr>';
+  }
+
+  function renderPoEditorForm() {
+    var d = poDraft;
+    var co = d.companyInfo || poCompanyDefaults();
+    var cur = poCurrency(d);
+
+    var html =
+      '<div class="po-workspace">' +
+
+        /* ---------------- Editor pane ---------------- */
+        '<div class="po-edit-pane">' +
+
+          '<section class="card po-card">' +
+            '<h2 class="po-card-title">General</h2>' +
+            '<div class="po-grid po-grid-4">' +
+              '<div class="field"><label for="poEdNumberField">PO number</label>' +
+                '<div class="po-assigned mono" id="poEdNumber">' + esc(poNumberDisplay(d)) + '</div>' +
+                '<span class="po-hint">' + (d.poNumber ? 'Assigned — cannot be changed' : 'Assigned by the server on save') + '</span>' +
+              '</div>' +
+              '<div class="field"><label for="poOrderDate">Order date</label>' +
+                '<input type="date" id="poOrderDate" value="' + esc(d.orderDate || '') + '" required></div>' +
+              '<div class="field"><label for="poExpectedDate">Expected date</label>' +
+                '<input type="date" id="poExpectedDate" value="' + esc(d.expectedDate || '') + '"></div>' +
+              '<div class="field"><label for="poCurrencySel">Currency</label>' +
+                '<select id="poCurrencySel">' +
+                  '<option value="USD"' + (cur === 'USD' ? ' selected' : '') + '>USD</option>' +
+                  '<option value="CAD"' + (cur === 'CAD' ? ' selected' : '') + '>CAD</option>' +
+                '</select></div>' +
+            '</div>' +
+            '<div class="po-grid po-grid-2">' +
+              '<div class="field"><label for="poStatusSel">Status</label>' +
+                '<select id="poStatusSel">' +
+                  ['draft', 'issued', 'closed', 'cancelled'].map(function (v) {
+                    return '<option value="' + v + '"' + (d.status === v ? ' selected' : '') + '>' +
+                      v.charAt(0).toUpperCase() + v.slice(1) + '</option>';
+                  }).join('') +
+                '</select></div>' +
+              '<div class="field"><label for="poFooterDate">Signature date <span class="po-hint-inline">(the &ldquo;Date:&rdquo; line on the document)</span></label>' +
+                '<input type="date" id="poFooterDate" value="' + esc(d.footerDate || '') + '"></div>' +
+            '</div>' +
+          '</section>' +
+
+          '<section class="card po-card">' +
+            '<h2 class="po-card-title">Supplier</h2>' +
+            '<div class="po-grid po-grid-2">' +
+              '<div class="field po-span-2"><label for="poSupName">Supplier name <span class="po-req">*</span></label>' +
+                '<input type="text" id="poSupName" value="' + esc(d.supplierName) + '" placeholder="Greenwave Recycling" required></div>' +
+              '<div class="field po-span-2"><label for="poSupAddress">Address</label>' +
+                '<input type="text" id="poSupAddress" value="' + esc(d.supplierAddress) + '" placeholder="23394, Fisherman Rd"></div>' +
+              '<div class="field"><label for="poSupCity">City</label>' +
+                '<input type="text" id="poSupCity" value="' + esc(d.supplierCity) + '" placeholder="Maple Ridge"></div>' +
+              '<div class="field"><label for="poSupProvince">Province / State</label>' +
+                '<input type="text" id="poSupProvince" value="' + esc(d.supplierProvince) + '" placeholder="BC"></div>' +
+              '<div class="field"><label for="poSupPostal">Postal / ZIP</label>' +
+                '<input type="text" id="poSupPostal" value="' + esc(d.supplierPostalCode) + '" placeholder="V3W 1B9"></div>' +
+              '<div class="field"><label for="poSupCountry">Country</label>' +
+                '<input type="text" id="poSupCountry" value="' + esc(d.supplierCountry) + '" placeholder="CANADA"></div>' +
+              '<div class="field"><label for="poSupPhone">Telephone</label>' +
+                '<input type="text" id="poSupPhone" value="' + esc(d.supplierPhone) + '" placeholder="1-672-472-0423"></div>' +
+              '<div class="field"><label for="poSupEmail">Email</label>' +
+                '<input type="email" id="poSupEmail" value="' + esc(d.supplierEmail) + '" placeholder="sales@greenwaverecycling.ca"></div>' +
+            '</div>' +
+          '</section>' +
+
+          '<section class="card po-card">' +
+            '<div class="po-card-head">' +
+              '<h2 class="po-card-title">Line items</h2>' +
+              '<button type="button" class="btn ghost btn-sm" id="poAddLine"><svg><use href="#i-plus"></use></svg>Add item</button>' +
+            '</div>' +
+            '<div class="tablewrap po-items-wrap" tabindex="0" role="region" aria-label="Line items, scrollable">' +
+              '<table class="table po-items-table stack-mobile" id="poItemsTable"><thead><tr>' +
+                '<th>Code</th><th>Resin</th><th>Description</th><th>Color</th>' +
+                '<th class="num">Quantity</th><th>Unit</th>' +
+                '<th class="num">Unit Price (<span class="po-cur-label">' + esc(cur) + '</span>)</th>' +
+                '<th class="num">Amount (<span class="po-cur-label">' + esc(cur) + '</span>)</th>' +
+                '<th></th>' +
+              '</tr></thead><tbody id="poLinesWrap">' +
+                d.items.map(poLineRowHtml).join('') +
+              '</tbody></table>' +
+            '</div>' +
+            '<p class="po-items-hint noprint">Amounts update as you type. Scroll the table sideways to reach every column, or use Tab.</p>' +
+          '</section>' +
+
+          '<section class="card po-card">' +
+            '<h2 class="po-card-title">Letterhead &amp; notes</h2>' +
+            '<div class="po-grid po-grid-2">' +
+              '<div class="field po-span-2"><label for="poCoName">Company name</label>' +
+                '<input type="text" id="poCoName" value="' + esc(co.name) + '"></div>' +
+              '<div class="field"><label for="poCoLine1">Address line 1</label>' +
+                '<input type="text" id="poCoLine1" value="' + esc(co.line1) + '"></div>' +
+              '<div class="field"><label for="poCoLine2">Address line 2</label>' +
+                '<input type="text" id="poCoLine2" value="' + esc(co.line2) + '"></div>' +
+              '<div class="field"><label for="poCoPhone">Telephone</label>' +
+                '<input type="text" id="poCoPhone" value="' + esc(co.phone) + '"></div>' +
+              '<div class="field"><label for="poCoEmail">Email</label>' +
+                '<input type="text" id="poCoEmail" value="' + esc(co.email) + '"></div>' +
+              '<div class="field po-span-2"><label for="poNotes">Notes (optional)</label>' +
+                '<textarea id="poNotes" rows="2" placeholder="Anything the supplier should see on the document">' + esc(d.notes) + '</textarea></div>' +
+            '</div>' +
+          '</section>' +
+
+          '<section class="card po-card po-summary-card">' +
+            '<div class="po-summary-row"><span>Line items</span><span class="mono" id="poSumCount">' + d.items.length + '</span></div>' +
+            '<div class="po-summary-row po-summary-total">' +
+              '<span>TOTAL</span>' +
+              '<span class="mono"><span id="poSumTotal">' + esc(poMoney(poTotalCents(d.items))) + '</span> <span class="po-cur-label">' + esc(cur) + '</span></span>' +
+            '</div>' +
+            '<p class="po-summary-note">Amounts are recalculated by the server when you save — this figure is a preview of that calculation.</p>' +
+          '</section>' +
+
+        '</div>' +
+
+        /* ---------------- Live preview pane ---------------- */
+        '<aside class="po-preview-pane" aria-label="Document preview">' +
+          '<div class="po-preview-label noprint">Live preview</div>' +
+          '<div class="po-doc-container" id="poPreview">' + poDocumentHtml(d) + '</div>' +
+        '</aside>' +
+
+      '</div>';
+
+    var body = $('#poEditorBody');
+    if (!body) return;
+    body.innerHTML = html;
+
+    /* ---- Read the form back into the draft, recompute, repaint preview ---- */
+    function val(id) { var el = $(id); return el ? el.value : ''; }
+
+    function syncPoDraft() {
+      d.orderDate = val('#poOrderDate');
+      d.expectedDate = val('#poExpectedDate');
+      d.currency = val('#poCurrencySel') === 'CAD' ? 'CAD' : 'USD';
+      d.status = val('#poStatusSel') || 'draft';
+      d.footerDate = val('#poFooterDate');
+
+      d.supplierName = val('#poSupName');
+      d.supplierAddress = val('#poSupAddress');
+      d.supplierCity = val('#poSupCity');
+      d.supplierProvince = val('#poSupProvince');
+      d.supplierPostalCode = val('#poSupPostal');
+      d.supplierCountry = val('#poSupCountry');
+      d.supplierPhone = val('#poSupPhone');
+      d.supplierEmail = val('#poSupEmail');
+
+      d.companyInfo = {
+        name: val('#poCoName'), line1: val('#poCoLine1'), line2: val('#poCoLine2'),
+        phone: val('#poCoPhone'), email: val('#poCoEmail')
+      };
+      d.notes = val('#poNotes');
+
+      $$('#poLinesWrap tr').forEach(function (row) {
+        var i = Number(row.dataset.poLine);
+        var it = d.items[i];
+        if (!it) return;
+        function cell(sel) { var e = row.querySelector(sel); return e ? e.value : ''; }
+        it.code = cell('.po-f-code');
+        it.resin = cell('.po-f-resin');
+        it.description = cell('.po-f-desc');
+        it.color = cell('.po-f-color');
+        it.quantity = parseQty(cell('.po-f-qty'));
+        it.unit = cell('.po-f-unit');
+        it.unitPrice = parseQty(cell('.po-f-price'));
+
+        var amt = row.querySelector('.po-line-amount');
+        if (amt) amt.textContent = poMoney(poLineAmountCents(it.quantity, it.unitPrice));
+      });
+
+      var cur2 = poCurrency(d);
+      $$('.po-cur-label').forEach(function (e) { e.textContent = cur2; });
+      var totEl = $('#poSumTotal');
+      if (totEl) totEl.textContent = poMoney(poTotalCents(d.items));
+      var cntEl = $('#poSumCount');
+      if (cntEl) cntEl.textContent = String(d.items.length);
+
+      var preview = $('#poPreview');
+      if (preview) preview.innerHTML = poDocumentHtml(d);
+    }
+
+    $$('#poEditorBody input, #poEditorBody textarea, #poEditorBody select').forEach(function (inp) {
+      inp.addEventListener('input', syncPoDraft);
+      inp.addEventListener('change', syncPoDraft);
+    });
+
+    var addBtn = $('#poAddLine');
+    if (addBtn) {
+      addBtn.addEventListener('click', function () {
+        syncPoDraft();
+        d.items.push(blankPoLine());
+        renderPoEditor();
+        // Put the cursor straight into the new row's first field.
+        var rows = $$('#poLinesWrap tr');
+        var last = rows[rows.length - 1];
+        if (last) { var f = last.querySelector('.po-f-code'); if (f) f.focus(); }
+      });
+    }
+
+    function lineIndexOf(btn) {
+      var row = btn.closest('tr');
+      return row ? Number(row.dataset.poLine) : -1;
+    }
+
+    $$('.po-line-del').forEach(function (b) {
+      b.addEventListener('click', function () {
+        syncPoDraft();
+        var i = lineIndexOf(b);
+        if (i < 0) return;
+        d.items.splice(i, 1);
+        // A purchase order always has at least one row to type into; the
+        // backend separately rejects a submission with no items.
+        if (!d.items.length) d.items.push(blankPoLine());
+        renderPoEditor();
+      });
+    });
+
+    function moveLine(from, to) {
+      if (to < 0 || to >= d.items.length) return;
+      var moved = d.items.splice(from, 1)[0];
+      d.items.splice(to, 0, moved);
+      renderPoEditor();
+    }
+    $$('.po-line-up').forEach(function (b) {
+      b.addEventListener('click', function () { syncPoDraft(); var i = lineIndexOf(b); if (i > 0) moveLine(i, i - 1); });
+    });
+    $$('.po-line-down').forEach(function (b) {
+      b.addEventListener('click', function () { syncPoDraft(); var i = lineIndexOf(b); if (i >= 0) moveLine(i, i + 1); });
+    });
+
+    /* ---- Save ---- */
+    var saveBtn = $('#poEdSave');
+    if (saveBtn) {
+      saveBtn.onclick = function () {
+        syncPoDraft();
+
+        var problem = validatePoDraft(d);
+        if (problem) { toast(problem); return; }
+
+        var payload = {
+          orderDate: d.orderDate,
+          currency: poCurrency(d),
+          supplierName: d.supplierName.trim(),
+          supplierAddress: d.supplierAddress || undefined,
+          supplierCity: d.supplierCity || undefined,
+          supplierProvince: d.supplierProvince || undefined,
+          supplierPostalCode: d.supplierPostalCode || undefined,
+          supplierCountry: d.supplierCountry || undefined,
+          supplierPhone: d.supplierPhone || undefined,
+          supplierEmail: d.supplierEmail || undefined,
+          companyInfo: d.companyInfo,
+          notes: d.notes || undefined,
+          status: d.status || 'draft',
+          // Scoping only, exactly as invoices do it — it has no bearing on the
+          // PO number, which is a single global server-side sequence.
+          division: apiDivisionKey(entity),
+          items: d.items.map(function (it) {
+            return {
+              code: it.code || undefined,
+              resin: it.resin || undefined,
+              description: it.description,
+              color: it.color || undefined,
+              quantity: Number(it.quantity),
+              unit: it.unit || undefined,
+              unitPrice: Number(it.unitPrice)
+              // No `amount`: the server computes it and rejects a supplied one.
+            };
+          })
+        };
+        // Optional dates are sent as null rather than "" (which is not a valid
+        // ISO date) and rather than being omitted — omitting them would make it
+        // impossible to *clear* a date that had previously been set, since the
+        // API treats an absent field as "leave unchanged".
+        payload.expectedDate = d.expectedDate || null;
+        payload.footerDate = d.footerDate || null;
+        if (d.warehouseId) payload.warehouseId = d.warehouseId;
+
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving…';
+        function reset() {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = '<svg><use href="#i-check"></use></svg>' +
+            (d.id ? 'Save changes' : 'Save purchase order');
+        }
+
+        var req = d.id ? Api.updatePurchaseOrder(d.id, payload)
+                       : Api.createPurchaseOrder(payload);
+        req.then(function (saved) {
+          reset();
+          toast('Purchase order ' + saved.poNumber + ' saved.');
+          // Re-seed from the server's response so the number, the recalculated
+          // amounts and the total on screen are the stored ones, not ours.
+          poDraft = poToDraft(saved);
+          poViewMode = true;
+          nextPoNumberHint = null;
+          renderPoEditor();
+          refreshNextPoNumber();
+        }).catch(function (err) {
+          reset();
+          toast(poErrorMessage(err));
+        });
+      };
+    }
+  }
+
+  /**
+   * Client-side validation. A convenience that catches mistakes before a round
+   * trip -- the backend independently re-validates all of it, and is the only
+   * thing that actually decides whether a purchase order is acceptable.
+   */
+  function validatePoDraft(d) {
+    if (!d.orderDate) return 'Please choose an order date.';
+    if (d.expectedDate && d.expectedDate < d.orderDate) {
+      return 'The expected date cannot be before the order date.';
+    }
+    if (!d.supplierName || !d.supplierName.trim()) return 'Please enter a supplier name.';
+    if (d.supplierEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.supplierEmail)) {
+      return 'Please enter a valid supplier email address.';
+    }
+    if (['USD', 'CAD'].indexOf(poCurrency(d)) < 0) return 'Please choose a currency.';
+
+    var usable = d.items.filter(function (it) {
+      return (it.description && it.description.trim()) || Number(it.quantity) > 0;
+    });
+    if (!usable.length) return 'Add at least one line item.';
+
+    for (var i = 0; i < d.items.length; i++) {
+      var it = d.items[i];
+      var n = i + 1;
+      if (!it.description || !it.description.trim()) return 'Line ' + n + ' needs a description.';
+      if (!(Number(it.quantity) > 0)) return 'Line ' + n + ': quantity must be greater than 0.';
+      if (Number(it.unitPrice) < 0) return 'Line ' + n + ': unit price cannot be negative.';
+    }
+    return null;
+  }
+
+  /** Turns an API failure into something an administrator can act on. */
+  function poErrorMessage(err) {
+    if (!err) return 'Could not save the purchase order.';
+    if (err.status === 403) return 'Only administrators can manage purchase orders.';
+    if (err.status === 401) return 'Your session has expired. Please sign in again.';
+    if (err.status === 0) return err.message;
+    // Nest returns `message` as an array for validation failures.
+    var body = err.body;
+    if (body && Array.isArray(body.message) && body.message.length) {
+      return String(body.message[0]);
+    }
+    return err.message || 'Could not save the purchase order.';
   }
 
   function renderCustomers() {
@@ -4102,6 +5112,8 @@
     else if (view === 'timeclock') renderTimeclock();
     else if (view === 'invoices') renderInvoiceList();
     else if (view === 'editor') renderEditor();
+    else if (view === 'purchaseorders') renderPurchaseOrderList();
+    else if (view === 'poeditor') renderPoEditor();
     else if (view === 'customers') renderCustomers();
     else if (view === 'products') renderProducts();
     else if (view === 'staff') renderStaff();
@@ -4325,6 +5337,7 @@
     });
 
     bindAction($('#newInvoice'), 'newInvoice');
+    bindAction($('#newPurchaseOrder'), 'newPurchaseOrder');
     bindAction($('#newCustomer'), 'newCustomer');
     bindAction($('#newProduct'), 'newProduct');
 
@@ -4424,6 +5437,7 @@
     });
 
     setupInvoiceFilters();
+    setupPurchaseOrderFilters();
   }
 
   function checkPublicPaymentRoute() {

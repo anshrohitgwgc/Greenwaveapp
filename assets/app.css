@@ -1356,9 +1356,34 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
 
 @media print {
   .rail, .topbar, .noprint, .vactions, .inven-toolbar, .tabbar { display: none !important; }
+  /* Transient overlays are screen furniture. A toast that happened to be up
+     when the user hit Print was being baked into the PDF. */
+  .toast, .modalwrap, .lightbox, .gate, .payportal-wrap { display: none !important; }
   .app { display: block; }
   .scroll { padding: 0; overflow: visible; }
   body { background: #fff; color: #000; font-size: 12pt; }
+
+  /* On screen `.app` is a 100vh grid with overflow:hidden so the rail and the
+     content scroll independently. On paper that clips the document to a single
+     viewport — a long invoice or purchase order lost every line past the fold,
+     including its total. Release the height and the clip so the document
+     paginates instead of being cut off. */
+  html, body {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  .app {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  .main, .scroll, .view {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
 }
 
 
@@ -2417,4 +2442,586 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
     flex-direction: column;
     gap: 8px;
   }
+}
+
+/* ==========================================================================
+   PURCHASE ORDER MODULE
+
+   Two things live here:
+
+     1. `.po-page` — the purchase order DOCUMENT, reproducing the supplied
+        PURCHASE.docx: Arial, the navy #1F3B5E rules and table header, the
+        bordered header box, the hairline #C7C7C7 grid, and the muted #666666
+        signature line. These are the reference's own values, so they are
+        written literally rather than mapped onto the app's Lumina tokens —
+        the document is a business artefact with a fixed identity, not a
+        surface that should restyle when the division accent changes.
+
+     2. The editor workspace around it. That DOES use the design-system
+        tokens, so the Purchase Order Maker and the Invoice Maker read as the
+        same product.
+
+   The same `.po-page` markup is used for the live preview, the read-only view
+   and the printed PDF, so there is no second template that can drift.
+   ========================================================================== */
+
+:root {
+  --po-navy:      #1F3B5E;
+  --po-navy-2:    #162C47;
+  --po-rule:      #C7C7C7;
+  --po-muted:     #666666;
+  --po-ink:       #1A1A1A;
+  --po-doc-font:  Arial, "Helvetica Neue", Helvetica, sans-serif;
+}
+
+/* --------------------------------------------------------------------------
+   The document
+   -------------------------------------------------------------------------- */
+
+.po-doc-container {
+  width: 100%;
+}
+
+.po-doc-standalone {
+  max-width: 900px;
+  margin: 0 auto 40px;
+}
+
+.po-page {
+  background: #ffffff;
+  color: var(--po-ink);
+  font-family: var(--po-doc-font);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 34px 38px 40px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-1, 0 4px 18px rgba(17, 28, 45, 0.06));
+}
+
+/* ---- Letterhead ---- */
+.po-letterhead {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 14px;
+}
+
+.po-logo {
+  width: 62px;
+  height: auto;
+  flex: none;
+}
+
+.po-co-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--po-navy);
+  letter-spacing: 0.2px;
+}
+
+.po-co-line {
+  font-size: 11.5px;
+  color: var(--po-ink);
+}
+
+/* ---- Title ---- */
+/* 16pt, navy, left-aligned — the reference document's own treatment. */
+.po-title {
+  margin: 12px 0 16px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: var(--po-navy);
+  text-align: left;
+  text-transform: uppercase;
+}
+
+/* ---- Bordered header box (PO # / dates | currency) ---- */
+.po-infobox {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 16px;
+  border: 1.5px solid var(--po-navy);
+  padding: 14px 18px;
+  margin-bottom: 20px;
+}
+
+.po-infobox-col {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.po-infobox-col-right {
+  justify-content: flex-start;
+}
+
+.po-kv {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.po-k {
+  font-weight: 700;
+  color: var(--po-navy);
+  font-size: 12px;
+  flex: none;
+  min-width: 92px;
+}
+
+.po-v {
+  font-size: 12px;
+  color: var(--po-ink);
+  overflow-wrap: anywhere;
+}
+
+/* ---- SUPPLIER section ---- */
+.po-section-bar {
+  background: var(--po-navy);
+  color: #ffffff;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  padding: 6px 12px;
+  margin-bottom: 10px;
+  /* The filled bar is a defining feature of the document, so it must survive
+     the browser's default "don't print backgrounds" behaviour. */
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.po-supplier {
+  margin-bottom: 20px;
+  font-size: 11.5px;
+}
+
+.po-supplier-name {
+  font-weight: 700;
+  font-size: 12.5px;
+  margin-bottom: 2px;
+}
+
+.po-supplier-line {
+  color: var(--po-ink);
+}
+
+.po-placeholder {
+  color: #9AA3AE;
+  font-style: italic;
+  font-weight: 400;
+}
+
+/* ---- Line items ----
+   Column widths are the reference document's own grid, converted from its
+   dxa measurements to percentages so the table scales without re-proportioning. */
+.po-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.po-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 11px;
+}
+
+.po-table th:nth-child(1), .po-table td:nth-child(1) { width: 7.8%; }
+.po-table th:nth-child(2), .po-table td:nth-child(2) { width: 9.4%; }
+.po-table th:nth-child(3), .po-table td:nth-child(3) { width: 17.1%; }
+.po-table th:nth-child(4), .po-table td:nth-child(4) { width: 10.5%; }
+.po-table th:nth-child(5), .po-table td:nth-child(5) { width: 11.2%; }
+.po-table th:nth-child(6), .po-table td:nth-child(6) { width: 7.8%; }
+.po-table th:nth-child(7), .po-table td:nth-child(7) { width: 19.0%; }
+.po-table th:nth-child(8), .po-table td:nth-child(8) { width: 17.2%; }
+
+.po-table thead th {
+  background: var(--po-navy);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 10.5px;
+  text-align: left;
+  padding: 9px 7px;
+  border: 0;
+  vertical-align: middle;
+  /* The navy header is the document's defining feature; it must survive the
+     browser's default "don't print backgrounds" behaviour. */
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.po-table tbody td {
+  border: 1px solid var(--po-rule);
+  padding: 8px 7px;
+  vertical-align: middle;
+  /* Long descriptions wrap inside the cell instead of forcing the table wide
+     or clipping — a PO line can be a full resin specification. */
+  overflow-wrap: anywhere;
+}
+
+.po-table .po-c { text-align: center; }
+.po-table .po-r { text-align: right; }
+.po-table thead .po-c { text-align: center; }
+
+/* ---- Notes ---- */
+.po-notes {
+  margin-top: 14px;
+  font-size: 11.5px;
+  color: var(--po-ink);
+  white-space: pre-line;
+}
+
+/* ---- Signature date + TOTAL ---- */
+.po-foot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 46px;
+}
+
+.po-foot-date {
+  font-size: 11px;
+  color: var(--po-muted);
+  white-space: nowrap;
+}
+
+.po-foot-total {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--po-ink);
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------------
+   Editor workspace — editor on the left, live document preview on the right
+   -------------------------------------------------------------------------- */
+
+.po-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.po-edit-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.po-preview-pane {
+  position: sticky;
+  top: 0;
+  min-width: 0;
+}
+
+.po-preview-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+/* The preview is a scaled-down document, so it stays legible without the
+   editor having to give up half the screen to it. */
+.po-preview-pane .po-page {
+  font-size: 11px;
+  padding: 26px 28px 30px;
+}
+.po-preview-pane .po-title { font-size: 21px; }
+.po-preview-pane .po-table { font-size: 10px; }
+.po-preview-pane .po-table thead th { font-size: 9.5px; padding: 7px 5px; }
+.po-preview-pane .po-table tbody td { padding: 6px 5px; }
+.po-preview-pane .po-foot { margin-top: 30px; }
+
+.po-card { padding: 20px 22px; }
+
+.po-card-title {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--ink);
+  margin: 0 0 16px;
+  letter-spacing: -0.01em;
+}
+
+.po-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.po-card-head .po-card-title { margin: 0; }
+
+.po-grid {
+  display: grid;
+  gap: 14px 16px;
+}
+.po-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.po-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.po-grid + .po-grid { margin-top: 14px; }
+.po-span-2 { grid-column: 1 / -1; }
+
+.po-req { color: var(--crit); }
+
+.po-hint {
+  display: block;
+  margin-top: 5px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.po-hint-inline {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+/* The assigned number is displayed, never typed: it comes from the server's
+   sequence and is not the client's to choose. Styled as a read-only field so
+   it reads as data rather than as a disabled input someone should unlock. */
+.po-assigned {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  padding: 0 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+/* ---- Line item table in the editor ---- */
+.po-items-table { table-layout: auto; }
+.po-items-table th { white-space: nowrap; }
+.po-items-table td { padding: 6px 8px; vertical-align: middle; }
+
+.po-in {
+  width: 100%;
+  min-width: 62px;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+}
+.po-in:hover { border-color: var(--line-2); }
+.po-in:focus {
+  outline: none;
+  border-color: var(--acc);
+  box-shadow: 0 0 0 3px var(--acc-ring);
+}
+.po-in.num { text-align: right; }
+
+.po-items-table td { padding: 6px 5px; }
+.po-items-table .po-f-desc { min-width: 150px; }
+.po-items-table .po-f-qty,
+.po-items-table .po-f-price { min-width: 84px; }
+.po-items-table .po-f-code,
+.po-items-table .po-f-resin,
+.po-items-table .po-f-color,
+.po-items-table .po-f-unit { min-width: 68px; }
+
+/* A scrollable region needs to look scrollable. */
+.po-items-wrap { scrollbar-width: thin; }
+.po-items-hint {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.po-line-amount { white-space: nowrap; font-weight: 600; }
+
+.po-line-actions {
+  white-space: nowrap;
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+.po-line-actions .iconbtn {
+  font-size: 10px;
+  line-height: 1;
+  min-width: 28px;
+}
+
+/* ---- Summary ---- */
+.po-summary-card { padding: 18px 22px; }
+
+.po-summary-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 7px 0;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+
+.po-summary-total {
+  border-top: 2px solid var(--po-navy);
+  margin-top: 6px;
+  padding-top: 12px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.po-summary-note {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* ---- Management list ----
+   Ten columns is a lot for one row, so the two that can be long are clipped
+   with their full value on hover rather than being allowed to wrap to three
+   lines and push the action buttons out of view. */
+#poTable { table-layout: auto; }
+#poTable td, #poTable th { white-space: nowrap; }
+#poTable td[data-label="Supplier"] { white-space: normal; }
+
+.po-cell-clip {
+  display: inline-block;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+#poTable td[data-label="Actions"] .btn { padding: 5px 10px; }
+
+@media (max-width: 768px) {
+  .po-cell-clip { max-width: none; }
+  #poTable td, #poTable th { white-space: normal; }
+}
+
+/* ---- Loading skeleton ---- */
+.po-skeleton-wrap { padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+.po-skeleton {
+  background: linear-gradient(90deg, var(--panel-2) 25%, var(--panel-3) 37%, var(--panel-2) 63%);
+  background-size: 400% 100%;
+  border-radius: var(--r);
+  animation: po-shimmer 1.4s ease-in-out infinite;
+}
+.po-skeleton-row { height: 42px; }
+
+@keyframes po-shimmer {
+  0%   { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .po-skeleton { animation: none; }
+}
+
+/* --------------------------------------------------------------------------
+   Responsive
+   -------------------------------------------------------------------------- */
+
+/* Below this the two panes stop being readable side by side, so the preview
+   moves under the editor rather than being squeezed. */
+@media (max-width: 1280px) {
+  .po-workspace { grid-template-columns: minmax(0, 1fr); }
+  .po-preview-pane { position: static; }
+  .po-preview-pane .po-doc-container { max-width: 900px; }
+}
+
+@media (max-width: 1024px) {
+  .po-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 768px) {
+  .po-page { padding: 22px 18px 26px; }
+  .po-title { font-size: 20px; letter-spacing: 1px; }
+  .po-infobox { grid-template-columns: 1fr; gap: 10px; padding: 12px 14px; }
+  .po-letterhead { gap: 12px; }
+  .po-logo { width: 48px; }
+  .po-foot { flex-direction: column; align-items: flex-start; gap: 14px; margin-top: 28px; }
+  .po-grid-2, .po-grid-4 { grid-template-columns: minmax(0, 1fr); }
+
+  /* The line-item table becomes one card per line; each input keeps its
+     column name from the `data-label` the renderer emits. */
+  /* In card form each field is on its own row, so there is nothing to scroll
+     sideways and the hint would be actively misleading. */
+  .po-items-hint { display: none; }
+  .po-items-table.stack-mobile td { padding: 8px 0; }
+  .po-items-table.stack-mobile .po-in { max-width: 60%; }
+  .po-items-table.stack-mobile .po-line-actions { justify-content: flex-end; width: 100%; }
+  .po-items-table.stack-mobile td.po-line-actions::before { content: "Actions"; }
+
+  /* The document itself stays desktop-proportioned and scrolls horizontally
+     rather than reflowing into something that no longer matches the print
+     output the admin is about to produce. */
+  .po-table-wrap { -webkit-overflow-scrolling: touch; }
+  .po-table { min-width: 620px; }
+}
+
+/* --------------------------------------------------------------------------
+   Print — the PDF.
+
+   The browser renders `.po-page` itself, so the output is real selectable,
+   vector text at the printer's resolution. Everything that is application
+   chrome (navigation, the editor form, the preview label) is removed, and the
+   document is promoted to the full page.
+   -------------------------------------------------------------------------- */
+@media print {
+  .po-workspace {
+    display: block !important;
+  }
+  /* Only the document prints. In the split editor that means the preview
+     pane; in the read-only view it is the only thing on screen anyway. */
+  .po-edit-pane,
+  .po-preview-label {
+    display: none !important;
+  }
+  .po-preview-pane {
+    position: static !important;
+    display: block !important;
+  }
+  .po-doc-container,
+  .po-doc-standalone {
+    max-width: 100% !important;
+    margin: 0 !important;
+  }
+  .po-page {
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    font-size: 10.5pt;
+  }
+  /* The preview's reduced type is a screen affordance; on paper the document
+     returns to its true proportions. */
+  .po-preview-pane .po-page { font-size: 10.5pt; padding: 0 !important; }
+  .po-preview-pane .po-title { font-size: 20pt; }
+  .po-preview-pane .po-table { font-size: 8.5pt; }
+  .po-preview-pane .po-table thead th { font-size: 8pt; padding: 7px 6px; }
+  .po-preview-pane .po-table tbody td { padding: 7px 6px; }
+
+  .po-title { font-size: 20pt; }
+  .po-table { font-size: 8.5pt; min-width: 0 !important; }
+  .po-table-wrap { overflow: visible !important; }
+
+  /* A long order may legitimately run to several pages. Repeat the navy
+     header on each one and never split a line across the fold. */
+  .po-table thead { display: table-header-group; }
+  .po-table tr { break-inside: avoid; page-break-inside: avoid; }
+  .po-letterhead, .po-infobox, .po-supplier { break-inside: avoid; }
+  .po-foot { break-inside: avoid; margin-top: 32px; }
+
+  @page { margin: 12mm 14mm; size: letter portrait; }
 }

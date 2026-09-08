@@ -203,6 +203,16 @@
     refundPayment: function (paymentId, reason) {
       return request('POST', '/payments/refund/' + paymentId, { reason: reason });
     },
+    // Purchase Orders (administrator-only server-side; see
+    // purchase-orders.controller.ts). The client hiding the navigation is a
+    // convenience -- every one of these 403s for a non-admin.
+    listPurchaseOrders: function (params) { return request('GET', '/purchase-orders' + qs(params)); },
+    getPurchaseOrder: function (id) { return request('GET', '/purchase-orders/' + id); },
+    createPurchaseOrder: function (data) { return request('POST', '/purchase-orders', data); },
+    updatePurchaseOrder: function (id, data) { return request('PATCH', '/purchase-orders/' + id, data); },
+    deletePurchaseOrder: function (id) { return request('DELETE', '/purchase-orders/' + id); },
+    nextPurchaseOrderNumber: function () { return request('GET', '/purchase-orders/next-number'); },
+
     getPublicInvoice: function (token) {
       return request('GET', '/pay/' + token);
     },
