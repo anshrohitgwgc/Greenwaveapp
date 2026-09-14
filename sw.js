@@ -1,15 +1,15 @@
 /* Offline cache for Greenwave Ops */
-var CACHE = 'greenwave-v22';
+var CACHE = 'greenwave-v24-payments-finance-ops';
 var FILES = [
   '/',
   '/index.html',
-  '/manifest.webmanifest?v=20260908_invoiceredesign',
-  '/assets/app.css?v=20260908_invoiceredesign',
-  '/assets/api.js?v=20260908_invoiceredesign',
-  '/assets/app.js?v=20260908_invoiceredesign',
-  '/assets/store.js?v=20260908_invoiceredesign',
-  '/assets/photos.js?v=20260908_invoiceredesign',
-  '/assets/logo.png?v=20260908_invoiceredesign',
+  '/manifest.webmanifest?v=20260913_financeops',
+  '/assets/app.css?v=20260913_financeops',
+  '/assets/api.js?v=20260913_financeops',
+  '/assets/app.js?v=20260913_financeops',
+  '/assets/store.js?v=20260913_financeops',
+  '/assets/photos.js?v=20260913_financeops',
+  '/assets/logo.png?v=20260913_financeops',
   '/assets/icon-192.png',
   '/assets/icon-512.png'
 ];
@@ -41,8 +41,28 @@ self.addEventListener('fetch', function (e) {
   if (!e.request.url.startsWith('http')) return;
 
   var url = new URL(e.request.url);
-  // Bypass all API backend endpoints, photo streams, and SSE streams
-  if (url.pathname.match(/^\/(api|auth|users|warehouses|customers|materials|containers|inventory|invoices|purchase-orders|timesheets|photos|greenwave-photos|audit|pickups|chat)(\/.*)?$/)) {
+
+  // Security Hardening: NEVER cache any API endpoint, auth, financial data,
+  // payment portal, banking, accounting, employees, or SSE stream. Only static assets may be cached.
+  if (
+    url.pathname.startsWith('/api') ||
+    url.pathname.startsWith('/auth') ||
+    url.pathname.startsWith('/pay') ||
+    url.pathname.startsWith('/p/') ||
+    url.pathname.startsWith('/payments') ||
+    url.pathname.startsWith('/accounting') ||
+    url.pathname.startsWith('/banking') ||
+    url.pathname.startsWith('/payables') ||
+    url.pathname.startsWith('/employees') ||
+    url.pathname.startsWith('/divisions') ||
+    url.pathname.startsWith('/roles') ||
+    url.pathname.startsWith('/permissions') ||
+    url.pathname.startsWith('/timesheets') ||
+    url.pathname.startsWith('/photos') ||
+    url.pathname.startsWith('/invoices') ||
+    url.pathname.startsWith('/purchase-orders') ||
+    url.pathname.match(/^\/(users|warehouses|customers|materials|containers|inventory|greenwave-photos|audit|pickups|chat)(\/.*)?$/)
+  ) {
     return;
   }
 

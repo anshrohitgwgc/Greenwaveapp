@@ -9,13 +9,13 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Greenwave">
 <title>GreenWave Operations Platform</title>
-<link rel="manifest" href="manifest.webmanifest?v=20260908_invoiceredesign">
+<link rel="manifest" href="manifest.webmanifest?v=20260913_financeops">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="icon" href="assets/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/app.css?v=20260908_invoiceredesign">
+<link rel="stylesheet" href="assets/app.css?v=20260913_financeops">
 </head>
 <body>
 
@@ -47,6 +47,13 @@
   <symbol id="i-out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.4 6.6V4.8a1.6 1.6 0 0 0-1.6-1.6H5.6A1.6 1.6 0 0 0 4 4.8v14.4a1.6 1.6 0 0 0 1.6 1.6h7.2a1.6 1.6 0 0 0 1.6-1.6v-1.8"/><path d="M9.6 12h10.8m0 0-3.2-3.2m3.2 3.2-3.2 3.2"/></symbol>
   <symbol id="i-po" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3.4h6v2.6H9z"/><path d="M15 4.7h2.6a1.4 1.4 0 0 1 1.4 1.4v13.1a1.4 1.4 0 0 1-1.4 1.4H6.4A1.4 1.4 0 0 1 5 19.2V6.1a1.4 1.4 0 0 1 1.4-1.4H9"/><path d="M8.6 12.2h6.8M8.6 16h4.4"/></symbol>
   <symbol id="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+  <symbol id="i-creditcard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></symbol>
+  <symbol id="i-bank" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-5 9 5v2H3zm2 4v6m4-6v6m6-6v6m4-6v6M2 21h20"/></symbol>
+  <symbol id="i-ledger" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></symbol>
+  <symbol id="i-pie" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></symbol>
+  <symbol id="i-user-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></symbol>
+  <symbol id="i-calendar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></symbol>
 </svg>
 
 <!-- ============ SIGN IN (CLEAN EMAIL-ONLY BUSINESS LOGIN) ============ -->
@@ -153,12 +160,25 @@
       <span class="navlabel">Communication</span>
       <button type="button" class="navitem" data-view="chat"><svg><use href="#i-chat"></use></svg>Global Chat <span class="navchip" id="chatNavBadge" hidden>0</span></button>
 
-      <span class="navlabel" data-only="recycling" data-role="admin,manager">Documents</span>
+      <span class="navlabel" data-only="recycling" data-role="admin,manager">Sales &amp; Receivables</span>
       <button type="button" class="navitem" data-view="invoices" data-only="recycling" data-role="admin,manager"><svg><use href="#i-doc"></use></svg>Invoices</button>
-      <!-- Purchase orders are administrator-only. `data-role="admin"` hides the
-           entry for everyone else; the actual control is @Roles('admin') on
-           PurchaseOrdersController, which 403s regardless of what the UI shows. -->
+      <button type="button" class="navitem" data-view="payments" data-only="recycling" data-role="admin,manager"><svg><use href="#i-creditcard"></use></svg>Payments</button>
+      <button type="button" class="navitem" data-view="araging" data-only="recycling" data-role="admin,manager"><svg><use href="#i-clock"></use></svg>AR Aging</button>
       <button type="button" class="navitem" data-view="purchaseorders" data-only="recycling" data-role="admin"><svg><use href="#i-po"></use></svg>Purchase Orders</button>
+
+      <span class="navlabel" data-role="admin,manager">Finance &amp; Banking</span>
+      <button type="button" class="navitem" data-view="banking" data-role="admin,manager"><svg><use href="#i-bank"></use></svg>Bank &amp; Cards</button>
+      <button type="button" class="navitem" data-view="reconciliation" data-role="admin,manager"><svg><use href="#i-check"></use></svg>Reconciliation</button>
+      <button type="button" class="navitem" data-view="payables" data-role="admin,manager"><svg><use href="#i-po"></use></svg>Bills &amp; Payables</button>
+      <button type="button" class="navitem" data-view="chartofaccounts" data-role="admin,manager"><svg><use href="#i-ledger"></use></svg>Chart of Accounts</button>
+      <button type="button" class="navitem" data-view="generalledger" data-role="admin,manager"><svg><use href="#i-doc"></use></svg>General Ledger</button>
+      <button type="button" class="navitem" data-view="profitloss" data-role="admin,manager"><svg><use href="#i-chart"></use></svg>Profit &amp; Loss</button>
+      <button type="button" class="navitem" data-view="balancesheet" data-role="admin,manager"><svg><use href="#i-pie"></use></svg>Balance Sheet</button>
+
+      <span class="navlabel">People &amp; Operations</span>
+      <button type="button" class="navitem" data-view="employees" data-role="admin,manager"><svg><use href="#i-users"></use></svg>Employees</button>
+      <button type="button" class="navitem" data-view="attendance"><svg><use href="#i-clock"></use></svg>Attendance</button>
+      <button type="button" class="navitem" data-view="leaverequests"><svg><use href="#i-calendar"></use></svg>Leave Requests</button>
 
       <span class="navlabel" data-role="admin,manager">Manage</span>
       <button type="button" class="navitem" data-view="customers" data-role="admin,manager"><svg><use href="#i-users"></use></svg>Customers</button>
@@ -608,6 +628,556 @@
         <div class="vhead"><div><h1>Settings</h1><p>Company details and operational parameters.</p></div></div>
         <div id="settingsBody"></div>
       </section>
+
+      <!-- ============ PAYMENTS & STRIPE VIEW ============ -->
+      <section class="view" id="v-payments">
+        <div class="vhead">
+          <div>
+            <h1>Customer Payments &amp; Gateway</h1>
+            <p>Stripe card checkouts, payment intent settlements, and admin refunds.</p>
+          </div>
+          <div class="vactions">
+            <button type="button" class="btn ghost" id="btnSyncStripe"><svg><use href="#i-history"></use></svg>Sync Stripe</button>
+          </div>
+        </div>
+
+        <div class="kpi-grid" id="paymentsKpis">
+          <div class="kpi-card">
+            <span class="kpi-label">TOTAL SETTLED</span>
+            <span class="kpi-value text-success" id="kpiPaySettled">$0.00</span>
+            <span class="kpi-sub">Completed customer payments</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">PROCESSING</span>
+            <span class="kpi-value text-accent" id="kpiPayProcessing">$0.00</span>
+            <span class="kpi-sub">Awaiting bank settlement</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">TOTAL REFUNDED</span>
+            <span class="kpi-value text-warning" id="kpiPayRefunded">$0.00</span>
+            <span class="kpi-sub">Returned to customers</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">FAILED / DISPUTED</span>
+            <span class="kpi-value text-crit" id="kpiPayFailed">0</span>
+            <span class="kpi-sub">Require attention</span>
+          </div>
+        </div>
+
+        <div class="inven-toolbar" style="margin-bottom:14px">
+          <div class="inven-tabs" id="payFilterTabs" role="tablist">
+            <button type="button" class="inven-tab active" data-pay-filter="all" role="tab" aria-selected="true">All</button>
+            <button type="button" class="inven-tab" data-pay-filter="SUCCEEDED" role="tab" aria-selected="false">Succeeded</button>
+            <button type="button" class="inven-tab" data-pay-filter="PROCESSING" role="tab" aria-selected="false">Processing</button>
+            <button type="button" class="inven-tab" data-pay-filter="CREATED" role="tab" aria-selected="false">Created</button>
+            <button type="button" class="inven-tab" data-pay-filter="REFUNDED" role="tab" aria-selected="false">Refunded</button>
+            <button type="button" class="inven-tab" data-pay-filter="FAILED" role="tab" aria-selected="false">Failed</button>
+          </div>
+          <div class="inven-filters">
+            <div class="search-wrap">
+              <svg class="search-ico"><use href="#i-search"></use></svg>
+              <input type="search" id="paySearch" placeholder="Search payment ID, invoice #, customer...">
+            </div>
+          </div>
+        </div>
+
+        <div id="paymentsList"></div>
+      </section>
+
+      <!-- ============ AR AGING VIEW ============ -->
+      <section class="view" id="v-araging">
+        <div class="vhead">
+          <div>
+            <h1>Accounts Receivable Aging</h1>
+            <p>Aging analysis of outstanding customer balances across 30, 60, and 90+ day buckets.</p>
+          </div>
+          <div class="vactions">
+            <button type="button" class="btn ghost" id="btnExportArAging"><svg><use href="#i-download"></use></svg>Export CSV</button>
+          </div>
+        </div>
+
+        <div class="kpi-grid" id="arAgingKpis">
+          <div class="kpi-card">
+            <span class="kpi-label">CURRENT (0-30 DAYS)</span>
+            <span class="kpi-value text-success" id="kpiArCurrent">$0.00</span>
+            <span class="kpi-sub">Not yet overdue</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">31–60 DAYS OVERDUE</span>
+            <span class="kpi-value text-accent" id="kpiAr30">$0.00</span>
+            <span class="kpi-sub">1 to 30 days past due</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">61–90 DAYS OVERDUE</span>
+            <span class="kpi-value text-warning" id="kpiAr60">$0.00</span>
+            <span class="kpi-sub">31 to 60 days past due</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">90+ DAYS OVERDUE</span>
+            <span class="kpi-value text-crit" id="kpiAr90">$0.00</span>
+            <span class="kpi-sub">Severely delinquent</span>
+          </div>
+        </div>
+
+        <div class="inven-toolbar" style="margin-bottom:14px">
+          <div class="inven-filters">
+            <label for="arAgingAsOf" style="font-size:13px;font-weight:600;color:var(--ink)">As Of Date:</label>
+            <input type="date" id="arAgingAsOf" style="max-width:180px">
+            <button type="button" class="btn ghost btn-sm" id="btnRefreshArAging">Apply</button>
+          </div>
+        </div>
+
+        <div id="arAgingBody"></div>
+      </section>
+
+      <!-- ============ BANKING & CARDS VIEW ============ -->
+      <section class="view" id="v-banking">
+        <div class="vhead">
+          <div>
+            <h1>Banking &amp; Corporate Credit Cards</h1>
+            <p>Operating cash accounts, credit cards, CSV statement imports, and transaction categorization.</p>
+          </div>
+          <div class="vactions">
+            <button type="button" class="btn btn-primary" id="btnAddBankAccount"><svg><use href="#i-plus"></use></svg>Add Account</button>
+          </div>
+        </div>
+
+        <div class="kpi-grid" id="bankingKpis">
+          <div class="kpi-card">
+            <span class="kpi-label">TOTAL CASH ACCOUNTS</span>
+            <span class="kpi-value text-success" id="kpiBankTotalCash">$0.00</span>
+            <span class="kpi-sub">Operating &amp; savings balances</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">CREDIT CARD LIABILITIES</span>
+            <span class="kpi-value text-warning" id="kpiBankTotalCredit">$0.00</span>
+            <span class="kpi-sub">Current card balances</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">NET LIQUID POSITION</span>
+            <span class="kpi-value" id="kpiBankNetLiquid">$0.00</span>
+            <span class="kpi-sub">Cash minus credit liabilities</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">UNRECONCILED ITEMS</span>
+            <span class="kpi-value text-accent" id="kpiBankUnreconciled">0</span>
+            <span class="kpi-sub">Awaiting statement match</span>
+          </div>
+        </div>
+
+        <div style="margin-bottom:18px" id="bankAccountsContainer"></div>
+
+        <div class="inven-toolbar" style="margin-bottom:14px">
+          <div class="inven-tabs" id="bankTabSelector" role="tablist">
+            <button type="button" class="inven-tab active" data-bank-tab="transactions" role="tab" aria-selected="true">Transactions</button>
+            <button type="button" class="inven-tab" data-bank-tab="import" role="tab" aria-selected="false">Import Statement (CSV)</button>
+          </div>
+          <div class="inven-filters" id="bankTxFilters">
+            <div class="search-wrap">
+              <svg class="search-ico"><use href="#i-search"></use></svg>
+              <input type="search" id="bankTxSearch" placeholder="Search payee, description, amount...">
+            </div>
+            <select id="bankTxStatusFilter" aria-label="Filter transactions by status">
+              <option value="">All Statuses</option>
+              <option value="UNCATEGORIZED">Uncategorized</option>
+              <option value="CATEGORIZED">Categorized</option>
+              <option value="MATCHED">Matched</option>
+              <option value="RECONCILED">Reconciled</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="bankTransactionsBody"></div>
+      </section>
+
+      <!-- ============ RECONCILIATION VIEW ============ -->
+      <section class="view" id="v-reconciliation">
+        <div class="vhead">
+          <div>
+            <h1>Bank Statement Reconciliation</h1>
+            <p>Verify bank statements against company general ledger records for complete mathematical accuracy.</p>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:18px;padding:16px">
+          <div class="formgrid-4" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;align-items:end">
+            <div class="field" style="margin:0">
+              <label for="reconAccountSelect">Financial Account</label>
+              <select id="reconAccountSelect"></select>
+            </div>
+            <div class="field" style="margin:0">
+              <label for="reconStatementDate">Statement Ending Date</label>
+              <input type="date" id="reconStatementDate">
+            </div>
+            <div class="field" style="margin:0">
+              <label for="reconStatementBalance">Statement Ending Balance ($)</label>
+              <input type="number" step="0.01" id="reconStatementBalance" placeholder="0.00">
+            </div>
+            <div>
+              <button type="button" class="btn btn-primary" id="btnStartRecon">Load Reconciliation</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="reconciliationWorksheet" hidden>
+          <div class="kpi-grid" style="margin-bottom:18px">
+            <div class="kpi-card">
+              <span class="kpi-label">STATEMENT BALANCE</span>
+              <span class="kpi-value" id="reconKpiStatement">$0.00</span>
+              <span class="kpi-sub">Target bank statement balance</span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-label">CLEARED BALANCE</span>
+              <span class="kpi-value text-accent" id="reconKpiCleared">$0.00</span>
+              <span class="kpi-sub">Book balance of cleared items</span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-label">DIFFERENCE</span>
+              <span class="kpi-value" id="reconKpiDiff">$0.00</span>
+              <span class="kpi-sub" id="reconKpiDiffSub">Must be $0.00 to complete</span>
+            </div>
+          </div>
+
+          <div style="display:flex;justify-content:flex-end;margin-bottom:12px;gap:8px">
+            <button type="button" class="btn ghost btn-sm" id="btnReconSelectAll">Select All</button>
+            <button type="button" class="btn btn-primary" id="btnCompleteReconciliation" disabled>Complete Reconciliation</button>
+          </div>
+
+          <div id="reconciliationItemsList"></div>
+        </div>
+      </section>
+
+      <!-- ============ ACCOUNTS PAYABLE & BILLS VIEW ============ -->
+      <section class="view" id="v-payables">
+        <div class="vhead">
+          <div>
+            <h1>Accounts Payable &amp; Bills</h1>
+            <p>Vendor directory, incoming vendor bills, approval lifecycle, and disbursements.</p>
+          </div>
+          <div class="vactions">
+            <button type="button" class="btn btn-primary" id="btnNewBill"><svg><use href="#i-plus"></use></svg>New Bill</button>
+            <button type="button" class="btn ghost" id="btnAddVendor"><svg><use href="#i-users"></use></svg>Add Vendor</button>
+          </div>
+        </div>
+
+        <div class="kpi-grid" id="payablesKpis">
+          <div class="kpi-card">
+            <span class="kpi-label">TOTAL UNPAID BILLS</span>
+            <span class="kpi-value text-accent" id="kpiApTotal">$0.00</span>
+            <span class="kpi-sub">Approved and pending bills</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">OVERDUE BILLS</span>
+            <span class="kpi-value text-crit" id="kpiApOverdue">$0.00</span>
+            <span class="kpi-sub">Past payment terms</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">PENDING APPROVAL</span>
+            <span class="kpi-value text-warning" id="kpiApPending">0</span>
+            <span class="kpi-sub">Awaiting manager approval</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">ACTIVE VENDORS</span>
+            <span class="kpi-value" id="kpiApVendorsCount">0</span>
+            <span class="kpi-sub">Approved supplier profiles</span>
+          </div>
+        </div>
+
+        <div class="inven-toolbar" style="margin-bottom:14px">
+          <div class="inven-tabs" id="payablesTabs" role="tablist">
+            <button type="button" class="inven-tab active" data-ap-tab="bills" role="tab" aria-selected="true">Bills &amp; Expenses</button>
+            <button type="button" class="inven-tab" data-ap-tab="vendors" role="tab" aria-selected="false">Vendors</button>
+            <button type="button" class="inven-tab" data-ap-tab="aging" role="tab" aria-selected="false">AP Aging</button>
+          </div>
+          <div class="inven-filters">
+            <div class="search-wrap">
+              <svg class="search-ico"><use href="#i-search"></use></svg>
+              <input type="search" id="apSearch" placeholder="Search bill #, vendor, PO ref...">
+            </div>
+          </div>
+        </div>
+
+        <div id="payablesBody"></div>
+      </section>
+
+      <!-- ============ CHART OF ACCOUNTS VIEW ============ -->
+      <section class="view" id="v-chartofaccounts">
+        <div class="vhead">
+          <div>
+            <h1>Chart of Accounts</h1>
+            <p>Master financial account structure for double-entry bookkeeping and financial reports.</p>
+          </div>
+          <div class="vactions">
+            <button type="button" class="btn btn-primary" id="btnNewCoaAccount"><svg><use href="#i-plus"></use></svg>New Account</button>
+          </div>
+        </div>
+
+        <div class="kpi-grid" id="coaKpis">
+          <div class="kpi-card">
+            <span class="kpi-label">ASSETS (1000s)</span>
+            <span class="kpi-value text-success" id="kpiCoaAssets">$0.00</span>
+            <span class="kpi-sub">Bank, AR, inventory &amp; fixed</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">LIABILITIES (2000s)</span>
+            <span class="kpi-value text-warning" id="kpiCoaLiabilities">$0.00</span>
+            <span class="kpi-sub">AP &amp; credit obligations</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">EQUITY (3000s)</span>
+            <span class="kpi-value text-accent" id="kpiCoaEquity">$0.00</span>
+            <span class="kpi-sub">Capital &amp; retained earnings</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">NET REVENUE YTD</span>
+            <span class="kpi-value" id="kpiCoaNetRevenue">$0.00</span>
+            <span class="kpi-sub">Revenue less expenses</span>
+          </div>
+        </div>
+
+        <div class="inven-toolbar" style="margin-bottom:14px">
+          <div class="inven-tabs" id="coaTabs" role="tablist">
+            <button type="button" class="inven-tab active" data-coa-tab="all" role="tab" aria-selected="true">All Accounts</button>
+            <button type="button" class="inven-tab" data-coa-tab="ASSET" role="tab" aria-selected="false">Assets</button>
+            <button type="button" class="inven-tab" data-coa-tab="LIABILITY" role="tab" aria-selected="false">Liabilities</button>
+            <button type="button" class="inven-tab" data-coa-tab="EQUITY" role="tab" aria-selected="false">Equity</button>
+            <button type="button" class="inven-tab" data-coa-tab="REVENUE" role="tab" aria-selected="false">Revenue</button>
+            <button type="button" class="inven-tab" data-coa-tab="EXPENSE" role="tab" aria-selected="false">Expenses</button>
+          </div>
+          <div class="inven-filters">
+            <div class="search-wrap">
+              <svg class="search-ico"><use href="#i-search"></use></svg>
+              <input type="search" id="coaSearch" placeholder="Search code or account name...">
+            </div>
+          </div>
+        </div>
+
+        <div id="chartOfAccountsBody"></div>
+      </section>
+
+      <!-- ============ GENERAL LEDGER & JOURNAL VIEW ============ -->
+      <section class="view" id="v-generalledger">
+        <div class="vhead">
+          <div>
+            <h1>General Ledger &amp; Journal Entries</h1>
+            <p>Strict double-entry journal records. Debits must exactly equal Credits on every posted entry.</p>
+          </div>
+          <div class="vactions">
+            <button type="button" class="btn btn-primary" id="btnNewJournalEntry"><svg><use href="#i-plus"></use></svg>New Journal Entry</button>
+          </div>
+        </div>
+
+        <div class="inven-toolbar" style="margin-bottom:14px">
+          <div class="inven-filters">
+            <div class="search-wrap">
+              <svg class="search-ico"><use href="#i-search"></use></svg>
+              <input type="search" id="glSearch" placeholder="Search entry #, memo, line item...">
+            </div>
+            <input type="date" id="glStartDate" title="From date">
+            <input type="date" id="glEndDate" title="To date">
+            <button type="button" class="btn ghost btn-sm" id="btnFilterGl">Apply</button>
+          </div>
+        </div>
+
+        <div id="generalLedgerBody"></div>
+      </section>
+
+      <!-- ============ PROFIT & LOSS VIEW ============ -->
+      <section class="view" id="v-profitloss">
+        <div class="vhead noprint">
+          <div>
+            <h1>Profit &amp; Loss Statement</h1>
+            <p>Income statement showing total sales revenue, cost of goods sold, and operating expenditures.</p>
+          </div>
+          <div class="vactions">
+            <button type="button" class="btn ghost" id="btnPrintPL"><svg><use href="#i-print"></use></svg>Print</button>
+          </div>
+        </div>
+
+        <div class="inven-toolbar noprint" style="margin-bottom:16px">
+          <div class="inven-filters">
+            <label for="plPreset" style="font-size:13px;font-weight:600;color:var(--ink)">Range:</label>
+            <select id="plPreset">
+              <option value="this_month">This Month</option>
+              <option value="last_month">Last Month</option>
+              <option value="this_quarter">This Quarter</option>
+              <option value="ytd" selected>Year-to-Date</option>
+              <option value="custom">Custom</option>
+            </select>
+            <input type="date" id="plStartDate" title="From date">
+            <input type="date" id="plEndDate" title="To date">
+            <button type="button" class="btn ghost btn-sm" id="btnApplyPL">Update Report</button>
+          </div>
+        </div>
+
+        <div id="profitLossBody"></div>
+      </section>
+
+      <!-- ============ BALANCE SHEET VIEW ============ -->
+      <section class="view" id="v-balancesheet">
+        <div class="vhead noprint">
+          <div>
+            <h1>Balance Sheet</h1>
+            <p>Financial statement showing cumulative Assets, Liabilities, and Shareholders' Equity as of a specific date.</p>
+          </div>
+          <div class="vactions">
+            <button type="button" class="btn ghost" id="btnPrintBS"><svg><use href="#i-print"></use></svg>Print</button>
+          </div>
+        </div>
+
+        <div class="inven-toolbar noprint" style="margin-bottom:16px">
+          <div class="inven-filters">
+            <label for="bsAsOfDate" style="font-size:13px;font-weight:600;color:var(--ink)">As of Date:</label>
+            <input type="date" id="bsAsOfDate">
+            <button type="button" class="btn ghost btn-sm" id="btnApplyBS">Update Balance Sheet</button>
+          </div>
+        </div>
+
+        <div id="balanceSheetBody"></div>
+      </section>
+
+      <!-- ============ EMPLOYEES VIEW ============ -->
+      <section class="view" id="v-employees">
+        <div class="vhead">
+          <div>
+            <h1>Employee Directory &amp; Profiles</h1>
+            <p>GreenWave workforce directory, department assignments, and employment status.</p>
+          </div>
+          <div class="vactions">
+            <button type="button" class="btn btn-primary" id="btnAddEmployee"><svg><use href="#i-plus"></use></svg>Add Employee</button>
+          </div>
+        </div>
+
+        <div class="kpi-grid" id="employeeKpis">
+          <div class="kpi-card">
+            <span class="kpi-label">TOTAL EMPLOYEES</span>
+            <span class="kpi-value" id="kpiEmpTotal">0</span>
+            <span class="kpi-sub">Registered team members</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">ACTIVE WORKFORCE</span>
+            <span class="kpi-value text-success" id="kpiEmpActive">0</span>
+            <span class="kpi-sub">Currently on active roster</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">OPERATIONS &amp; LOGISTICS</span>
+            <span class="kpi-value text-accent" id="kpiEmpOps">0</span>
+            <span class="kpi-sub">Warehouse &amp; drivers</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">OFFICE &amp; FINANCE</span>
+            <span class="kpi-value" id="kpiEmpOffice">0</span>
+            <span class="kpi-sub">Administration &amp; sales</span>
+          </div>
+        </div>
+
+        <div class="inven-toolbar" style="margin-bottom:14px">
+          <div class="inven-tabs" id="empDeptTabs" role="tablist">
+            <button type="button" class="inven-tab active" data-emp-dept="all" role="tab" aria-selected="true">All Departments</button>
+            <button type="button" class="inven-tab" data-emp-dept="Operations" role="tab" aria-selected="false">Operations</button>
+            <button type="button" class="inven-tab" data-emp-dept="Logistics" role="tab" aria-selected="false">Logistics</button>
+            <button type="button" class="inven-tab" data-emp-dept="Administration" role="tab" aria-selected="false">Administration</button>
+            <button type="button" class="inven-tab" data-emp-dept="Sales" role="tab" aria-selected="false">Sales</button>
+          </div>
+          <div class="inven-filters">
+            <div class="search-wrap">
+              <svg class="search-ico"><use href="#i-search"></use></svg>
+              <input type="search" id="empSearch" placeholder="Search employee name, title, email...">
+            </div>
+          </div>
+        </div>
+
+        <div id="employeesBody"></div>
+      </section>
+
+      <!-- ============ ATTENDANCE VIEW ============ -->
+      <section class="view" id="v-attendance">
+        <div class="vhead">
+          <div>
+            <h1>Attendance Tracking</h1>
+            <p>Shift clock records, daily attendance tracking, hours worked, and overtime logs.</p>
+          </div>
+        </div>
+
+        <div class="kpi-grid" id="attendanceKpis">
+          <div class="kpi-card">
+            <span class="kpi-label">ON SHIFT TODAY</span>
+            <span class="kpi-value text-success" id="kpiAttPresent">0</span>
+            <span class="kpi-sub">Currently clocked in</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">TOTAL HOURS TODAY</span>
+            <span class="kpi-value text-accent" id="kpiAttHours">0.0h</span>
+            <span class="kpi-sub">Logged shift hours</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">OVERTIME HOURS</span>
+            <span class="kpi-value text-warning" id="kpiAttOvertime">0.0h</span>
+            <span class="kpi-sub">Hours beyond standard shift</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">ON APPROVED LEAVE</span>
+            <span class="kpi-value" id="kpiAttOnLeave">0</span>
+            <span class="kpi-sub">Scheduled absence</span>
+          </div>
+        </div>
+
+        <div class="inven-toolbar" style="margin-bottom:14px">
+          <div class="inven-filters">
+            <label for="attDateFilter" style="font-size:13px;font-weight:600;color:var(--ink)">Date:</label>
+            <input type="date" id="attDateFilter">
+            <button type="button" class="btn ghost btn-sm" id="btnRefreshAttendance">Refresh</button>
+          </div>
+        </div>
+
+        <div id="attendanceBody"></div>
+      </section>
+
+      <!-- ============ LEAVE REQUESTS VIEW ============ -->
+      <section class="view" id="v-leaverequests">
+        <div class="vhead">
+          <div>
+            <h1>Leave Requests &amp; Accruals</h1>
+            <p>Employee time off requests, remaining balances, and manager approval workflow.</p>
+          </div>
+          <div class="vactions">
+            <button type="button" class="btn btn-primary" id="btnRequestLeave"><svg><use href="#i-plus"></use></svg>Request Leave</button>
+          </div>
+        </div>
+
+        <div class="kpi-grid" id="leaveBalanceKpis">
+          <div class="kpi-card">
+            <span class="kpi-label">VACATION DAYS</span>
+            <span class="kpi-value text-success" id="kpiLeaveVacation">0</span>
+            <span class="kpi-sub" id="kpiLeaveVacationSub">Days remaining</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">SICK LEAVE</span>
+            <span class="kpi-value text-accent" id="kpiLeaveSick">0</span>
+            <span class="kpi-sub" id="kpiLeaveSickSub">Days remaining</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">PERSONAL DAYS</span>
+            <span class="kpi-value" id="kpiLeavePersonal">0</span>
+            <span class="kpi-sub" id="kpiLeavePersonalSub">Days remaining</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">PENDING REQUESTS</span>
+            <span class="kpi-value text-warning" id="kpiLeavePending">0</span>
+            <span class="kpi-sub">Awaiting manager review</span>
+          </div>
+        </div>
+
+        <div class="inven-toolbar" style="margin-bottom:14px">
+          <div class="inven-tabs" id="leaveTabs" role="tablist">
+            <button type="button" class="inven-tab active" data-leave-tab="my" role="tab" aria-selected="true">My Leave Requests</button>
+            <button type="button" class="inven-tab" data-leave-tab="pending" data-role="admin,manager" role="tab" aria-selected="false">Pending Approvals</button>
+            <button type="button" class="inven-tab" data-leave-tab="all" data-role="admin,manager" role="tab" aria-selected="false">All Company Requests</button>
+          </div>
+        </div>
+
+        <div id="leaveRequestsBody"></div>
+      </section>
     </div>
 
     <!-- Mobile Bottom Navigation Bar -->
@@ -640,10 +1210,10 @@
   <div class="lbmeta" id="lbMeta"></div>
 </div>
 
-<script src="assets/api.js?v=20260908_invoiceredesign"></script>
-<script src="assets/store.js?v=20260908_invoiceredesign"></script>
-<script src="assets/photos.js?v=20260908_invoiceredesign"></script>
-<script src="assets/app.js?v=20260908_invoiceredesign"></script>
+<script src="assets/api.js?v=20260913_financeops"></script>
+<script src="assets/store.js?v=20260913_financeops"></script>
+<script src="assets/photos.js?v=20260913_financeops"></script>
+<script src="assets/app.js?v=20260913_financeops"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {

@@ -1,18 +1,18 @@
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import type { Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
 
 import { AppModule } from './app.module';
+import { requestIdMiddleware } from './common/request-id';
 
 /**
  * Browser origins allowed to make cross-origin calls to this API.
  *
  * The production web app is served same-origin (nginx proxies the API under
- * https://gwgc.cloud), so it does not rely on CORS at all. What this list is
- * for is the API's own public hostname, api.gwgc.cloud, which previously ran
- * with `origin: true` — Nest reflects whatever Origin the caller sends and,
- * combined with `credentials: true`, told every browser on the internet that
- * any site was allowed to make credentialed calls and read the responses.
+ * https://gwgc.cloud/api), so it does not rely on CORS. What this list is
+ * for is cross-origin clients and the API's own public hostname, api.gwgc.cloud.
  *
  * Override with CORS_ALLOWED_ORIGINS (comma-separated) rather than editing
  * this list for a new environment.
@@ -21,6 +21,7 @@ const DEFAULT_PRODUCTION_ORIGINS = [
   'https://gwgc.cloud',
   'https://www.gwgc.cloud',
   'https://app.gwgcservers.ca',
+  'https://pay.gwgcservers.ca',
 ];
 
 function allowedOrigins(isProduction: boolean): string[] {
@@ -41,8 +42,28 @@ function allowedOrigins(isProduction: boolean): string[] {
         'http://localhost:4173',
         'http://localhost:5173',
         'http://localhost:8080',
+        'http://127.0.0.1:4000',
         'http://127.0.0.1:5173',
+        'http://127.0.0.1:8080',
       ];
+}
+
+function parseCookieHeader(header?: string): Record<string, string> {
+  if (!header) return {};
+  const cookies: Record<string, string> = {};
+  for (const pair of header.split(';')) {
+    const idx = pair.indexOf('=');
+    if (idx !== -1) {
+      const key = pair.slice(0, idx).trim();
+      const val = pair.slice(idx + 1).trim();
+      cookies[key] = decodeURIComponent(val);
+    }
+  }
+  return cookies;
+}
+
+interface RequestWithCookies extends Request {
+  cookies: Record<string, string>;
 }
 
 async function bootstrap() {
@@ -57,9 +78,55 @@ async function bootstrap() {
     );
   }
 
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    // Preserve the exact request bytes on req.rawBody. Stripe signs the raw
+    // payload; a re-serialized JSON body would never verify.
+    rawBody: true,
+  });
 
-  app.use(helmet());
+  // Trust proxy for secure cookies and accurate client IP logging behind NGINX
+  app.set('trust proxy', 1);
+
+  // Security Headers via Helmet
+  app.use(
+    helmet({
+      contentSecurityPolicy: false, // API returns JSON; frontend NGINX provides document CSP
+      crossOriginResourcePolicy: { policy: 'same-origin' },
+      crossOriginOpenerPolicy: { policy: 'same-origin' },
+      frameguard: { action: 'deny' },
+      hsts: {
+        maxAge: 63072000,
+        includeSubDomains: true,
+        preload: true,
+      },
+      noSniff: true,
+      referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    }),
+  );
+
+  app.use(requestIdMiddleware);
+
+  // Cookie parser and Cache-Control middleware
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    (req as RequestWithCookies).cookies = parseCookieHeader(req.headers.cookie);
+
+    // Ensure API responses are never cached by browsers, proxies, or service workers
+    res.setHeader(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate, proxy-revalidate',
+    );
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    // URL path normalization: allows both /api/... and /...
+    if (req.url.startsWith('/api/')) {
+      req.url = req.url.substring(4);
+    } else if (req.url === '/api') {
+      req.url = '/';
+    }
+
+    next();
+  });
 
   const origins = allowedOrigins(isProduction);
 
@@ -68,10 +135,6 @@ async function bootstrap() {
       origin: string | undefined,
       callback: (err: Error | null, allow?: boolean) => void,
     ) {
-      // No Origin header means the caller is not a browser enforcing the
-      // same-origin policy — the mobile app, a health check, server-to-server.
-      // CORS has nothing to say about those, so they are not blocked here;
-      // they still have to authenticate like anyone else.
       if (!origin) {
         return callback(null, true);
       }

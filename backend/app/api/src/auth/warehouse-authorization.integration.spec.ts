@@ -39,6 +39,9 @@ import { Warehouse } from '../warehouses/entities/warehouse.entity';
 import { WarehousesModule } from '../warehouses/warehouses.module';
 import { WarehousesService } from '../warehouses/warehouses.service';
 import { AuthModule } from './auth.module';
+import { ACCOUNTING_ENTITIES } from '../accounting/accounting.module';
+import { EmailOutbox } from '../mail/entities/email-outbox.entity';
+import { PAYMENT_ENTITIES } from '../payments/payments.module';
 /* eslint-disable */
 describe('Security: Authoritative Warehouse Access & Isolation Matrix (HTTP Integration)', () => {
   jest.setTimeout(30000);
@@ -67,6 +70,9 @@ describe('Security: Authoritative Warehouse Access & Isolation Matrix (HTTP Inte
           database: ':memory:',
           dropSchema: true,
           entities: [
+            ...PAYMENT_ENTITIES,
+            ...ACCOUNTING_ENTITIES,
+            EmailOutbox,
             User,
             AuditEvent,
             Role,

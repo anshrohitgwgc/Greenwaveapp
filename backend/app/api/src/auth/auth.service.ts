@@ -1,18 +1,26 @@
 import {
   ConflictException,
   Injectable,
+  Optional,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 
 import { AuditService } from '../audit/audit.service';
+import { DIVISION_LABELS } from '../divisions/divisions.constants';
+import { DivisionsService } from '../divisions/divisions.service';
+import { RedisService } from '../redis/redis.service';
 import { RolesService } from '../roles/roles.service';
 import { UsersService } from '../users/users.service';
 import { WarehousesService } from '../warehouses/warehouses.service';
 import { RegisterDto } from './dto/register.dto';
+import { SessionService } from './session.service';
 
 const BCRYPT_ROUNDS = 12;
+// Precomputed bcrypt(12) hash for timing attack protection when email is not found
+const DUMMY_BCRYPT_HASH =
+  '$2b$12$But4KfPaAVBzdTco0Ep7du/MdY/T3gMcr8zzDb04XtvnoIY9570ie';
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
@@ -20,13 +28,23 @@ function normalizeEmail(email: string): string {
 
 @Injectable()
 export class AuthService {
+  private resolvedSessionService: SessionService;
+
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
     private auditService: AuditService,
     private rolesService: RolesService,
     private warehousesService: WarehousesService,
-  ) {}
+    @Optional() private divisionsService?: DivisionsService,
+    @Optional() private sessionService?: SessionService,
+  ) {
+    this.resolvedSessionService =
+      this.sessionService ||
+      new SessionService({
+        getClient: () => null,
+      } as unknown as RedisService);
+  }
 
   /**
    * Bootstrap path only. Rejected once any user exists — this is not a
@@ -68,9 +86,20 @@ export class AuthService {
       user.role,
       permissions,
     );
+    const divisions = this.divisionsService
+      ? await this.divisionsService.getUserDivisions(user.id)
+      : [];
+
+    const session = await this.resolvedSessionService.createSession({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    });
 
     const payload = { sub: user.id, email: user.email, role: user.role };
     return {
+      sessionId: session.id,
+      csrfToken: session.csrfToken,
       access_token: await this.jwtService.signAsync(payload),
       user: {
         id: user.id,
@@ -79,16 +108,26 @@ export class AuthService {
         role: user.role,
         permissions,
         warehouses,
+        divisions: divisions.map((key) => ({
+          key,
+          label: DIVISION_LABELS[key] || key,
+        })),
         hasGlobalAccess,
       },
     };
   }
 
-  async login(rawEmail: string, password: string) {
+  async login(
+    rawEmail: string,
+    password: string,
+    meta?: { ip?: string; userAgent?: string },
+  ) {
     const email = normalizeEmail(rawEmail);
     const user = await this.usersService.findByEmail(email);
 
     if (!user) {
+      // Execute constant-time bcrypt verification to mitigate timing attacks/account enumeration
+      await bcrypt.compare(password, DUMMY_BCRYPT_HASH);
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -99,7 +138,7 @@ export class AuthService {
     }
 
     if (user.status && user.status !== 'active') {
-      throw new UnauthorizedException('Account is not active');
+      throw new UnauthorizedException('Invalid credentials');
     }
 
     if (typeof this.usersService.recordLogin === 'function') {
@@ -114,6 +153,19 @@ export class AuthService {
       user.id,
       user.role,
       permissions,
+    );
+    const divisions = this.divisionsService
+      ? await this.divisionsService.getUserDivisions(user.id)
+      : [];
+
+    // Create opaque server session
+    const session = await this.resolvedSessionService.createSession(
+      {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+      },
+      meta,
     );
 
     const payload = {
@@ -132,6 +184,8 @@ export class AuthService {
     });
 
     return {
+      sessionId: session.id,
+      csrfToken: session.csrfToken,
       access_token: await this.jwtService.signAsync(payload),
       user: {
         id: user.id,
@@ -141,8 +195,18 @@ export class AuthService {
         status: user.status ?? 'active',
         permissions,
         warehouses,
+        divisions: divisions.map((key) => ({
+          key,
+          label: DIVISION_LABELS[key] || key,
+        })),
         hasGlobalAccess,
       },
     };
+  }
+
+  async logout(sessionId?: string): Promise<void> {
+    if (sessionId) {
+      await this.resolvedSessionService.invalidateSession(sessionId);
+    }
   }
 }

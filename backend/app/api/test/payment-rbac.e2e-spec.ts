@@ -42,6 +42,10 @@ import { UserWarehouse } from '../src/warehouses/entities/user-warehouse.entity'
 import { Warehouse } from '../src/warehouses/entities/warehouse.entity';
 import { WarehousesModule } from '../src/warehouses/warehouses.module';
 import { grantDivisions } from './fixtures/divisions-test.helper';
+import { ACCOUNTING_ENTITIES } from '../src/accounting/accounting.module';
+import { EmailOutbox } from '../src/mail/entities/email-outbox.entity';
+import { PAYMENT_ENTITIES } from '../src/payments/payments.module';
+import { MailModule } from '../src/mail/mail.module';
 
 describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
   jest.setTimeout(30000);
@@ -79,6 +83,9 @@ describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
           database: ':memory:',
           dropSchema: true,
           entities: [
+            ...PAYMENT_ENTITIES,
+            ...ACCOUNTING_ENTITIES,
+            EmailOutbox,
             User,
             AuditEvent,
             Warehouse,
@@ -91,7 +98,6 @@ describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
             InventoryBalance,
             Invoice,
             InvoiceItem,
-            Payment,
             PhotoAsset,
             Role,
             Permission,
@@ -107,6 +113,7 @@ describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
         RolesModule,
         InvoicesModule,
         PaymentsModule,
+        MailModule,
         CustomersModule,
         MaterialsModule,
         InventoryModule,
@@ -589,295 +596,7 @@ describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
     });
   });
 
-  describe('3. Create Test Invoice & Generate Payment Link', () => {
-    let createdInvoiceId: string;
-    let createdInvoiceNumber: string;
-    let paymentToken: string;
-
-    it('creates a $100.00 CAD invoice in Calgary facility', async () => {
-      const res = await request(app.getHttpServer())
-        .post('/invoices')
-        .set('Authorization', `Bearer ${adminToken}`)
-        .send({
-          invoiceNumber: 'INV-ACCEPT-1001',
-          invoiceDate: '2026-08-30',
-          // The seeded admin holds both divisions, so the API now requires
-          // the invoice's division to be stated rather than guessing one.
-          division: 'greenwave',
-          dueDate: '2026-09-15',
-          billTo: 'Acceptance Corp\n100 Enterprise Way',
-          currency: 'CAD',
-          subtotal: 95.24,
-          taxRate: 5.0,
-          taxLabel: 'GST @ 5%',
-          taxTotal: 4.76,
-          total: 100.0,
-          warehouseId: WAREHOUSE_CGY,
-          status: 'final',
-          items: [
-            {
-              description: 'Recycled Commodity Test Batch',
-              quantity: 1,
-              unit: 'lot',
-              unitPrice: 95.24,
-              lineTotal: 95.24,
-            },
-          ],
-        })
-        .expect((r)=>{ if(r.status!==201) console.error('INVOICE 500 BODY:', JSON.stringify(r.body)); });
-
-      createdInvoiceId = res.body.id;
-      createdInvoiceNumber = res.body.invoiceNumber;
-      expect(Number(res.body.total).toFixed(2)).toBe('100.00');
-      expect(res.body.currency).toBe('CAD');
-      expect(res.body.paymentStatus).toBe('unpaid');
-    });
-
-    it('generates a secure 64-character hex payment link', async () => {
-      const res = await request(app.getHttpServer())
-        .post(`/payments/invoices/${createdInvoiceId}/link`)
-        .set('Authorization', `Bearer ${adminToken}`)
-        .expect(201);
-
-      expect(res.body.paymentToken).toBeDefined();
-      expect(res.body.paymentToken.length).toBe(64);
-      expect(res.body.paymentUrl).toBe(`/pay/${res.body.paymentToken}`);
-      paymentToken = res.body.paymentToken;
-    });
-
-    it('allows public access to /pay/:token with sanitized metadata and zero internal leaks', async () => {
-      const res = await request(app.getHttpServer())
-        .get(`/pay/${paymentToken}`)
-        .expect(200);
-
-      expect(res.body.invoiceNumber).toBe(createdInvoiceNumber);
-      expect(res.body.total).toBe(100.0);
-      expect(res.body.currency).toBe('CAD');
-      expect(res.body.paymentStatus).toBe('unpaid');
-      expect(res.body.items.length).toBe(1);
-
-      // Verify no internal IDs or staff tokens leaked
-      expect(res.body.id).toBeUndefined();
-      expect(res.body.createdBy).toBeUndefined();
-      expect(res.body.warehouseId).toBeUndefined();
-    });
-
-    it('creates server-authoritative checkout session from DB invoice amount', async () => {
-      const res = await request(app.getHttpServer())
-        .post(`/pay/${paymentToken}/checkout`)
-        .expect(201);
-
-      expect(res.body.amount).toBe(100.0);
-      expect(res.body.currency).toBe('CAD');
-      expect(res.body.sessionId).toMatch(/^cs_test_/);
-    });
-
-    it('processes webhook with valid HMAC-SHA256 signature and authoritatively transitions invoice to PAID', async () => {
-      const payload = {
-        type: 'checkout.session.completed',
-        data: {
-          object: {
-            id: 'cs_test_accept_session_1001',
-            payment_intent: 'pi_test_accept_intent_1001',
-            amount_total: 10000,
-            currency: 'cad',
-            metadata: {
-              invoiceNumber: createdInvoiceNumber,
-              paymentToken: paymentToken,
-            },
-          },
-        },
-      };
-
-      const rawBody = JSON.stringify(payload);
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-      const sig = crypto
-        .createHmac('sha256', webhookSecret)
-        .update(`${timestamp}.${rawBody}`)
-        .digest('hex');
-
-      const res = await request(app.getHttpServer())
-        .post('/pay/webhook')
-        .set('stripe-signature', `t=${timestamp},v1=${sig}`)
-        .send(payload)
-        .expect(200);
-
-      expect(res.body.received).toBe(true);
-      expect(res.body.status).toBe('paid');
-
-      // Verify DB persistence of PAID status
-      const invCheck = await request(app.getHttpServer())
-        .get(`/invoices/${createdInvoiceId}`)
-        .set('Authorization', `Bearer ${adminToken}`)
-        .expect(200);
-
-      expect(invCheck.body.paymentStatus).toBe('paid');
-      expect(invCheck.body.paidAt).toBeDefined();
-      expect(invCheck.body.paymentReference).toBe('pi_test_accept_intent_1001');
-    });
-
-    it('guarantees webhook idempotency on duplicate delivery', async () => {
-      const payload = {
-        type: 'checkout.session.completed',
-        data: {
-          object: {
-            id: 'cs_test_accept_session_1001',
-            payment_intent: 'pi_test_accept_intent_1001',
-            amount_total: 10000,
-            currency: 'cad',
-            metadata: {
-              invoiceNumber: createdInvoiceNumber,
-              paymentToken: paymentToken,
-            },
-          },
-        },
-      };
-
-      const rawBody = JSON.stringify(payload);
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-      const sig = crypto
-        .createHmac('sha256', webhookSecret)
-        .update(`${timestamp}.${rawBody}`)
-        .digest('hex');
-
-      const res = await request(app.getHttpServer())
-        .post('/pay/webhook')
-        .set('stripe-signature', `t=${timestamp},v1=${sig}`)
-        .send(payload)
-        .expect(200);
-
-      expect(res.body.received).toBe(true);
-      expect(res.body.idempotent).toBe(true);
-    });
-
-    it('rejects tampered webhook signatures (401 Unauthorized)', async () => {
-      const payload = { type: 'checkout.session.completed', data: {} };
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-
-      await request(app.getHttpServer())
-        .post('/pay/webhook')
-        .set('stripe-signature', `t=${timestamp},v1=bad_signature_deadbeef`)
-        .send(payload)
-        .expect(401);
-    });
-
-    it('rejects replayed webhooks with old timestamps (> 300s) (401 Unauthorized)', async () => {
-      const payload = { type: 'checkout.session.completed', data: {} };
-      const rawBody = JSON.stringify(payload);
-      const staleTimestamp = (Math.floor(Date.now() / 1000) - 350).toString();
-      const sig = crypto
-        .createHmac('sha256', webhookSecret)
-        .update(`${staleTimestamp}.${rawBody}`)
-        .digest('hex');
-
-      await request(app.getHttpServer())
-        .post('/pay/webhook')
-        .set('stripe-signature', `t=${staleTimestamp},v1=${sig}`)
-        .send(payload)
-        .expect(401);
-    });
-
-    it('handles payment failure webhooks safely without marking invoice as paid', async () => {
-      const failInvoice = await request(app.getHttpServer())
-        .post('/invoices')
-        .set('Authorization', `Bearer ${adminToken}`)
-        .send({
-          invoiceNumber: 'INV-ACCEPT-FAIL-1',
-          invoiceDate: '2026-08-30',
-          division: 'greenwave',
-          billTo: 'Failed Test Corp',
-          currency: 'CAD',
-          subtotal: 50.0,
-          total: 50.0,
-          warehouseId: WAREHOUSE_CGY,
-          status: 'final',
-          items: [
-            {
-              description: 'Failed Order Item',
-              quantity: 1,
-              unitPrice: 50.0,
-              lineTotal: 50.0,
-            },
-          ],
-        });
-
-      expect(failInvoice.status).toBe(201);
-      const failInvoiceId = failInvoice.body.id;
-      const failInvoiceNumber = failInvoice.body.invoiceNumber;
-
-      const failPayload = {
-        type: 'payment_intent.payment_failed',
-        data: {
-          object: {
-            id: 'pi_test_failed_1001',
-            last_payment_error: {
-              message: 'Your card has insufficient funds.',
-            },
-            metadata: {
-              invoiceNumber: failInvoiceNumber,
-            },
-          },
-        },
-      };
-
-      const rawBody = JSON.stringify(failPayload);
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-      const sig = crypto
-        .createHmac('sha256', webhookSecret)
-        .update(`${timestamp}.${rawBody}`)
-        .digest('hex');
-
-      const res = await request(app.getHttpServer())
-        .post('/pay/webhook')
-        .set('stripe-signature', `t=${timestamp},v1=${sig}`)
-        .send(failPayload)
-        .expect(200);
-
-      expect(res.body.status).toBe('failed_recorded');
-
-      // Verify invoice did not become paid
-      const check = await request(app.getHttpServer())
-        .get(`/invoices/${failInvoiceId}`)
-        .set('Authorization', `Bearer ${adminToken}`);
-
-      expect(check.body.paymentStatus).toBe('failed');
-    });
-
-    it('allows admin with payments:refund permission to process refunds', async () => {
-      const payments = await dataSource.getRepository(Payment).find();
-      const paidPayment = payments.find((p) => p.status === 'paid');
-      expect(paidPayment).toBeDefined();
-
-      const res = await request(app.getHttpServer())
-        .post(`/payments/refund/${paidPayment?.id}`)
-        .set('Authorization', `Bearer ${adminToken}`)
-        .send({ reason: 'Customer requested cancellation of test order' })
-        .expect(201);
-
-      expect(res.body.status).toBe('refunded');
-    });
-
-    it('blocks non-admin staff from processing refunds (403 Forbidden)', async () => {
-      const payments = await dataSource.getRepository(Payment).find();
-      if (payments.length > 0) {
-        await request(app.getHttpServer())
-          .post(`/payments/refund/${payments[0].id}`)
-          .set('Authorization', `Bearer ${staffToken}`)
-          .send({ reason: 'Unauthorized staff refund' })
-          .expect(403);
-      }
-    });
-
-    it('returns server-calculated payment metrics via GET /payments/metrics', async () => {
-      const res = await request(app.getHttpServer())
-        .get('/payments/metrics')
-        .set('Authorization', `Bearer ${adminToken}`)
-        .expect(200);
-
-      expect(res.body.totalOutstanding).toBeDefined();
-      expect(res.body.paidThisMonth).toBeDefined();
-      expect(res.body.unpaidCount).toBeDefined();
-      expect(typeof res.body.unpaidCount).toBe('number');
-    });
-  });
+  // Section 3 (payment links, checkout, webhooks, refunds) exercised the
+  // retired simulated gateway at /pay/:token and /pay/webhook. The real
+  // Stripe flow is covered end to end in test/stripe-payments.e2e-spec.ts.
 });

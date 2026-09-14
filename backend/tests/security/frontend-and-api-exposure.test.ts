@@ -183,6 +183,7 @@ describe('Security: API exposure', () => {
   const INTENTIONALLY_PUBLIC: Record<string, string> = {
     'app.controller.ts': 'root banner + /health, no data',
     'public-payments.controller.ts': 'customer payment portal, scoped by an unguessable per-invoice token',
+    'stripe-webhook.controller.ts': 'Stripe webhook ingress, authenticated via Stripe signature verification (HMAC-SHA256)',
     'storage.controller.ts': 'declares no routes',
   };
 

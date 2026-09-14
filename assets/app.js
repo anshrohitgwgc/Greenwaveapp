@@ -35,10 +35,10 @@
     /* `purchaseorders` / `poeditor` are admin-only, matching @Roles('admin')
        on PurchaseOrdersController. Leaving them off the manager row is the
        point: managers may work invoices but not purchase orders. */
-    admin:   { label: 'Administrator', sees: ['dashboard','inventory','photos','timeclock','chat','invoices','editor','purchaseorders','poeditor','customers','products','staff','history','settings'] },
-    manager: { label: 'Manager',       sees: ['dashboard','inventory','photos','timeclock','chat','invoices','editor','customers','products','history','settings'] },
-    staff:   { label: 'Staff',         sees: ['dashboard','inventory','photos','timeclock','chat','settings'] },
-    driver:  { label: 'Driver',        sees: ['dashboard','inventory','photos','timeclock','chat','settings'] }
+    admin:   { label: 'Administrator', sees: ['dashboard','inventory','photos','timeclock','chat','invoices','editor','payments','araging','purchaseorders','poeditor','banking','reconciliation','payables','chartofaccounts','generalledger','profitloss','balancesheet','employees','attendance','leaverequests','customers','products','staff','history','settings'] },
+    manager: { label: 'Manager',       sees: ['dashboard','inventory','photos','timeclock','chat','invoices','editor','payments','araging','banking','reconciliation','payables','chartofaccounts','generalledger','profitloss','balancesheet','employees','attendance','leaverequests','customers','products','history','settings'] },
+    staff:   { label: 'Staff',         sees: ['dashboard','inventory','photos','timeclock','chat','attendance','leaverequests','settings'] },
+    driver:  { label: 'Driver',        sees: ['dashboard','inventory','photos','timeclock','chat','attendance','leaverequests','settings'] }
   };
 
   var SIZE_KEYS = ['xl', 'l', 'm', 's'];
@@ -458,6 +458,7 @@
     if (chatSseSource) { chatSseSource.close(); chatSseSource = null; }
     if (chatPollTimer) { clearInterval(chatPollTimer); chatPollTimer = null; }
     if (chatOnlineTimer) { clearInterval(chatOnlineTimer); chatOnlineTimer = null; }
+    Api.logout();
     Api.clearSession();
     S.clearSession();
     me = null;
@@ -542,7 +543,7 @@
     // be able to reach Staff Management to grant themselves or others access.
     var DIVISION_SCOPED_VIEWS = [
       'dashboard', 'inventory', 'photos', 'timeclock', 'chat',
-      'invoices', 'purchaseorders', 'customers', 'products', 'history'
+      'invoices', 'payments', 'araging', 'purchaseorders', 'customers', 'products', 'history'
     ];
     if (!hasAnyDivision()) {
       $$('.navitem').forEach(function (b) {
@@ -665,6 +666,8 @@
 
   function show(next) {
     if (next === 'invoices' && !isRecycling()) next = 'inventory';
+    if (next === 'payments' && !isRecycling()) next = 'inventory';
+    if (next === 'araging' && !isRecycling()) next = 'inventory';
     if (next === 'purchaseorders' && !isRecycling()) next = 'inventory';
     if (!can(next) && next !== 'editor') next = 'dashboard';
     if (next === 'editor' && !can('invoices')) next = 'inventory';
@@ -676,8 +679,13 @@
     // A session with no division has no operational views to land on; keep it
     // on the administrative ones rather than bouncing to a dashboard that
     // would render empty.
-    if (!hasAnyDivision() && next !== 'settings' && next !== 'staff') {
-      next = isAdmin() ? 'staff' : 'dashboard';
+    var nonDivisionViews = [
+      'settings', 'staff', 'banking', 'reconciliation', 'payables',
+      'chartofaccounts', 'generalledger', 'profitloss', 'balancesheet',
+      'employees', 'attendance', 'leaverequests'
+    ];
+    if (!hasAnyDivision() && nonDivisionViews.indexOf(next) < 0) {
+      next = isAdmin() ? 'staff' : (can('attendance') ? 'attendance' : 'dashboard');
     }
 
     view = next;
@@ -5216,6 +5224,15 @@
     }
   }
 
+  function closeModal() {
+    var wrap = $('#modalWrap');
+    if (wrap) {
+      wrap.hidden = true;
+      var formEl = $('#modalForm');
+      if (formEl) formEl.innerHTML = '';
+    }
+  }
+
   /**
    * Renders the "no business unit assigned" state.
    *
@@ -5253,10 +5270,14 @@
   function render() {
     syncChrome();
 
-    // Guard every division-scoped view behind an actual grant. Settings and
-    // Staff are administrative and not division-scoped, so they stay usable
-    // (an admin must still be able to assign divisions to people).
-    if (!hasAnyDivision() && view !== 'settings' && view !== 'staff') {
+    // Guard every division-scoped view behind an actual grant. Settings, Staff,
+    // Banking, Accounting, and HR are company-wide and not division-scoped, so they stay usable.
+    var nonDivisionViews = [
+      'settings', 'staff', 'banking', 'reconciliation', 'payables',
+      'chartofaccounts', 'generalledger', 'profitloss', 'balancesheet',
+      'employees', 'attendance', 'leaverequests'
+    ];
+    if (!hasAnyDivision() && nonDivisionViews.indexOf(view) < 0) {
       renderNoDivisionState();
       return;
     }
@@ -5270,8 +5291,20 @@
     else if (view === 'timeclock') renderTimeclock();
     else if (view === 'invoices') renderInvoiceList();
     else if (view === 'editor') renderEditor();
+    else if (view === 'payments') renderPaymentsList();
+    else if (view === 'araging') renderArAgingView();
     else if (view === 'purchaseorders') renderPurchaseOrderList();
     else if (view === 'poeditor') renderPoEditor();
+    else if (view === 'banking') renderBankingView();
+    else if (view === 'reconciliation') renderReconciliationView();
+    else if (view === 'payables') renderPayablesView();
+    else if (view === 'chartofaccounts') renderChartOfAccountsView();
+    else if (view === 'generalledger') renderGeneralLedgerView();
+    else if (view === 'profitloss') renderProfitLossView();
+    else if (view === 'balancesheet') renderBalanceSheetView();
+    else if (view === 'employees') renderEmployeesView();
+    else if (view === 'attendance') renderAttendanceView();
+    else if (view === 'leaverequests') renderLeaveRequestsView();
     else if (view === 'customers') renderCustomers();
     else if (view === 'products') renderProducts();
     else if (view === 'staff') renderStaff();
@@ -5598,6 +5631,22 @@
     setupPurchaseOrderFilters();
   }
 
+  var stripeJsPromise = null;
+  function loadStripeJs() {
+    if (window.Stripe) return Promise.resolve(window.Stripe);
+    if (!stripeJsPromise) {
+      stripeJsPromise = new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = 'https://js.stripe.com/v3/';
+        s.async = true;
+        s.onload = function () { resolve(window.Stripe); };
+        s.onerror = function () { reject(new Error('Unable to load Stripe checkout SDK')); };
+        document.head.appendChild(s);
+      });
+    }
+    return stripeJsPromise;
+  }
+
   function checkPublicPaymentRoute() {
     var path = window.location.pathname;
     var hash = window.location.hash;
@@ -5605,13 +5654,16 @@
 
     if (path.indexOf('/pay/') === 0) {
       token = path.replace('/pay/', '').split('/')[0];
+    } else if (path.indexOf('/p/') === 0) {
+      token = path.replace('/p/', '').split('/')[0];
     } else if (hash.indexOf('#pay/') === 0) {
       token = hash.replace('#pay/', '').split('?')[0];
+    } else if (hash.indexOf('#p/') === 0) {
+      token = hash.replace('#p/', '').split('?')[0];
     }
 
     if (!token) return false;
 
-    // Render Public Customer Payment Portal
     var gate = $('#gate'); if (gate) gate.hidden = true;
     var app = $('#app'); if (app) app.hidden = true;
     var portal = $('#payPortal'); if (portal) portal.hidden = false;
@@ -5626,154 +5678,1828 @@
     pBody.innerHTML = '<div style="text-align:center;padding:40px 20px;color:var(--muted)"><div class="spin" style="margin:0 auto 14px"></div>Loading invoice payment details…</div>';
 
     Api.getPublicInvoice(token).then(function (inv) {
-      var isPaid = inv.paymentStatus === 'paid';
-      var isFailed = inv.paymentStatus === 'failed';
-      var isRefunded = inv.paymentStatus === 'refunded';
+      var isPaid = inv.state === 'paid';
+      var isRefunded = inv.state === 'refunded';
+      var isProcessing = inv.state === 'processing';
+      var isNotPayable = inv.state === 'not_payable';
 
-      var itemsHtml = (inv.items || []).map(function (item) {
-        return '<tr>' +
-          '<td><strong>' + esc(item.description) + '</strong></td>' +
-          '<td class="mono" style="text-align:center">' + esc(item.quantity) + ' ' + esc(item.unit || '') + '</td>' +
-          '<td class="mono" style="text-align:right">' + moneyDollars(item.unitPrice) + '</td>' +
-          '<td class="mono" style="text-align:right;font-weight:600">' + moneyDollars(item.lineTotal) + '</td>' +
-        '</tr>';
-      }).join('');
-
-      var actionHtml = '';
+      var statusBadge = '';
       if (isPaid) {
-        actionHtml = '<div class="payportal-paid-banner">' +
-          '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6 9 17l-5-5"/></svg>' +
-          '<span>PAID IN FULL · Thank you for your payment</span>' +
-        '</div>';
+        statusBadge = '<span class="badge badge-paid" style="font-size:13px;padding:4px 10px">PAID IN FULL</span>';
       } else if (isRefunded) {
-        actionHtml = '<div class="payportal-paid-banner" style="background:#EDE9FE;border-color:#DDD6FE;color:#5B21B6">' +
-          '<span>REFUNDED · This invoice transaction has been refunded</span>' +
-        '</div>';
+        statusBadge = '<span class="badge badge-refunded" style="font-size:13px;padding:4px 10px">REFUNDED</span>';
+      } else if (isProcessing) {
+        statusBadge = '<span class="badge badge-pending" style="font-size:13px;padding:4px 10px">PROCESSING</span>';
+      } else if (isNotPayable) {
+        statusBadge = '<span class="badge badge-failed" style="font-size:13px;padding:4px 10px">NOT PAYABLE</span>';
       } else {
-        actionHtml = '<div class="payportal-actions">' +
-          '<button type="button" class="payportal-pay-btn" id="btnCustomerPayNow">' +
-            '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>' +
-            '<span>PAY INVOICE · ' + moneyDollars(inv.total) + ' ' + esc(inv.currency) + '</span>' +
-          '</button>' +
-          '<div style="font-size:12.5px;color:var(--muted)">Instant receipt &amp; automated processing via GreenWave Secure Gateway</div>' +
-        '</div>';
+        statusBadge = '<span class="badge badge-unpaid" style="font-size:13px;padding:4px 10px">AMOUNT DUE</span>';
+      }
+
+      var actionContent = '';
+      if (isPaid) {
+        actionContent =
+          '<div class="payportal-paid-banner">' +
+            '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>' +
+            '<span>PAID IN FULL · Thank you for your payment' + (inv.paidAt ? ' on ' + ddmmyyyy(inv.paidAt) : '') + '</span>' +
+          '</div>';
+      } else if (isRefunded) {
+        actionContent =
+          '<div class="payportal-paid-banner" style="background:#EDE9FE;border-color:#DDD6FE;color:#5B21B6">' +
+            '<span>REFUNDED · This transaction was refunded to the original payment method.</span>' +
+          '</div>';
+      } else if (isProcessing) {
+        actionContent =
+          '<div class="payportal-paid-banner" style="background:#FEF3C7;border-color:#FDE68A;color:#92400E">' +
+            '<span class="spin" style="margin-right:8px"></span>' +
+            '<span>PROCESSING · Your payment is being verified. Please refresh in a moment.</span>' +
+          '</div>';
+      } else if (isNotPayable) {
+        actionContent =
+          '<div class="payportal-paid-banner" style="background:#FEE2E2;border-color:#FECACA;color:#991B1B">' +
+            '<span>Online payment is unavailable for this invoice. Please contact sales@greenwaverecycling.ca</span>' +
+          '</div>';
+      } else {
+        actionContent =
+          '<div id="stripePaymentSection" style="margin-top:24px">' +
+            '<div id="stripeMountLoading" style="text-align:center;padding:20px;color:var(--muted)"><div class="spin" style="margin:0 auto 10px"></div>Preparing secure payment form…</div>' +
+            '<div id="stripe-payment-element"></div>' +
+            '<div id="stripe-pay-message" style="color:var(--crit);font-size:13px;margin-top:12px;text-align:center" hidden></div>' +
+            '<div class="payportal-actions" style="margin-top:20px">' +
+              '<button type="button" class="payportal-pay-btn" id="btnCustomerPayNow" disabled>' +
+                '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>' +
+                '<span id="btnPayText">PAY ' + esc(inv.amountDue || '$0.00') + ' ' + esc(inv.currency) + '</span>' +
+              '</button>' +
+              '<div style="font-size:12px;color:var(--muted)">End-to-end encrypted via GreenWave Secure Gateway (Stripe PCI Level 1)</div>' +
+            '</div>' +
+          '</div>';
       }
 
       pBody.innerHTML =
         '<div class="payportal-title-bar">' +
           '<div>' +
             '<div class="payportal-inv-num">Invoice #' + esc(inv.invoiceNumber) + '</div>' +
-            '<div style="color:var(--muted);font-size:13px;margin-top:2px">Issued: ' + esc(inv.invoiceDate) + (inv.dueDate ? ' · Due: ' + esc(inv.dueDate) : '') + '</div>' +
+            '<div style="color:var(--muted);font-size:13px;margin-top:2px">Issued: ' + esc(inv.invoiceDate || '—') + (inv.dueDate ? ' · Due: ' + esc(inv.dueDate) : '') + '</div>' +
           '</div>' +
-          '<div>' +
-            '<span class="badge ' + (isPaid ? 'badge-paid' : (isRefunded ? 'badge-refunded' : (isFailed ? 'badge-failed' : 'badge-unpaid'))) + '" style="font-size:13px;padding:4px 10px">' +
-              (isPaid ? 'PAID' : (isRefunded ? 'REFUNDED' : (isFailed ? 'FAILED' : 'AMOUNT DUE'))) +
-            '</span>' +
-          '</div>' +
+          '<div>' + statusBadge + '</div>' +
         '</div>' +
 
         '<div class="payportal-meta-grid">' +
           '<div class="payportal-meta-item">' +
             '<label>BILLED TO</label>' +
-            '<span>' + esc((inv.billTo || '').split('\n')[0] || '—') + '</span>' +
+            '<span>' + esc(inv.customerName || 'Customer') + '</span>' +
           '</div>' +
-          (inv.poReference ? '<div class="payportal-meta-item"><label>PO REFERENCE</label><span>' + esc(inv.poReference) + '</span></div>' : '') +
           '<div class="payportal-meta-item">' +
             '<label>PAYMENT METHOD</label>' +
-            '<span>Online Card / Interac</span>' +
+            '<span>Credit / Debit Card</span>' +
           '</div>' +
           '<div class="payportal-meta-item">' +
             '<label>CURRENCY</label>' +
             '<span>' + esc(inv.currency || 'CAD') + '</span>' +
           '</div>' +
-        '</div>' +
-
-        '<div class="payportal-table-wrap">' +
-          '<table class="payportal-table">' +
-            '<thead><tr><th>Item &amp; Description</th><th style="text-align:center">Quantity</th><th style="text-align:right">Rate</th><th style="text-align:right">Amount</th></tr></thead>' +
-            '<tbody>' + (itemsHtml || '<tr><td colspan="4" style="text-align:center;color:var(--muted)">No line items</td></tr>') + '</tbody>' +
-          '</table>' +
+          '<div class="payportal-meta-item">' +
+            '<label>AMOUNT DUE</label>' +
+            '<span class="mono" style="font-weight:700;color:var(--ink)">' + esc(inv.amountDue || '$0.00') + ' ' + esc(inv.currency) + '</span>' +
+          '</div>' +
         '</div>' +
 
         '<div class="payportal-totals-box">' +
-          '<div class="payportal-total-row"><span>Subtotal</span><span class="mono">' + moneyDollars(inv.subtotal) + '</span></div>' +
-          (inv.discountTotal && Number(inv.discountTotal) > 0 ? '<div class="payportal-total-row" style="color:var(--good)"><span>Discount</span><span class="mono">-' + moneyDollars(inv.discountTotal) + '</span></div>' : '') +
-          '<div class="payportal-total-row"><span>' + esc(inv.taxLabel || 'GST @ 5%') + '</span><span class="mono">' + moneyDollars(inv.taxTotal) + '</span></div>' +
-          '<div class="payportal-total-row payportal-grand-total"><span>Total (' + esc(inv.currency) + ')</span><span class="mono">' + moneyDollars(inv.total) + '</span></div>' +
+          '<div class="payportal-total-row payportal-grand-total">' +
+            '<span>Total Amount Due</span>' +
+            '<span class="mono">' + esc(inv.amountDue || '$0.00') + ' ' + esc(inv.currency) + '</span>' +
+          '</div>' +
         '</div>' +
 
-        actionHtml;
+        actionContent;
 
-      var payBtn = $('#btnCustomerPayNow');
-      if (payBtn) {
-        payBtn.onclick = function () {
-          payBtn.disabled = true;
-          payBtn.innerHTML = '<span class="spin" style="margin-right:8px"></span>Initiating Secure Checkout…';
+      if (!isPaid && !isRefunded && !isProcessing && !isNotPayable && inv.onlinePaymentsAvailable && inv.publishableKey) {
+        loadStripeJs().then(function (StripeSDK) {
+          Api.createPaymentIntent(token).then(function (intent) {
+            var loader = $('#stripeMountLoading');
+            if (loader) loader.hidden = true;
 
-          Api.createCheckoutSession(token).then(function (session) {
-            openModal('Checkout: Invoice #' + inv.invoiceNumber,
-              '<div style="text-align:center;padding:10px 0">' +
-                '<p style="font-size:15px;color:var(--ink);margin-bottom:14px">Total Amount: <strong>' + moneyDollars(session.amount) + ' ' + esc(session.currency) + '</strong></p>' +
-                '<div style="background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--r);padding:14px;margin-bottom:16px;text-align:left;font-size:13px">' +
-                  '<div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Session ID:</span><span class="mono">' + esc(session.sessionId) + '</span></div>' +
-                  '<div style="display:flex;justify-content:space-between;margin-bottom:6px"><span>Provider:</span><span>Stripe Gateway</span></div>' +
-                  '<div style="display:flex;justify-content:space-between"><span>Status:</span><span class="badge badge-pending">Checkout Pending</span></div>' +
-                '</div>' +
-                '<p style="font-size:12.5px;color:var(--muted);margin-bottom:16px">In test environment, you can complete test authorization or simulate webhook confirmation.</p>' +
-                '<button type="button" class="btn btn-primary btn-block" id="btnSimulateCompletePay" style="background:#0F7A4C;font-size:15px;padding:12px">Simulate Successful Payment ($' + session.amount + ')</button>' +
-              '</div>',
-              function () { return Promise.resolve(); }
-            );
+            if (intent.state === 'paid') {
+              renderPublicPaymentPortal(token);
+              return;
+            }
 
-            var simPayBtn = $('#btnSimulateCompletePay');
-            if (simPayBtn) {
-              simPayBtn.onclick = function () {
-                simPayBtn.disabled = true;
-                simPayBtn.textContent = 'Processing Payment…';
+            if (!intent.clientSecret) {
+              var msg = $('#stripe-pay-message');
+              if (msg) { msg.hidden = false; msg.textContent = 'Payment could not be prepared. Please refresh.'; }
+              return;
+            }
 
-                var testPayload = {
-                  type: 'checkout.session.completed',
-                  data: {
-                    object: {
-                      id: session.sessionId,
-                      payment_intent: 'pi_test_' + Date.now(),
-                      amount_total: Math.round(Number(session.amount) * 100),
-                      currency: session.currency.toLowerCase(),
-                      metadata: {
-                        invoiceNumber: inv.invoiceNumber,
-                        paymentToken: token
-                      }
+            var stripeInstance = StripeSDK(inv.publishableKey);
+            var elements = stripeInstance.elements({
+              clientSecret: intent.clientSecret,
+              appearance: {
+                theme: 'stripe',
+                variables: {
+                  colorPrimary: '#0F7A4C',
+                  colorBackground: '#FFFFFF',
+                  colorText: '#0F172A',
+                  borderRadius: '6px'
+                }
+              }
+            });
+
+            var paymentElement = elements.create('payment');
+            paymentElement.mount('#stripe-payment-element');
+
+            var payBtn = $('#btnCustomerPayNow');
+            paymentElement.on('ready', function () {
+              if (payBtn) payBtn.disabled = false;
+            });
+
+            if (payBtn) {
+              payBtn.onclick = function () {
+                payBtn.disabled = true;
+                payBtn.innerHTML = '<span class="spin" style="margin-right:8px"></span>Processing Payment…';
+                var errMsg = $('#stripe-pay-message');
+                if (errMsg) errMsg.hidden = true;
+
+                stripeInstance.confirmPayment({
+                  elements: elements,
+                  confirmParams: {
+                    return_url: window.location.origin + '/pay/' + token
+                  },
+                  redirect: 'if_required'
+                }).then(function (res) {
+                  if (res.error) {
+                    payBtn.disabled = false;
+                    payBtn.innerHTML = 'PAY ' + esc(inv.amountDue || '$0.00') + ' ' + esc(inv.currency);
+                    if (errMsg) {
+                      errMsg.hidden = false;
+                      errMsg.textContent = res.error.message || 'Payment submission failed. Please check card details.';
                     }
+                  } else {
+                    renderPublicPaymentPortal(token);
                   }
-                };
-
-                fetch(Api.getBaseUrl() + '/pay/webhook', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(testPayload)
-                }).then(function () {
-                  toast('Payment processed successfully!');
-                  closeModal();
-                  renderPublicPaymentPortal(token);
                 }).catch(function (err) {
-                  toast('Payment processed: ' + (err.message || 'Complete'));
-                  closeModal();
-                  renderPublicPaymentPortal(token);
+                  payBtn.disabled = false;
+                  payBtn.innerHTML = 'PAY ' + esc(inv.amountDue || '$0.00') + ' ' + esc(inv.currency);
+                  if (errMsg) {
+                    errMsg.hidden = false;
+                    errMsg.textContent = err.message || 'Payment submission error.';
+                  }
                 });
               };
             }
           }).catch(function (err) {
-            payBtn.disabled = false;
-            payBtn.innerHTML = 'PAY INVOICE · ' + moneyDollars(inv.total) + ' ' + esc(inv.currency);
-            toast(err.message || 'Could not initiate checkout session.');
+            var loader = $('#stripeMountLoading');
+            if (loader) loader.innerHTML = '<span style="color:var(--crit)">Unable to initialize payment: ' + esc(err.message || 'Error') + '</span>';
           });
-        };
+        }).catch(function () {
+          var loader = $('#stripeMountLoading');
+          if (loader) loader.innerHTML = '<span style="color:var(--crit)">Could not load secure checkout SDK. Please check network connection.</span>';
+        });
       }
     }).catch(function (err) {
       pBody.innerHTML = '<div style="text-align:center;padding:40px 20px;color:var(--crit)">' +
         '<div style="font-size:18px;font-weight:700;margin-bottom:8px">Unable to load invoice</div>' +
         '<div>' + esc(err.message || 'Invalid or expired payment link.') + '</div>' +
       '</div>';
+    });
+  }
+
+  // ==========================================================================
+  // PAYMENTS & SETTLEMENT
+  // ==========================================================================
+  var payFilterState = 'all';
+  var paySearchState = '';
+  function renderPaymentsList() {
+    var host = $('#paymentsList');
+    if (!host) return;
+
+    var tabs = $$('#payFilterTabs button');
+    tabs.forEach(function (tab) {
+      if (!tab.dataset.bound) {
+        tab.dataset.bound = 'true';
+        tab.addEventListener('click', function () {
+          tabs.forEach(function (t) { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
+          tab.classList.add('active');
+          tab.setAttribute('aria-selected', 'true');
+          payFilterState = tab.dataset.payFilter || 'all';
+          renderPaymentsList();
+        });
+      }
+    });
+
+    var sInput = $('#paySearch');
+    if (sInput && !sInput.dataset.bound) {
+      sInput.dataset.bound = 'true';
+      sInput.addEventListener('input', function () {
+        paySearchState = sInput.value.trim().toLowerCase();
+        renderPaymentsList();
+      });
+    }
+
+    var btnSync = $('#btnSyncStripe');
+    if (btnSync && !btnSync.dataset.bound) {
+      btnSync.dataset.bound = 'true';
+      btnSync.addEventListener('click', function () {
+        btnSync.disabled = true;
+        btnSync.innerHTML = '<span class="spin" style="margin-right:6px"></span>Syncing…';
+        Api.syncStripe({ full: false }).then(function () {
+          btnSync.disabled = false;
+          btnSync.innerHTML = '<svg><use href="#i-history"></use></svg>Sync Stripe';
+          toast('Stripe synchronization complete.');
+          renderPaymentsList();
+        }).catch(function (err) {
+          btnSync.disabled = false;
+          btnSync.innerHTML = '<svg><use href="#i-history"></use></svg>Sync Stripe';
+          toast(err.message || 'Stripe synchronization finished.');
+          renderPaymentsList();
+        });
+      });
+    }
+
+    host.innerHTML = '<div style="text-align:center;padding:30px;color:var(--muted)"><div class="spin" style="margin:0 auto 10px"></div>Loading payments…</div>';
+
+    Promise.all([
+      Api.getPaymentSummary().catch(function () { return null; }),
+      Api.listPayments({ status: payFilterState === 'all' ? undefined : payFilterState, q: paySearchState || undefined })
+    ]).then(function (results) {
+      var summary = results[0];
+      var payments = results[1] || [];
+
+      if (summary) {
+        var elS = $('#kpiPaySettled'); if (elS) elS.textContent = money(summary.settledTotalMinor || 0);
+        var elP = $('#kpiPayProcessing'); if (elP) elP.textContent = money(summary.processingTotalMinor || 0);
+        var elR = $('#kpiPayRefunded'); if (elR) elR.textContent = money(summary.refundedTotalMinor || 0);
+        var elF = $('#kpiPayFailed'); if (elF) elF.textContent = num(summary.failedCount || 0);
+      }
+
+      if (!payments.length) {
+        host.innerHTML = '<div class="card pad" style="text-align:center;color:var(--muted)">No payment records matching filter.</div>';
+        return;
+      }
+
+      var rows = payments.map(function (p) {
+        var statusCls = 'badge-pending';
+        var statusLabel = p.status || 'CREATED';
+        if (p.status === 'SUCCEEDED') { statusCls = 'badge-paid'; statusLabel = 'SUCCEEDED'; }
+        else if (p.status === 'REFUNDED') { statusCls = 'badge-refunded'; statusLabel = 'REFUNDED'; }
+        else if (p.status === 'FAILED') { statusCls = 'badge-failed'; statusLabel = 'FAILED'; }
+        else if (p.status === 'PROCESSING') { statusCls = 'badge-pending'; statusLabel = 'PROCESSING'; }
+
+        var canRefund = isAdminOrManager() && p.status === 'SUCCEEDED';
+        var refundBtn = canRefund ?
+          '<button type="button" class="btn ghost btn-sm btn-refund" data-pay-id="' + esc(p.id) + '" data-pay-amount="' + esc(p.amount) + '" data-pay-curr="' + esc(p.currency || 'CAD') + '">Refund</button>' : '';
+
+        var copyBtn = p.paymentToken ?
+          '<button type="button" class="btn ghost btn-sm btn-copylink" data-token="' + esc(p.paymentToken) + '" title="Copy customer payment link">Copy Link</button>' : '';
+
+        return '<tr>' +
+          '<td class="mono"><strong>' + esc((p.providerPaymentId || p.id).slice(0, 18)) + '</strong></td>' +
+          '<td>' + (p.invoiceNumber ? '<a href="#invoices" class="link-inv" data-inv-id="' + esc(p.invoiceId) + '">#' + esc(p.invoiceNumber) + '</a>' : (p.invoiceId ? '#' + esc(p.invoiceId.slice(0, 8)) : '—')) + '</td>' +
+          '<td>' + esc(p.customerName || (p.metadata && p.metadata.customerName) || 'Customer') + '</td>' +
+          '<td class="mono" style="font-weight:600">' + moneyDollars(p.amount) + ' <small>' + esc(p.currency || 'CAD') + '</small></td>' +
+          '<td><span class="badge ' + statusCls + '">' + statusLabel + '</span></td>' +
+          '<td class="mono">' + ddmmyyyy(p.createdAt) + '</td>' +
+          '<td style="text-align:right;white-space:nowrap">' + copyBtn + ' ' + refundBtn + '</td>' +
+        '</tr>';
+      }).join('');
+
+      host.innerHTML =
+        '<div class="card"><div class="tablewrap"><table class="table">' +
+          '<thead><tr><th>Reference</th><th>Invoice</th><th>Customer</th><th>Amount</th><th>Status</th><th>Date</th><th style="text-align:right">Actions</th></tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table></div></div>';
+
+      $$('.btn-copylink', host).forEach(function (btn) {
+        btn.onclick = function () {
+          var url = window.location.origin + '/pay/' + btn.dataset.token;
+          if (navigator.clipboard) {
+            navigator.clipboard.writeText(url).then(function () { toast('Copied payment link to clipboard!'); });
+          } else {
+            prompt('Copy payment link:', url);
+          }
+        };
+      });
+
+      $$('.btn-refund', host).forEach(function (btn) {
+        btn.onclick = function () {
+          var pId = btn.dataset.payId;
+          var pAmt = btn.dataset.payAmount;
+          var pCurr = btn.dataset.payCurr;
+
+          openModal('Issue Payment Refund',
+            '<div class="field">' +
+              '<label>Refund Amount (' + esc(pCurr) + ')</label>' +
+              '<input type="number" step="0.01" min="0.01" max="' + esc(pAmt) + '" name="amount" value="' + esc(pAmt) + '" required>' +
+              '<small style="color:var(--muted)">Original charge: ' + moneyDollars(pAmt) + ' ' + esc(pCurr) + '</small>' +
+            '</div>' +
+            '<div class="field">' +
+              '<label>Reason for Refund</label>' +
+              '<select name="reason">' +
+                '<option value="requested_by_customer">Customer Request</option>' +
+                '<option value="duplicate">Duplicate Transaction</option>' +
+                '<option value="fraudulent">Suspected Fraud</option>' +
+              '</select>' +
+            '</div>',
+            function (fd) {
+              var minor = Math.round(Number(fd.amount) * 100);
+              if (!minor || minor <= 0) { toast('Please enter a valid refund amount.'); return Promise.reject(); }
+              return Api.refundPayment(pId, minor, fd.reason).then(function () {
+                toast('Refund issued successfully.');
+                renderPaymentsList();
+              });
+            },
+            { okLabel: 'Issue Refund', okClass: 'btn-primary' }
+          );
+        };
+      });
+    }).catch(function (err) {
+      host.innerHTML = '<div class="card pad" style="color:var(--crit)">Failed to load payments: ' + esc(err.message || 'Error') + '</div>';
+    });
+  }
+
+  // ==========================================================================
+  // ACCOUNTS RECEIVABLE AGING
+  // ==========================================================================
+  function renderArAgingView() {
+    var host = $('#arAgingBody');
+    if (!host) return;
+
+    var asOfInput = $('#arAgingAsOf');
+    if (asOfInput && !asOfInput.value) asOfInput.value = today();
+
+    var btnRefresh = $('#btnRefreshArAging');
+    if (btnRefresh && !btnRefresh.dataset.bound) {
+      btnRefresh.dataset.bound = 'true';
+      btnRefresh.onclick = function () { renderArAgingView(); };
+    }
+
+    var asOf = asOfInput ? asOfInput.value : today();
+    host.innerHTML = '<div style="text-align:center;padding:30px;color:var(--muted)"><div class="spin" style="margin:0 auto 10px"></div>Calculating AR aging…</div>';
+
+    Api.getAccountsReceivableAging({ asOf: asOf }).then(function (res) {
+      var summary = res.summary || {};
+      var buckets = res.buckets || [];
+
+      var kCurrent = $('#kpiArCurrent'); if (kCurrent) kCurrent.textContent = money(summary.current || 0);
+      var k30 = $('#kpiAr30'); if (k30) k30.textContent = money(summary.days1_30 || 0);
+      var k60 = $('#kpiAr60'); if (k60) k60.textContent = money(summary.days31_60 || 0);
+      var k90 = $('#kpiAr90'); if (k90) k90.textContent = money(summary.days90Plus || 0);
+
+      var btnExport = $('#btnExportArAging');
+      if (btnExport && !btnExport.dataset.bound) {
+        btnExport.dataset.bound = 'true';
+        btnExport.onclick = function () {
+          var csv = 'Customer,Current,1-30 Days,31-60 Days,61-90 Days,90+ Days,Total Due\n' +
+            buckets.map(function (b) {
+              return '"' + (b.customerName || '').replace(/"/g, '""') + '",' +
+                (b.current / 100).toFixed(2) + ',' +
+                (b.days1_30 / 100).toFixed(2) + ',' +
+                (b.days31_60 / 100).toFixed(2) + ',' +
+                (b.days61_90 / 100).toFixed(2) + ',' +
+                (b.days90Plus / 100).toFixed(2) + ',' +
+                (b.total / 100).toFixed(2);
+            }).join('\n');
+          var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+          var link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = 'greenwave-ar-aging-' + asOf + '.csv';
+          link.click();
+        };
+      }
+
+      if (!buckets.length) {
+        host.innerHTML = '<div class="card pad" style="text-align:center;color:var(--muted)">No outstanding accounts receivable found as of ' + esc(asOf) + '.</div>';
+        return;
+      }
+
+      var rows = buckets.map(function (b) {
+        return '<tr>' +
+          '<td><strong>' + esc(b.customerName || 'Customer') + '</strong></td>' +
+          '<td class="mono num">' + money(b.current || 0) + '</td>' +
+          '<td class="mono num">' + money(b.days1_30 || 0) + '</td>' +
+          '<td class="mono num">' + money(b.days31_60 || 0) + '</td>' +
+          '<td class="mono num">' + money(b.days61_90 || 0) + '</td>' +
+          '<td class="mono num" style="color:var(--crit)">' + money(b.days90Plus || 0) + '</td>' +
+          '<td class="mono num" style="font-weight:700">' + money(b.total || 0) + '</td>' +
+          '<td style="text-align:center"><span class="badge">' + num(b.invoiceCount || 0) + ' inv</span></td>' +
+        '</tr>';
+      }).join('');
+
+      var totalsRow = '<tr style="font-weight:700;background:var(--panel-2)">' +
+        '<td>TOTAL RECEIVABLES</td>' +
+        '<td class="mono num">' + money(summary.current || 0) + '</td>' +
+        '<td class="mono num">' + money(summary.days1_30 || 0) + '</td>' +
+        '<td class="mono num">' + money(summary.days31_60 || 0) + '</td>' +
+        '<td class="mono num">' + money(summary.days61_90 || 0) + '</td>' +
+        '<td class="mono num" style="color:var(--crit)">' + money(summary.days90Plus || 0) + '</td>' +
+        '<td class="mono num" style="color:var(--accent)">' + money(summary.total || 0) + '</td>' +
+        '<td></td>' +
+      '</tr>';
+
+      host.innerHTML =
+        '<div class="card"><div class="tablewrap"><table class="table">' +
+          '<thead><tr><th>Customer Name</th><th class="num">Current</th><th class="num">1–30 Days</th><th class="num">31–60 Days</th><th class="num">61–90 Days</th><th class="num">90+ Days</th><th class="num">Total Outstanding</th><th style="text-align:center">Invoices</th></tr></thead>' +
+          '<tbody>' + rows + totalsRow + '</tbody>' +
+        '</table></div></div>';
+    }).catch(function (err) {
+      host.innerHTML = '<div class="card pad" style="color:var(--crit)">Failed to calculate AR aging: ' + esc(err.message || 'Error') + '</div>';
+    });
+  }
+
+  // ==========================================================================
+  // BANKING & CORPORATE CREDIT CARDS
+  // ==========================================================================
+  var selectedBankAccountId = null;
+  var bankSubTab = 'transactions';
+  var bankTxStatus = '';
+  var bankTxQ = '';
+
+  function renderBankingView() {
+    var cardsHost = $('#bankAccountsContainer');
+    var txHost = $('#bankTransactionsBody');
+    if (!cardsHost || !txHost) return;
+
+    var btnAdd = $('#btnAddBankAccount');
+    if (btnAdd && !btnAdd.dataset.bound) {
+      btnAdd.dataset.bound = 'true';
+      btnAdd.onclick = function () {
+        openModal('Add Financial Account',
+          '<div class="field">' +
+            '<label>Account Name</label>' +
+            '<input type="text" name="name" placeholder="e.g. Operating Checking" required>' +
+          '</div>' +
+          '<div class="field">' +
+            '<label>Account Type</label>' +
+            '<select name="type">' +
+              '<option value="checking">Checking Account</option>' +
+              '<option value="savings">Savings Account</option>' +
+              '<option value="credit_card">Corporate Credit Card</option>' +
+            '</select>' +
+          '</div>' +
+          '<div class="formgrid-2">' +
+            '<div class="field"><label>Institution Name</label><input type="text" name="institutionName" placeholder="e.g. RBC, TD, Stripe"></div>' +
+            '<div class="field"><label>Last 4 Digits</label><input type="text" name="accountNumberLast4" maxlength="4" placeholder="1234"></div>' +
+          '</div>' +
+          '<div class="formgrid-2">' +
+            '<div class="field"><label>Currency</label><select name="currency"><option value="CAD">CAD</option><option value="USD">USD</option></select></div>' +
+            '<div class="field"><label>Opening Balance ($)</label><input type="number" step="0.01" name="openingBalance" value="0.00"></div>' +
+          '</div>',
+          function (fd) {
+            return Api.createFinancialAccount(fd).then(function (acc) {
+              toast('Financial account added.');
+              selectedBankAccountId = acc.id;
+              renderBankingView();
+            });
+          }
+        );
+      };
+    }
+
+    var tabs = $$('#bankTabSelector button');
+    tabs.forEach(function (tab) {
+      if (!tab.dataset.bound) {
+        tab.dataset.bound = 'true';
+        tab.onclick = function () {
+          tabs.forEach(function (t) { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
+          tab.classList.add('active');
+          tab.setAttribute('aria-selected', 'true');
+          bankSubTab = tab.dataset.bankTab || 'transactions';
+          var txFilters = $('#bankTxFilters');
+          if (txFilters) txFilters.hidden = (bankSubTab !== 'transactions');
+          renderBankingSubTab();
+        };
+      }
+    });
+
+    var sInput = $('#bankTxSearch');
+    if (sInput && !sInput.dataset.bound) {
+      sInput.dataset.bound = 'true';
+      sInput.addEventListener('input', function () {
+        bankTxQ = sInput.value.trim().toLowerCase();
+        renderBankingSubTab();
+      });
+    }
+
+    var stFilter = $('#bankTxStatusFilter');
+    if (stFilter && !stFilter.dataset.bound) {
+      stFilter.dataset.bound = 'true';
+      stFilter.addEventListener('change', function () {
+        bankTxStatus = stFilter.value;
+        renderBankingSubTab();
+      });
+    }
+
+    Api.listFinancialAccounts().then(function (accounts) {
+      accounts = accounts || [];
+      var totalCashMinor = 0;
+      var totalCreditMinor = 0;
+
+      accounts.forEach(function (a) {
+        var bal = Number(a.currentBalanceMinor || 0);
+        if (a.type === 'credit_card') totalCreditMinor += bal;
+        else totalCashMinor += bal;
+      });
+
+      var kCash = $('#kpiBankTotalCash'); if (kCash) kCash.textContent = money(totalCashMinor);
+      var kCredit = $('#kpiBankTotalCredit'); if (kCredit) kCredit.textContent = money(totalCreditMinor);
+      var kNet = $('#kpiBankNetLiquid'); if (kNet) kNet.textContent = money(totalCashMinor - totalCreditMinor);
+
+      if (!accounts.length) {
+        cardsHost.innerHTML = '<div class="card pad" style="text-align:center;color:var(--muted)">No financial accounts set up yet. Click "Add Account" above.</div>';
+        txHost.innerHTML = '';
+        return;
+      }
+
+      if (!selectedBankAccountId || !accounts.some(function (a) { return a.id === selectedBankAccountId; })) {
+        selectedBankAccountId = accounts[0].id;
+      }
+
+      var cardsHtml = accounts.map(function (a) {
+        var isSel = a.id === selectedBankAccountId;
+        var typeBadge = a.type === 'credit_card' ? 'Credit Card' : (a.type === 'savings' ? 'Savings' : 'Checking');
+        return '<div class="card pad bank-card-item' + (isSel ? ' active-bank-card' : '') + '" data-acc-id="' + esc(a.id) + '" style="cursor:pointer;flex:1;min-width:240px;border:' + (isSel ? '2px solid var(--accent)' : '1px solid var(--line)') + '">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">' +
+            '<span style="font-weight:600;font-size:14px">' + esc(a.name) + '</span>' +
+            '<span class="badge">' + typeBadge + '</span>' +
+          '</div>' +
+          '<div style="font-size:12px;color:var(--muted);margin-bottom:8px">' + esc(a.institutionName || 'Bank') + ' · •••• ' + esc(a.accountNumberLast4 || '0000') + ' (' + esc(a.currency || 'CAD') + ')</div>' +
+          '<div style="display:flex;justify-content:space-between;align-items:baseline">' +
+            '<span style="font-size:11px;color:var(--muted)">GL BALANCE</span>' +
+            '<span class="mono" style="font-size:18px;font-weight:700;color:var(--ink)">' + money(a.currentBalanceMinor || 0) + '</span>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+
+      cardsHost.innerHTML = '<div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:6px">' + cardsHtml + '</div>';
+
+      $$('.bank-card-item', cardsHost).forEach(function (card) {
+        card.onclick = function () {
+          selectedBankAccountId = card.dataset.accId;
+          renderBankingView();
+        };
+      });
+
+      renderBankingSubTab();
+    }).catch(function (err) {
+      cardsHost.innerHTML = '<div class="card pad" style="color:var(--crit)">Failed to load financial accounts: ' + esc(err.message || 'Error') + '</div>';
+    });
+  }
+
+  function renderBankingSubTab() {
+    var txHost = $('#bankTransactionsBody');
+    if (!txHost || !selectedBankAccountId) return;
+
+    if (bankSubTab === 'import') {
+      txHost.innerHTML =
+        '<div class="card pad">' +
+          '<h3>Import Statement (CSV)</h3>' +
+          '<p style="color:var(--muted);font-size:13px;margin-bottom:16px">Upload bank or credit card statements in CSV format to synchronize transactions with the general ledger.</p>' +
+          '<div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:var(--r);padding:12px 16px;margin-bottom:18px;display:flex;align-items:center;gap:12px">' +
+            '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16A34A" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>' +
+            '<div style="font-size:12.5px;color:#166534">' +
+              '<strong>PCI-DSS Safe Masking &amp; Deduplication:</strong> All 13–19 digit payment card numbers are automatically sanitized before storage. Duplicate statement rows are detected and filtered via SHA-256 fingerprinting.' +
+            '</div>' +
+          '</div>' +
+          '<div class="field">' +
+            '<label>Select CSV Statement File</label>' +
+            '<input type="file" id="bankCsvFileInput" accept=".csv,text/csv">' +
+          '</div>' +
+          '<div id="bankImportPreviewArea"></div>' +
+        '</div>';
+
+      var fileInput = $('#bankCsvFileInput');
+      if (fileInput) {
+        fileInput.onchange = function (e) {
+          var file = e.target.files && e.target.files[0];
+          if (!file) return;
+          var prevArea = $('#bankImportPreviewArea');
+          if (prevArea) prevArea.innerHTML = '<div style="text-align:center;padding:20px"><div class="spin" style="margin:0 auto 8px"></div>Analyzing and parsing statement CSV…</div>';
+
+          Api.previewStatementImport(selectedBankAccountId, file, {}).then(function (prev) {
+            if (!prevArea) return;
+            var rows = (prev.sampleRows || prev.rows || []).slice(0, 10).map(function (r) {
+              return '<tr>' +
+                '<td class="mono">' + esc(r.date) + '</td>' +
+                '<td>' + esc(r.description) + '</td>' +
+                '<td class="mono num" style="color:var(--good)">' + (r.inflowMinor ? money(r.inflowMinor) : '—') + '</td>' +
+                '<td class="mono num" style="color:var(--crit)">' + (r.outflowMinor ? money(r.outflowMinor) : '—') + '</td>' +
+                '<td class="mono"><small>' + esc((r.dedupeHash || '').slice(0, 10)) + '…</small></td>' +
+              '</tr>';
+            }).join('');
+
+            prevArea.innerHTML =
+              '<div style="margin-top:16px">' +
+                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">' +
+                  '<span style="font-weight:600;font-size:14px">Statement Preview (' + num(prev.totalRows || 0) + ' rows, ' + num(prev.newRowsCount || prev.totalRows || 0) + ' new)</span>' +
+                  '<button type="button" class="btn btn-primary" id="btnCommitStatementImport">Commit Import (' + num(prev.newRowsCount || prev.totalRows || 0) + ' Rows)</button>' +
+                '</div>' +
+                '<div class="tablewrap"><table class="table">' +
+                  '<thead><tr><th>Date</th><th>Description</th><th class="num">Inflow</th><th class="num">Outflow</th><th>Hash</th></tr></thead>' +
+                  '<tbody>' + rows + '</tbody>' +
+                '</table></div>' +
+              '</div>';
+
+            var btnCommit = $('#btnCommitStatementImport');
+            if (btnCommit) {
+              btnCommit.onclick = function () {
+                btnCommit.disabled = true;
+                btnCommit.innerHTML = '<span class="spin" style="margin-right:6px"></span>Committing…';
+                Api.commitStatementImport(prev.batchId).then(function () {
+                  toast('Statement imported successfully.');
+                  bankSubTab = 'transactions';
+                  var tabs = $$('#bankTabSelector button');
+                  tabs.forEach(function (t) { t.classList.toggle('active', t.dataset.bankTab === 'transactions'); });
+                  renderBankingView();
+                }).catch(function (err) {
+                  btnCommit.disabled = false;
+                  btnCommit.textContent = 'Commit Import';
+                  toast(err.message || 'Import failed.');
+                });
+              };
+            }
+          }).catch(function (err) {
+            if (prevArea) prevArea.innerHTML = '<div style="color:var(--crit);padding:14px">Could not parse CSV: ' + esc(err.message || 'Invalid format') + '</div>';
+          });
+        };
+      }
+      return;
+    }
+
+    // Transactions tab
+    txHost.innerHTML = '<div style="text-align:center;padding:30px;color:var(--muted)"><div class="spin" style="margin:0 auto 10px"></div>Loading transactions…</div>';
+
+    Api.listFinancialTransactions({
+      accountId: selectedBankAccountId,
+      status: bankTxStatus || undefined,
+      q: bankTxQ || undefined
+    }).then(function (txs) {
+      txs = txs || [];
+      if (!txs.length) {
+        txHost.innerHTML = '<div class="card pad" style="text-align:center;color:var(--muted)">No transactions found for this account.</div>';
+        return;
+      }
+
+      var rows = txs.map(function (tx) {
+        var isInflow = tx.type === 'CREDIT' || (tx.amountMinor > 0 && tx.direction !== 'OUTFLOW');
+        var amtFormatted = money(Math.abs(tx.amountMinor));
+        var amtCls = isInflow ? 'text-success' : 'text-ink';
+        var sign = isInflow ? '+' : '-';
+
+        var catBtn = '<button type="button" class="btn ghost btn-sm btn-categorize" data-tx-id="' + esc(tx.id) + '">Categorize</button>';
+
+        return '<tr>' +
+          '<td class="mono">' + ddmmyyyy(tx.transactionDate) + '</td>' +
+          '<td><strong>' + esc(tx.payee || tx.description) + '</strong>' + (tx.payee && tx.description ? '<br><small style="color:var(--muted)">' + esc(tx.description) + '</small>' : '') + '</td>' +
+          '<td class="mono num ' + amtCls + '" style="font-weight:600">' + sign + amtFormatted + '</td>' +
+          '<td>' + (tx.categorizedAccountName ? '<span class="mono">' + esc(tx.categorizedAccountCode || '') + ' ' + esc(tx.categorizedAccountName) + '</span>' : '<span style="color:var(--muted)">Uncategorized</span>') + '</td>' +
+          '<td><span class="badge ' + (tx.status === 'RECONCILED' ? 'badge-paid' : 'badge-pending') + '">' + esc(tx.status || 'UNCATEGORIZED') + '</span></td>' +
+          '<td style="text-align:right">' + catBtn + '</td>' +
+        '</tr>';
+      }).join('');
+
+      txHost.innerHTML =
+        '<div class="card"><div class="tablewrap"><table class="table">' +
+          '<thead><tr><th>Date</th><th>Description / Payee</th><th class="num">Amount</th><th>GL Category</th><th>Status</th><th style="text-align:right">Action</th></tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table></div></div>';
+
+      $$('.btn-categorize', txHost).forEach(function (btn) {
+        btn.onclick = function () {
+          var txId = btn.dataset.txId;
+          Api.listLedgerAccounts().then(function (accounts) {
+            var opts = (accounts || []).map(function (a) {
+              return '<option value="' + esc(a.id) + '">' + esc(a.code) + ' - ' + esc(a.name) + ' (' + esc(a.classification) + ')</option>';
+            }).join('');
+
+            openModal('Categorize Transaction',
+              '<div class="field">' +
+                '<label>General Ledger Account</label>' +
+                '<select name="accountId" required>' + opts + '</select>' +
+              '</div>' +
+              '<div class="field">' +
+                '<label>Memo / Notes</label>' +
+                '<input type="text" name="memo" placeholder="Optional categorization notes">' +
+              '</div>',
+              function (fd) {
+                return Api.categorizeTransaction(txId, {
+                  accountId: fd.accountId,
+                  memo: fd.memo
+                }).then(function () {
+                  toast('Transaction categorized.');
+                  renderBankingSubTab();
+                });
+              }
+            );
+          });
+        };
+      });
+    }).catch(function (err) {
+      txHost.innerHTML = '<div class="card pad" style="color:var(--crit)">Failed to load transactions: ' + esc(err.message || 'Error') + '</div>';
+    });
+  }
+
+  // ==========================================================================
+  // STATEMENT RECONCILIATION
+  // ==========================================================================
+  var currentReconSession = null;
+  function renderReconciliationView() {
+    var acctSelect = $('#reconAccountSelect');
+    var dateInput = $('#reconStatementDate');
+    var balInput = $('#reconStatementBalance');
+    var btnStart = $('#btnStartRecon');
+    var worksheet = $('#reconciliationWorksheet');
+    var listHost = $('#reconciliationItemsList');
+    var btnComplete = $('#btnCompleteReconciliation');
+    var btnSelectAll = $('#btnReconSelectAll');
+
+    if (!acctSelect) return;
+    if (dateInput && !dateInput.value) dateInput.value = today();
+
+    Api.listFinancialAccounts().then(function (accounts) {
+      accounts = accounts || [];
+      acctSelect.innerHTML = accounts.map(function (a) {
+        return '<option value="' + esc(a.id) + '">' + esc(a.name) + ' (' + esc(a.institutionName || 'Bank') + ' •••• ' + esc(a.accountNumberLast4 || '') + ')</option>';
+      }).join('');
+    });
+
+    if (btnStart && !btnStart.dataset.bound) {
+      btnStart.dataset.bound = 'true';
+      btnStart.onclick = function () {
+        var acctId = acctSelect.value;
+        var stDate = dateInput ? dateInput.value : today();
+        var stBalVal = balInput ? parseFloat(balInput.value || '0') : 0;
+        if (!acctId) { toast('Please select a financial account.'); return; }
+        if (isNaN(stBalVal)) { toast('Please enter a valid statement balance.'); return; }
+
+        if (worksheet) worksheet.hidden = false;
+        if (listHost) listHost.innerHTML = '<div style="text-align:center;padding:24px"><div class="spin" style="margin:0 auto 10px"></div>Loading unreconciled items…</div>';
+
+        Api.listFinancialTransactions({ accountId: acctId, limit: 200 }).then(function (txs) {
+          txs = (txs || []).filter(function (t) { return t.status !== 'RECONCILED'; });
+          currentReconSession = {
+            accountId: acctId,
+            statementEndingDate: stDate,
+            statementEndingBalance: stBalVal,
+            statementEndingBalanceMinor: Math.round(stBalVal * 100),
+            transactions: txs,
+            clearedIds: {}
+          };
+
+          function updateWorksheet() {
+            var clearedMinor = 0;
+            currentReconSession.transactions.forEach(function (t) {
+              if (currentReconSession.clearedIds[t.id]) {
+                var isCredit = t.type === 'CREDIT' || (t.amountMinor > 0 && t.direction !== 'OUTFLOW');
+                if (isCredit) clearedMinor += Math.abs(t.amountMinor);
+                else clearedMinor -= Math.abs(t.amountMinor);
+              }
+            });
+
+            var diffMinor = currentReconSession.statementEndingBalanceMinor - clearedMinor;
+            var isBalanced = Math.abs(diffMinor) === 0;
+
+            var kStmt = $('#reconKpiStatement'); if (kStmt) kStmt.textContent = money(currentReconSession.statementEndingBalanceMinor);
+            var kClr = $('#reconKpiCleared'); if (kClr) kClr.textContent = money(clearedMinor);
+            var kDiff = $('#reconKpiDiff');
+            var kSub = $('#reconKpiDiffSub');
+
+            if (kDiff) {
+              kDiff.textContent = money(diffMinor);
+              kDiff.className = 'kpi-value ' + (isBalanced ? 'text-success' : 'text-crit');
+            }
+            if (kSub) {
+              kSub.textContent = isBalanced ? '✓ Reconciled to $0.00 difference' : 'Difference must equal $0.00 to complete';
+            }
+            if (btnComplete) {
+              btnComplete.disabled = !isBalanced;
+            }
+          }
+
+          if (!txs.length) {
+            if (listHost) listHost.innerHTML = '<div class="card pad" style="text-align:center;color:var(--muted)">No unreconciled transactions for this period.</div>';
+            updateWorksheet();
+            return;
+          }
+
+          var rows = txs.map(function (t) {
+            var isCredit = t.type === 'CREDIT' || (t.amountMinor > 0 && t.direction !== 'OUTFLOW');
+            var amtCls = isCredit ? 'text-success' : 'text-ink';
+            var sign = isCredit ? '+' : '-';
+
+            return '<tr>' +
+              '<td style="width:40px;text-align:center"><input type="checkbox" class="recon-chk" data-tx-id="' + esc(t.id) + '"></td>' +
+              '<td class="mono">' + ddmmyyyy(t.transactionDate) + '</td>' +
+              '<td><strong>' + esc(t.payee || t.description) + '</strong></td>' +
+              '<td>' + (t.categorizedAccountName ? '<span class="mono">' + esc(t.categorizedAccountCode || '') + ' ' + esc(t.categorizedAccountName) + '</span>' : '—') + '</td>' +
+              '<td class="mono num ' + amtCls + '" style="font-weight:600">' + sign + money(Math.abs(t.amountMinor)) + '</td>' +
+            '</tr>';
+          }).join('');
+
+          if (listHost) {
+            listHost.innerHTML =
+              '<div class="card"><div class="tablewrap"><table class="table">' +
+                '<thead><tr><th style="text-align:center">Cleared</th><th>Date</th><th>Payee / Description</th><th>Category</th><th class="num">Amount</th></tr></thead>' +
+                '<tbody>' + rows + '</tbody>' +
+              '</table></div></div>';
+
+            $$('.recon-chk', listHost).forEach(function (chk) {
+              chk.onchange = function () {
+                currentReconSession.clearedIds[chk.dataset.txId] = chk.checked;
+                updateWorksheet();
+              };
+            });
+          }
+
+          if (btnSelectAll) {
+            btnSelectAll.onclick = function () {
+              var allChecked = Object.keys(currentReconSession.clearedIds).length === currentReconSession.transactions.length;
+              $$('.recon-chk', listHost).forEach(function (chk) {
+                chk.checked = !allChecked;
+                currentReconSession.clearedIds[chk.dataset.txId] = !allChecked;
+              });
+              updateWorksheet();
+            };
+          }
+
+          updateWorksheet();
+        });
+      };
+    }
+
+    if (btnComplete && !btnComplete.dataset.bound) {
+      btnComplete.dataset.bound = 'true';
+      btnComplete.onclick = function () {
+        if (!currentReconSession) return;
+        btnComplete.disabled = true;
+        btnComplete.textContent = 'Posting Reconciliation…';
+
+        var clearedIds = Object.keys(currentReconSession.clearedIds).filter(function (id) {
+          return currentReconSession.clearedIds[id];
+        });
+
+        Api.startReconciliation({
+          accountId: currentReconSession.accountId,
+          statementEndingDate: currentReconSession.statementEndingDate,
+          statementEndingBalance: currentReconSession.statementEndingBalance
+        }).then(function (rec) {
+          return Api.completeReconciliation(rec.id, { clearedTransactionIds: clearedIds });
+        }).then(function () {
+          toast('Reconciliation successfully finalized and posted.');
+          btnComplete.textContent = 'Complete Reconciliation';
+          renderReconciliationView();
+        }).catch(function (err) {
+          btnComplete.disabled = false;
+          btnComplete.textContent = 'Complete Reconciliation';
+          toast(err.message || 'Reconciliation failed.');
+        });
+      };
+    }
+  }
+
+  // ==========================================================================
+  // ACCOUNTS PAYABLE & BILLS
+  // ==========================================================================
+  var apSubTab = 'bills';
+  var apSearchQ = '';
+  function renderPayablesView() {
+    var host = $('#payablesBody');
+    if (!host) return;
+
+    var tabs = $$('#payablesTabs button');
+    tabs.forEach(function (tab) {
+      if (!tab.dataset.bound) {
+        tab.dataset.bound = 'true';
+        tab.onclick = function () {
+          tabs.forEach(function (t) { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
+          tab.classList.add('active');
+          tab.setAttribute('aria-selected', 'true');
+          apSubTab = tab.dataset.apTab || 'bills';
+          renderPayablesSubTab();
+        };
+      }
+    });
+
+    var sInput = $('#apSearch');
+    if (sInput && !sInput.dataset.bound) {
+      sInput.dataset.bound = 'true';
+      sInput.addEventListener('input', function () {
+        apSearchQ = sInput.value.trim().toLowerCase();
+        renderPayablesSubTab();
+      });
+    }
+
+    var btnNew = $('#btnNewBill');
+    if (btnNew && !btnNew.dataset.bound) {
+      btnNew.dataset.bound = 'true';
+      btnNew.onclick = function () {
+        Promise.all([
+          Api.listVendors(),
+          Api.listLedgerAccounts({ classification: 'EXPENSE' })
+        ]).then(function (results) {
+          var vendors = results[0] || [];
+          var accounts = results[1] || [];
+
+          var vendorOpts = vendors.map(function (v) {
+            return '<option value="' + esc(v.id) + '">' + esc(v.name) + '</option>';
+          }).join('');
+
+          var acctOpts = accounts.map(function (a) {
+            return '<option value="' + esc(a.id) + '">' + esc(a.code) + ' - ' + esc(a.name) + '</option>';
+          }).join('');
+
+          openModal('New Vendor Bill',
+            '<div class="field">' +
+              '<label>Vendor</label>' +
+              '<select name="vendorId" required>' + vendorOpts + '</select>' +
+            '</div>' +
+            '<div class="formgrid-2">' +
+              '<div class="field"><label>Bill / Invoice #</label><input type="text" name="billNumber" placeholder="INV-001" required></div>' +
+              '<div class="field"><label>Total Amount ($)</label><input type="number" step="0.01" min="0.01" name="total" placeholder="0.00" required></div>' +
+            '</div>' +
+            '<div class="formgrid-2">' +
+              '<div class="field"><label>Bill Date</label><input type="date" name="billDate" value="' + today() + '" required></div>' +
+              '<div class="field"><label>Due Date</label><input type="date" name="dueDate" value="' + today() + '" required></div>' +
+            '</div>' +
+            '<div class="field">' +
+              '<label>Expense Account</label>' +
+              '<select name="expenseAccountId" required>' + acctOpts + '</select>' +
+            '</div>' +
+            '<div class="field">' +
+              '<label>Notes / Memo</label>' +
+              '<input type="text" name="notes" placeholder="Optional notes">' +
+            '</div>',
+            function (fd) {
+              var amt = parseFloat(fd.total || '0');
+              var payload = {
+                vendorId: fd.vendorId,
+                billNumber: fd.billNumber,
+                billDate: fd.billDate,
+                dueDate: fd.dueDate,
+                total: amt.toFixed(2),
+                currency: 'CAD',
+                notes: fd.notes,
+                lines: [{
+                  description: fd.notes || 'Vendor Bill ' + fd.billNumber,
+                  amount: amt.toFixed(2),
+                  expenseAccountId: fd.expenseAccountId
+                }]
+              };
+              return Api.createBill(payload).then(function () {
+                toast('Vendor bill created.');
+                renderPayablesView();
+              });
+            }
+          );
+        });
+      };
+    }
+
+    var btnVendor = $('#btnAddVendor');
+    if (btnVendor && !btnVendor.dataset.bound) {
+      btnVendor.dataset.bound = 'true';
+      btnVendor.onclick = function () {
+        openModal('Add Supplier / Vendor',
+          '<div class="field"><label>Vendor Name</label><input type="text" name="name" required></div>' +
+          '<div class="formgrid-2">' +
+            '<div class="field"><label>Email</label><input type="email" name="email"></div>' +
+            '<div class="field"><label>Phone</label><input type="tel" name="phone"></div>' +
+          '</div>' +
+          '<div class="formgrid-2">' +
+            '<div class="field"><label>Payment Terms</label><select name="paymentTerms"><option value="net_30">Net 30</option><option value="net_15">Net 15</option><option value="due_on_receipt">Due on Receipt</option></select></div>' +
+            '<div class="field"><label>Currency</label><select name="currency"><option value="CAD">CAD</option><option value="USD">USD</option></select></div>' +
+          '</div>',
+          function (fd) {
+            return Api.createVendor(fd).then(function () {
+              toast('Vendor added.');
+              renderPayablesView();
+            });
+          }
+        );
+      };
+    }
+
+    // Load AP aging KPIs
+    Api.getPayablesAging().then(function (aging) {
+      var s = aging.summary || {};
+      var kTot = $('#kpiApTotal'); if (kTot) kTot.textContent = money(s.total || 0);
+      var kOver = $('#kpiApOverdue'); if (kOver) kOver.textContent = money((s.days1_30 || 0) + (s.days31_60 || 0) + (s.days61_90 || 0) + (s.days90Plus || 0));
+    }).catch(function () {});
+
+    renderPayablesSubTab();
+  }
+
+  function renderPayablesSubTab() {
+    var host = $('#payablesBody');
+    if (!host) return;
+
+    if (apSubTab === 'vendors') {
+      host.innerHTML = '<div style="text-align:center;padding:24px"><div class="spin" style="margin:0 auto 10px"></div>Loading vendors…</div>';
+      Api.listVendors().then(function (vendors) {
+        vendors = vendors || [];
+        var kCount = $('#kpiApVendorsCount'); if (kCount) kCount.textContent = num(vendors.length);
+        if (!vendors.length) {
+          host.innerHTML = '<div class="card pad" style="text-align:center;color:var(--muted)">No vendors found. Click "Add Vendor" above.</div>';
+          return;
+        }
+
+        var rows = vendors.map(function (v) {
+          return '<tr>' +
+            '<td><strong>' + esc(v.name) + '</strong></td>' +
+            '<td>' + esc(v.email || '—') + '</td>' +
+            '<td>' + esc(v.phone || '—') + '</td>' +
+            '<td><span class="badge">' + esc(v.paymentTerms || 'net_30') + '</span></td>' +
+            '<td>' + esc(v.currency || 'CAD') + '</td>' +
+            '<td><span class="badge ' + (v.isActive !== false ? 'badge-paid' : 'badge-failed') + '">' + (v.isActive !== false ? 'ACTIVE' : 'INACTIVE') + '</span></td>' +
+          '</tr>';
+        }).join('');
+
+        host.innerHTML =
+          '<div class="card"><div class="tablewrap"><table class="table">' +
+            '<thead><tr><th>Vendor Name</th><th>Email</th><th>Phone</th><th>Terms</th><th>Currency</th><th>Status</th></tr></thead>' +
+            '<tbody>' + rows + '</tbody>' +
+          '</table></div></div>';
+      });
+      return;
+    }
+
+    if (apSubTab === 'aging') {
+      host.innerHTML = '<div style="text-align:center;padding:24px"><div class="spin" style="margin:0 auto 10px"></div>Calculating AP aging…</div>';
+      Api.getPayablesAging().then(function (res) {
+        var buckets = res.buckets || [];
+        if (!buckets.length) {
+          host.innerHTML = '<div class="card pad" style="text-align:center;color:var(--muted)">No accounts payable balances currently due.</div>';
+          return;
+        }
+
+        var rows = buckets.map(function (b) {
+          return '<tr>' +
+            '<td><strong>' + esc(b.vendorName) + '</strong></td>' +
+            '<td class="mono num">' + money(b.current || 0) + '</td>' +
+            '<td class="mono num">' + money(b.days1_30 || 0) + '</td>' +
+            '<td class="mono num">' + money(b.days31_60 || 0) + '</td>' +
+            '<td class="mono num">' + money(b.days61_90 || 0) + '</td>' +
+            '<td class="mono num" style="color:var(--crit)">' + money(b.days90Plus || 0) + '</td>' +
+            '<td class="mono num" style="font-weight:700">' + money(b.total || 0) + '</td>' +
+          '</tr>';
+        }).join('');
+
+        host.innerHTML =
+          '<div class="card"><div class="tablewrap"><table class="table">' +
+            '<thead><tr><th>Vendor</th><th class="num">Current</th><th class="num">1–30 Days</th><th class="num">31–60 Days</th><th class="num">61–90 Days</th><th class="num">90+ Days</th><th class="num">Total AP</th></tr></thead>' +
+            '<tbody>' + rows + '</tbody>' +
+          '</table></div></div>';
+      });
+      return;
+    }
+
+    // Bills tab
+    host.innerHTML = '<div style="text-align:center;padding:24px"><div class="spin" style="margin:0 auto 10px"></div>Loading bills…</div>';
+    Api.listBills({ q: apSearchQ || undefined }).then(function (bills) {
+      bills = bills || [];
+      var pendingCount = bills.filter(function (b) { return b.status === 'PENDING_APPROVAL'; }).length;
+      var kPend = $('#kpiApPending'); if (kPend) kPend.textContent = num(pendingCount);
+
+      if (!bills.length) {
+        host.innerHTML = '<div class="card pad" style="text-align:center;color:var(--muted)">No bills recorded. Click "New Bill" to enter a supplier invoice.</div>';
+        return;
+      }
+
+      var rows = bills.map(function (b) {
+        var statusCls = 'badge-pending';
+        if (b.status === 'PAID') statusCls = 'badge-paid';
+        else if (b.status === 'APPROVED') statusCls = 'badge-received';
+        else if (b.status === 'VOID') statusCls = 'badge-failed';
+
+        var actBtns = '';
+        if (isAdmin() && b.status === 'PENDING_APPROVAL') {
+          actBtns += '<button type="button" class="btn ghost btn-sm btn-approve-bill" data-bill-id="' + esc(b.id) + '">Approve</button> ';
+        }
+        if (isAdmin() && b.status !== 'PAID' && b.status !== 'VOID') {
+          actBtns += '<button type="button" class="btn ghost btn-sm btn-void-bill" data-bill-id="' + esc(b.id) + '">Void</button>';
+        }
+
+        return '<tr>' +
+          '<td class="mono"><strong>' + esc(b.billNumber) + '</strong></td>' +
+          '<td>' + esc(b.vendor ? b.vendor.name : 'Supplier') + '</td>' +
+          '<td class="mono">' + ddmmyyyy(b.billDate) + '</td>' +
+          '<td class="mono">' + ddmmyyyy(b.dueDate) + '</td>' +
+          '<td class="mono num" style="font-weight:600">' + moneyDollars(b.total) + '</td>' +
+          '<td class="mono num">' + moneyDollars(b.balanceDue || b.total) + '</td>' +
+          '<td><span class="badge ' + statusCls + '">' + esc(b.status) + '</span></td>' +
+          '<td style="text-align:right">' + actBtns + '</td>' +
+        '</tr>';
+      }).join('');
+
+      host.innerHTML =
+        '<div class="card"><div class="tablewrap"><table class="table">' +
+          '<thead><tr><th>Bill #</th><th>Vendor</th><th>Bill Date</th><th>Due Date</th><th class="num">Total</th><th class="num">Balance Due</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table></div></div>';
+
+      $$('.btn-approve-bill', host).forEach(function (btn) {
+        btn.onclick = function () {
+          Api.approveBill(btn.dataset.billId).then(function () {
+            toast('Bill approved for payment.');
+            renderPayablesSubTab();
+          });
+        };
+      });
+
+      $$('.btn-void-bill', host).forEach(function (btn) {
+        btn.onclick = function () {
+          if (!confirm('Are you sure you want to void this bill?')) return;
+          Api.voidBill(btn.dataset.billId).then(function () {
+            toast('Bill voided.');
+            renderPayablesSubTab();
+          });
+        };
+      });
+    });
+  }
+
+  // ==========================================================================
+  // CHART OF ACCOUNTS
+  // ==========================================================================
+  var coaFilterType = 'all';
+  function renderChartOfAccountsView() {
+    var host = $('#chartOfAccountsBody');
+    if (!host) return;
+
+    var tabs = $$('#coaTabs button');
+    tabs.forEach(function (tab) {
+      if (!tab.dataset.bound) {
+        tab.dataset.bound = 'true';
+        tab.onclick = function () {
+          tabs.forEach(function (t) { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
+          tab.classList.add('active');
+          tab.setAttribute('aria-selected', 'true');
+          coaFilterType = tab.dataset.coaTab || 'all';
+          renderChartOfAccountsView();
+        };
+      }
+    });
+
+    var btnNew = $('#btnNewCoaAccount');
+    if (btnNew && !btnNew.dataset.bound) {
+      btnNew.dataset.bound = 'true';
+      btnNew.onclick = function () {
+        openModal('Add Ledger Account',
+          '<div class="formgrid-2">' +
+            '<div class="field"><label>Account Code</label><input type="text" name="code" placeholder="e.g. 1020, 5030" required></div>' +
+            '<div class="field"><label>Classification</label><select name="classification">' +
+              '<option value="ASSET">ASSET (1000s)</option>' +
+              '<option value="LIABILITY">LIABILITY (2000s)</option>' +
+              '<option value="EQUITY">EQUITY (3000s)</option>' +
+              '<option value="REVENUE">REVENUE (4000s)</option>' +
+              '<option value="EXPENSE">EXPENSE (5000s)</option>' +
+            '</select></div>' +
+          '</div>' +
+          '<div class="field"><label>Account Name</label><input type="text" name="name" placeholder="e.g. Card Clearing Account" required></div>' +
+          '<div class="formgrid-2">' +
+            '<div class="field"><label>Normal Balance</label><select name="normalBalance"><option value="DEBIT">Debit</option><option value="CREDIT">Credit</option></select></div>' +
+            '<div class="field"><label>Currency</label><select name="currency"><option value="CAD">CAD</option><option value="USD">USD</option></select></div>' +
+          '</div>' +
+          '<div class="field"><label>Description</label><input type="text" name="description" placeholder="Optional description"></div>',
+          function (fd) {
+            return Api.createLedgerAccount(fd).then(function () {
+              toast('Chart of accounts updated.');
+              renderChartOfAccountsView();
+            });
+          }
+        );
+      };
+    }
+
+    host.innerHTML = '<div style="text-align:center;padding:24px"><div class="spin" style="margin:0 auto 10px"></div>Loading chart of accounts…</div>';
+
+    Api.listLedgerAccounts().then(function (accounts) {
+      accounts = accounts || [];
+
+      var assetSum = 0, liabSum = 0, eqSum = 0, revSum = 0, expSum = 0;
+      accounts.forEach(function (a) {
+        var bal = Number(a.currentBalanceMinor || 0);
+        if (a.classification === 'ASSET') assetSum += bal;
+        else if (a.classification === 'LIABILITY') liabSum += bal;
+        else if (a.classification === 'EQUITY') eqSum += bal;
+        else if (a.classification === 'REVENUE') revSum += bal;
+        else if (a.classification === 'EXPENSE') expSum += bal;
+      });
+
+      var kA = $('#kpiCoaAssets'); if (kA) kA.textContent = money(assetSum);
+      var kL = $('#kpiCoaLiabilities'); if (kL) kL.textContent = money(liabSum);
+      var kE = $('#kpiCoaEquity'); if (kE) kE.textContent = money(eqSum);
+      var kR = $('#kpiCoaNetRevenue'); if (kR) kR.textContent = money(revSum - expSum);
+
+      var filtered = accounts.filter(function (a) {
+        if (coaFilterType === 'all') return true;
+        return a.classification === coaFilterType;
+      });
+
+      if (!filtered.length) {
+        host.innerHTML = '<div class="card pad" style="text-align:center;color:var(--muted)">No accounts found in this category.</div>';
+        return;
+      }
+
+      var rows = filtered.map(function (a) {
+        return '<tr>' +
+          '<td class="mono"><strong>' + esc(a.code) + '</strong></td>' +
+          '<td>' + esc(a.name) + (a.description ? '<br><small style="color:var(--muted)">' + esc(a.description) + '</small>' : '') + '</td>' +
+          '<td><span class="badge">' + esc(a.classification) + '</span></td>' +
+          '<td class="mono"><small>' + esc(a.normalBalance) + '</small></td>' +
+          '<td class="mono num" style="font-weight:600">' + money(a.currentBalanceMinor || 0) + '</td>' +
+          '<td><span class="badge ' + (a.isActive !== false ? 'badge-paid' : 'badge-failed') + '">' + (a.isActive !== false ? 'ACTIVE' : 'ARCHIVED') + '</span></td>' +
+        '</tr>';
+      }).join('');
+
+      host.innerHTML =
+        '<div class="card"><div class="tablewrap"><table class="table">' +
+          '<thead><tr><th>Code</th><th>Account Name</th><th>Classification</th><th>Normal</th><th class="num">GL Balance</th><th>Status</th></tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table></div></div>';
+    }).catch(function (err) {
+      host.innerHTML = '<div class="card pad" style="color:var(--crit)">Failed to load Chart of Accounts: ' + esc(err.message || 'Error') + '</div>';
+    });
+  }
+
+  // ==========================================================================
+  // GENERAL LEDGER & JOURNAL
+  // ==========================================================================
+  function renderGeneralLedgerView() {
+    var host = $('#generalLedgerBody');
+    if (!host) return;
+
+    var btnFilter = $('#btnFilterGl');
+    if (btnFilter && !btnFilter.dataset.bound) {
+      btnFilter.dataset.bound = 'true';
+      btnFilter.onclick = function () { renderGeneralLedgerView(); };
+    }
+
+    var btnNew = $('#btnNewJournalEntry');
+    if (btnNew && !btnNew.dataset.bound) {
+      btnNew.dataset.bound = 'true';
+      btnNew.onclick = function () {
+        Api.listLedgerAccounts().then(function (accounts) {
+          var opts = (accounts || []).map(function (a) {
+            return '<option value="' + esc(a.id) + '">' + esc(a.code) + ' - ' + esc(a.name) + '</option>';
+          }).join('');
+
+          openModal('New Journal Entry',
+            '<div class="formgrid-2">' +
+              '<div class="field"><label>Date</label><input type="date" name="entryDate" value="' + today() + '" required></div>' +
+              '<div class="field"><label>Reference</label><input type="text" name="reference" placeholder="e.g. ADJ-001"></div>' +
+            '</div>' +
+            '<div class="field"><label>Memo</label><input type="text" name="memo" placeholder="Journal entry description" required></div>' +
+            '<div style="font-weight:600;margin:14px 0 8px;font-size:13px">DEBIT LINE (LINE 1)</div>' +
+            '<div class="formgrid-2">' +
+              '<div class="field"><label>Account (Debit)</label><select name="debitAccountId" required>' + opts + '</select></div>' +
+              '<div class="field"><label>Amount ($)</label><input type="number" step="0.01" min="0.01" name="debitAmount" placeholder="0.00" required></div>' +
+            '</div>' +
+            '<div style="font-weight:600;margin:14px 0 8px;font-size:13px">CREDIT LINE (LINE 2)</div>' +
+            '<div class="formgrid-2">' +
+              '<div class="field"><label>Account (Credit)</label><select name="creditAccountId" required>' + opts + '</select></div>' +
+              '<div class="field"><label>Amount ($)</label><input type="number" step="0.01" min="0.01" name="creditAmount" placeholder="0.00" required></div>' +
+            '</div>',
+            function (fd) {
+              var dAmt = parseFloat(fd.debitAmount || '0');
+              var cAmt = parseFloat(fd.creditAmount || '0');
+              if (Math.abs(dAmt - cAmt) > 0.001) {
+                toast('Journal entries must balance: Debits ($' + dAmt.toFixed(2) + ') must equal Credits ($' + cAmt.toFixed(2) + ').');
+                return Promise.reject();
+              }
+              var payload = {
+                entryDate: fd.entryDate,
+                memo: fd.memo,
+                reference: fd.reference,
+                lines: [
+                  { accountId: fd.debitAccountId, type: 'DEBIT', amount: dAmt.toFixed(2), description: fd.memo },
+                  { accountId: fd.creditAccountId, type: 'CREDIT', amount: cAmt.toFixed(2), description: fd.memo }
+                ]
+              };
+              return Api.createJournalEntry(payload).then(function (entry) {
+                return Api.postJournalEntry(entry.id);
+              }).then(function () {
+                toast('Journal entry posted to General Ledger.');
+                renderGeneralLedgerView();
+              });
+            }
+          );
+        });
+      };
+    }
+
+    host.innerHTML = '<div style="text-align:center;padding:24px"><div class="spin" style="margin:0 auto 10px"></div>Loading journal records…</div>';
+
+    var sDate = $('#glStartDate') ? $('#glStartDate').value : undefined;
+    var eDate = $('#glEndDate') ? $('#glEndDate').value : undefined;
+    var q = $('#glSearch') ? $('#glSearch').value.trim() : undefined;
+
+    Api.listJournalEntries({ startDate: sDate || undefined, endDate: eDate || undefined, q: q || undefined }).then(function (entries) {
+      entries = entries || [];
+      if (!entries.length) {
+        host.innerHTML = '<div class="card pad" style="text-align:center;color:var(--muted)">No journal entries found for this period.</div>';
+        return;
+      }
+
+      var rows = entries.map(function (e) {
+        var linesHtml = (e.lines || []).map(function (l) {
+          return '<tr style="background:var(--panel-2);font-size:12.5px">' +
+            '<td style="padding-left:36px" class="mono">' + esc(l.accountCode || '') + ' ' + esc(l.accountName || 'Account') + '</td>' +
+            '<td>' + esc(l.description || '') + '</td>' +
+            '<td class="mono num">' + (l.type === 'DEBIT' ? money(l.amountMinor) : '—') + '</td>' +
+            '<td class="mono num">' + (l.type === 'CREDIT' ? money(l.amountMinor) : '—') + '</td>' +
+            '<td></td>' +
+          '</tr>';
+        }).join('');
+
+        return '<tr>' +
+          '<td class="mono"><strong>' + esc(e.entryNumber) + '</strong></td>' +
+          '<td class="mono">' + ddmmyyyy(e.entryDate) + '</td>' +
+          '<td>' + esc(e.memo) + (e.reference ? ' <small style="color:var(--muted)">(' + esc(e.reference) + ')</small>' : '') + '</td>' +
+          '<td class="mono num" style="font-weight:600">' + money(e.totalDebitMinor || 0) + '</td>' +
+          '<td class="mono num" style="font-weight:600">' + money(e.totalCreditMinor || 0) + '</td>' +
+          '<td><span class="badge ' + (e.status === 'POSTED' ? 'badge-paid' : 'badge-pending') + '">' + esc(e.status) + '</span></td>' +
+        '</tr>' + linesHtml;
+      }).join('');
+
+      host.innerHTML =
+        '<div class="card"><div class="tablewrap"><table class="table">' +
+          '<thead><tr><th>Entry #</th><th>Date</th><th>Memo / Details</th><th class="num">Debits</th><th class="num">Credits</th><th>Status</th></tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table></div></div>';
+    }).catch(function (err) {
+      host.innerHTML = '<div class="card pad" style="color:var(--crit)">Failed to load General Ledger: ' + esc(err.message || 'Error') + '</div>';
+    });
+  }
+
+  // ==========================================================================
+  // FINANCIAL REPORTS: PROFIT & LOSS AND BALANCE SHEET
+  // ==========================================================================
+  function renderProfitLossView() {
+    var host = $('#profitLossBody');
+    if (!host) return;
+
+    var sInput = $('#plStartDate');
+    var eInput = $('#plEndDate');
+    var preset = $('#plPreset');
+
+    if (preset && !preset.dataset.bound) {
+      preset.dataset.bound = 'true';
+      preset.onchange = function () {
+        var p = preset.value;
+        var now = new Date();
+        var y = now.getFullYear();
+        var m = now.getMonth();
+        if (p === 'this_month') {
+          sInput.value = new Date(y, m, 1).toISOString().slice(0, 10);
+          eInput.value = new Date(y, m + 1, 0).toISOString().slice(0, 10);
+        } else if (p === 'last_month') {
+          sInput.value = new Date(y, m - 1, 1).toISOString().slice(0, 10);
+          eInput.value = new Date(y, m, 0).toISOString().slice(0, 10);
+        } else if (p === 'ytd') {
+          sInput.value = new Date(y, 0, 1).toISOString().slice(0, 10);
+          eInput.value = now.toISOString().slice(0, 10);
+        }
+        renderProfitLossView();
+      };
+    }
+
+    if (!sInput.value) sInput.value = new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10);
+    if (!eInput.value) eInput.value = today();
+
+    var btnApply = $('#btnApplyPL');
+    if (btnApply && !btnApply.dataset.bound) {
+      btnApply.dataset.bound = 'true';
+      btnApply.onclick = function () { renderProfitLossView(); };
+    }
+
+    var btnPrint = $('#btnPrintPL');
+    if (btnPrint && !btnPrint.dataset.bound) {
+      btnPrint.dataset.bound = 'true';
+      btnPrint.onclick = function () { window.print(); };
+    }
+
+    host.innerHTML = '<div style="text-align:center;padding:24px"><div class="spin" style="margin:0 auto 10px"></div>Computing Profit &amp; Loss statement…</div>';
+
+    Api.getProfitAndLoss({ startDate: sInput.value, endDate: eInput.value }).then(function (pl) {
+      var revRows = (pl.revenueLines || []).map(function (l) {
+        return '<tr><td style="padding-left:24px">' + esc(l.accountName) + '</td><td class="mono num">' + money(l.amountMinor) + '</td></tr>';
+      }).join('') || '<tr><td style="padding-left:24px;color:var(--muted)">No revenue recorded</td><td class="mono num">$0.00</td></tr>';
+
+      var cogsRows = (pl.cogsLines || []).map(function (l) {
+        return '<tr><td style="padding-left:24px">' + esc(l.accountName) + '</td><td class="mono num">' + money(l.amountMinor) + '</td></tr>';
+      }).join('') || '<tr><td style="padding-left:24px;color:var(--muted)">No COGS recorded</td><td class="mono num">$0.00</td></tr>';
+
+      var expRows = (pl.expenseLines || []).map(function (l) {
+        return '<tr><td style="padding-left:24px">' + esc(l.accountName) + '</td><td class="mono num">' + money(l.amountMinor) + '</td></tr>';
+      }).join('') || '<tr><td style="padding-left:24px;color:var(--muted)">No operating expenses recorded</td><td class="mono num">$0.00</td></tr>';
+
+      var grossMargin = pl.totalRevenueMinor > 0 ? ((pl.grossProfitMinor / pl.totalRevenueMinor) * 100).toFixed(1) + '%' : '0.0%';
+
+      host.innerHTML =
+        '<div class="card" style="max-width:800px;margin:0 auto;padding:24px 32px">' +
+          '<div style="text-align:center;border-bottom:1px solid var(--line);padding-bottom:16px;margin-bottom:20px">' +
+            '<h2 style="margin-bottom:4px">GreenWave Recycling Inc.</h2>' +
+            '<div style="font-size:16px;font-weight:600;color:var(--ink)">Statement of Profit and Loss (Income Statement)</div>' +
+            '<div style="font-size:13px;color:var(--muted)">Period: ' + esc(sInput.value) + ' to ' + esc(eInput.value) + ' · Currency: CAD</div>' +
+          '</div>' +
+          '<table class="table" style="font-size:14px">' +
+            '<tbody>' +
+              '<tr style="font-weight:700;background:var(--panel-2)"><td>OPERATING REVENUE</td><td class="num"></td></tr>' +
+              revRows +
+              '<tr style="font-weight:700"><td>Total Operating Revenue</td><td class="mono num">' + money(pl.totalRevenueMinor || 0) + '</td></tr>' +
+              '<tr><td colspan="2" style="height:12px;border:0"></td></tr>' +
+              '<tr style="font-weight:700;background:var(--panel-2)"><td>COST OF GOODS SOLD (COGS)</td><td class="num"></td></tr>' +
+              cogsRows +
+              '<tr style="font-weight:700"><td>Total Cost of Goods Sold</td><td class="mono num">' + money(pl.totalCogsMinor || 0) + '</td></tr>' +
+              '<tr><td colspan="2" style="height:12px;border:0"></td></tr>' +
+              '<tr style="font-weight:700;background:#F0FDF4;font-size:15px"><td>GROSS PROFIT (Gross Margin ' + grossMargin + ')</td><td class="mono num" style="color:var(--good)">' + money(pl.grossProfitMinor || 0) + '</td></tr>' +
+              '<tr><td colspan="2" style="height:12px;border:0"></td></tr>' +
+              '<tr style="font-weight:700;background:var(--panel-2)"><td>OPERATING EXPENSES</td><td class="num"></td></tr>' +
+              expRows +
+              '<tr style="font-weight:700"><td>Total Operating Expenses</td><td class="mono num">' + money(pl.totalExpensesMinor || 0) + '</td></tr>' +
+              '<tr><td colspan="2" style="height:12px;border:0"></td></tr>' +
+              '<tr style="font-weight:700;background:#EBF5FF;font-size:16px;border-top:2px solid var(--accent)"><td>NET OPERATING INCOME</td><td class="mono num" style="color:var(--accent)">' + money(pl.netIncomeMinor || 0) + '</td></tr>' +
+            '</tbody>' +
+          '</table>' +
+        '</div>';
+    }).catch(function (err) {
+      host.innerHTML = '<div class="card pad" style="color:var(--crit)">Failed to compute Profit &amp; Loss: ' + esc(err.message || 'Error') + '</div>';
+    });
+  }
+
+  function renderBalanceSheetView() {
+    var host = $('#balanceSheetBody');
+    if (!host) return;
+
+    var asOfInput = $('#bsAsOfDate');
+    if (asOfInput && !asOfInput.value) asOfInput.value = today();
+
+    var btnApply = $('#btnApplyBS');
+    if (btnApply && !btnApply.dataset.bound) {
+      btnApply.dataset.bound = 'true';
+      btnApply.onclick = function () { renderBalanceSheetView(); };
+    }
+
+    var btnPrint = $('#btnPrintBS');
+    if (btnPrint && !btnPrint.dataset.bound) {
+      btnPrint.dataset.bound = 'true';
+      btnPrint.onclick = function () { window.print(); };
+    }
+
+    host.innerHTML = '<div style="text-align:center;padding:24px"><div class="spin" style="margin:0 auto 10px"></div>Computing Balance Sheet…</div>';
+
+    Api.getBalanceSheet({ asOfDate: asOfInput ? asOfInput.value : today() }).then(function (bs) {
+      var assetRows = (bs.assetLines || []).map(function (l) {
+        return '<tr><td style="padding-left:24px">' + esc(l.accountName) + '</td><td class="mono num">' + money(l.amountMinor) + '</td></tr>';
+      }).join('') || '<tr><td style="padding-left:24px;color:var(--muted)">None</td><td class="mono num">$0.00</td></tr>';
+
+      var liabRows = (bs.liabilityLines || []).map(function (l) {
+        return '<tr><td style="padding-left:24px">' + esc(l.accountName) + '</td><td class="mono num">' + money(l.amountMinor) + '</td></tr>';
+      }).join('') || '<tr><td style="padding-left:24px;color:var(--muted)">None</td><td class="mono num">$0.00</td></tr>';
+
+      var eqRows = (bs.equityLines || []).map(function (l) {
+        return '<tr><td style="padding-left:24px">' + esc(l.accountName) + '</td><td class="mono num">' + money(l.amountMinor) + '</td></tr>';
+      }).join('') || '<tr><td style="padding-left:24px;color:var(--muted)">None</td><td class="mono num">$0.00</td></tr>';
+
+      var isBalanced = (bs.totalAssetsMinor === (bs.totalLiabilitiesMinor + bs.totalEquityMinor));
+
+      host.innerHTML =
+        '<div class="card" style="max-width:800px;margin:0 auto;padding:24px 32px">' +
+          '<div style="text-align:center;border-bottom:1px solid var(--line);padding-bottom:16px;margin-bottom:20px">' +
+            '<h2 style="margin-bottom:4px">GreenWave Recycling Inc.</h2>' +
+            '<div style="font-size:16px;font-weight:600;color:var(--ink)">Statement of Financial Position (Balance Sheet)</div>' +
+            '<div style="font-size:13px;color:var(--muted)">As of: ' + esc(asOfInput ? asOfInput.value : today()) + ' · Currency: CAD</div>' +
+            '<div style="margin-top:8px"><span class="badge ' + (isBalanced ? 'badge-paid' : 'badge-failed') + '">' + (isBalanced ? '✓ Equation Balanced (Assets = Liabilities + Equity)' : 'Equation Imbalance') + '</span></div>' +
+          '</div>' +
+          '<table class="table" style="font-size:14px">' +
+            '<tbody>' +
+              '<tr style="font-weight:700;background:var(--panel-2)"><td>ASSETS</td><td class="num"></td></tr>' +
+              assetRows +
+              '<tr style="font-weight:700;border-top:1px solid var(--line)"><td>TOTAL ASSETS</td><td class="mono num" style="color:var(--good)">' + money(bs.totalAssetsMinor || 0) + '</td></tr>' +
+              '<tr><td colspan="2" style="height:14px;border:0"></td></tr>' +
+              '<tr style="font-weight:700;background:var(--panel-2)"><td>LIABILITIES</td><td class="num"></td></tr>' +
+              liabRows +
+              '<tr style="font-weight:700;border-top:1px solid var(--line)"><td>TOTAL LIABILITIES</td><td class="mono num" style="color:var(--crit)">' + money(bs.totalLiabilitiesMinor || 0) + '</td></tr>' +
+              '<tr><td colspan="2" style="height:14px;border:0"></td></tr>' +
+              '<tr style="font-weight:700;background:var(--panel-2)"><td>EQUITY &amp; RETAINED EARNINGS</td><td class="num"></td></tr>' +
+              eqRows +
+              '<tr style="font-weight:700;border-top:1px solid var(--line)"><td>TOTAL EQUITY</td><td class="mono num">' + money(bs.totalEquityMinor || 0) + '</td></tr>' +
+              '<tr><td colspan="2" style="height:14px;border:0"></td></tr>' +
+              '<tr style="font-weight:700;background:#EBF5FF;font-size:15px;border-top:2px solid var(--accent)"><td>TOTAL LIABILITIES &amp; SHAREHOLDERS’ EQUITY</td><td class="mono num" style="color:var(--accent)">' + money((bs.totalLiabilitiesMinor || 0) + (bs.totalEquityMinor || 0)) + '</td></tr>' +
+            '</tbody>' +
+          '</table>' +
+        '</div>';
+    }).catch(function (err) {
+      host.innerHTML = '<div class="card pad" style="color:var(--crit)">Failed to compute Balance Sheet: ' + esc(err.message || 'Error') + '</div>';
+    });
+  }
+
+  // ==========================================================================
+  // EMPLOYEE OPERATIONS, ATTENDANCE & LEAVE
+  // ==========================================================================
+  var empDeptFilter = 'all';
+  var empSearchQ = '';
+  function renderEmployeesView() {
+    var host = $('#employeesBody');
+    if (!host) return;
+
+    var tabs = $$('#empDeptTabs button');
+    tabs.forEach(function (tab) {
+      if (!tab.dataset.bound) {
+        tab.dataset.bound = 'true';
+        tab.onclick = function () {
+          tabs.forEach(function (t) { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
+          tab.classList.add('active');
+          tab.setAttribute('aria-selected', 'true');
+          empDeptFilter = tab.dataset.empDept || 'all';
+          renderEmployeesView();
+        };
+      }
+    });
+
+    var sInput = $('#empSearch');
+    if (sInput && !sInput.dataset.bound) {
+      sInput.dataset.bound = 'true';
+      sInput.addEventListener('input', function () {
+        empSearchQ = sInput.value.trim().toLowerCase();
+        renderEmployeesView();
+      });
+    }
+
+    var btnAdd = $('#btnAddEmployee');
+    if (btnAdd && !btnAdd.dataset.bound) {
+      btnAdd.dataset.bound = 'true';
+      btnAdd.onclick = function () {
+        var whOpts = (warehouses || []).map(function (w) {
+          return '<option value="' + esc(w.id) + '">' + esc(w.name) + '</option>';
+        }).join('');
+
+        openModal('Add Team Member',
+          '<div class="formgrid-2">' +
+            '<div class="field"><label>First Name</label><input type="text" name="firstName" required></div>' +
+            '<div class="field"><label>Last Name</label><input type="text" name="lastName" required></div>' +
+          '</div>' +
+          '<div class="field"><label>Work Email</label><input type="email" name="email" required></div>' +
+          '<div class="formgrid-2">' +
+            '<div class="field"><label>Job Title</label><input type="text" name="jobTitle" placeholder="e.g. Lead Sorter, Driver" required></div>' +
+            '<div class="field"><label>Department</label><select name="department"><option value="Operations">Operations</option><option value="Logistics">Logistics</option><option value="Administration">Administration</option><option value="Sales">Sales</option></select></div>' +
+          '</div>' +
+          '<div class="formgrid-2">' +
+            '<div class="field"><label>Employment Type</label><select name="employmentType"><option value="full_time">Full-Time</option><option value="part_time">Part-Time</option><option value="contractor">Contractor</option></select></div>' +
+            '<div class="field"><label>Facility</label><select name="warehouseId"><option value="">Company-Wide</option>' + whOpts + '</select></div>' +
+          '</div>' +
+          '<div class="field"><label>Start Date</label><input type="date" name="startDate" value="' + today() + '" required></div>',
+          function (fd) {
+            return Api.createEmployee(fd).then(function () {
+              toast('Employee profile registered.');
+              renderEmployeesView();
+            });
+          }
+        );
+      };
+    }
+
+    host.innerHTML = '<div style="text-align:center;padding:24px"><div class="spin" style="margin:0 auto 10px"></div>Loading employee directory…</div>';
+
+    Api.listEmployees({ department: empDeptFilter === 'all' ? undefined : empDeptFilter, q: empSearchQ || undefined }).then(function (employees) {
+      employees = employees || [];
+
+      var kTot = $('#kpiEmpTotal'); if (kTot) kTot.textContent = num(employees.length);
+      var actCount = employees.filter(function (e) { return e.status === 'active'; }).length;
+      var kAct = $('#kpiEmpActive'); if (kAct) kAct.textContent = num(actCount);
+      var opsCount = employees.filter(function (e) { return e.department === 'Operations' || e.department === 'Logistics'; }).length;
+      var kOps = $('#kpiEmpOps'); if (kOps) kOps.textContent = num(opsCount);
+      var offCount = employees.filter(function (e) { return e.department === 'Administration' || e.department === 'Sales'; }).length;
+      var kOff = $('#kpiEmpOffice'); if (kOff) kOff.textContent = num(offCount);
+
+      if (!employees.length) {
+        host.innerHTML = '<div class="card pad" style="text-align:center;color:var(--muted)">No employee records found. Click "Add Employee" above.</div>';
+        return;
+      }
+
+      var rows = employees.map(function (e) {
+        var wName = e.warehouseId ? warehouseName(e.warehouseId) : 'All Facilities';
+        return '<tr>' +
+          '<td><strong>' + esc(e.firstName + ' ' + e.lastName) + '</strong></td>' +
+          '<td>' + esc(e.jobTitle || 'Team Member') + '</td>' +
+          '<td><span class="badge">' + esc(e.department || 'Operations') + '</span></td>' +
+          '<td>' + esc((e.employmentType || 'full_time').replace('_', ' ')) + '</td>' +
+          '<td>' + esc(wName) + '</td>' +
+          '<td>' + esc(e.email) + '</td>' +
+          '<td><span class="badge ' + (e.status === 'active' ? 'badge-paid' : 'badge-failed') + '">' + esc((e.status || 'active').toUpperCase()) + '</span></td>' +
+        '</tr>';
+      }).join('');
+
+      host.innerHTML =
+        '<div class="card"><div class="tablewrap"><table class="table">' +
+          '<thead><tr><th>Name</th><th>Title</th><th>Department</th><th>Type</th><th>Facility</th><th>Email</th><th>Status</th></tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table></div></div>';
+    }).catch(function (err) {
+      host.innerHTML = '<div class="card pad" style="color:var(--crit)">Failed to load employees: ' + esc(err.message || 'Error') + '</div>';
+    });
+  }
+
+  function renderAttendanceView() {
+    var host = $('#attendanceBody');
+    if (!host) return;
+
+    var dInput = $('#attDateFilter');
+    if (dInput && !dInput.value) dInput.value = today();
+
+    var btnRef = $('#btnRefreshAttendance');
+    if (btnRef && !btnRef.dataset.bound) {
+      btnRef.dataset.bound = 'true';
+      btnRef.onclick = function () { renderAttendanceView(); };
+    }
+
+    host.innerHTML = '<div style="text-align:center;padding:24px"><div class="spin" style="margin:0 auto 10px"></div>Loading attendance records…</div>';
+
+    var date = dInput ? dInput.value : today();
+    Api.listAttendance({ date: date }).then(function (records) {
+      records = records || [];
+
+      var presCount = records.filter(function (r) { return r.status === 'PRESENT' || !r.clockOut; }).length;
+      var kPres = $('#kpiAttPresent'); if (kPres) kPres.textContent = num(presCount);
+
+      var totHours = 0;
+      var otHours = 0;
+      records.forEach(function (r) {
+        totHours += Number(r.hoursWorked || 0);
+        otHours += Number(r.overtimeHours || 0);
+      });
+      var kH = $('#kpiAttHours'); if (kH) kH.textContent = totHours.toFixed(1) + 'h';
+      var kOT = $('#kpiAttOvertime'); if (kOT) kOT.textContent = otHours.toFixed(1) + 'h';
+      var kL = $('#kpiAttOnLeave'); if (kL) kL.textContent = num(records.filter(function (r) { return r.status === 'ON_LEAVE'; }).length);
+
+      if (!records.length) {
+        host.innerHTML = '<div class="card pad" style="text-align:center;color:var(--muted)">No attendance records found for ' + esc(date) + '.</div>';
+        return;
+      }
+
+      var rows = records.map(function (r) {
+        var empName = r.employee ? (r.employee.firstName + ' ' + r.employee.lastName) : 'Staff Member';
+        var statusCls = r.status === 'PRESENT' ? 'badge-paid' : (r.status === 'LATE' ? 'badge-failed' : 'badge-pending');
+
+        return '<tr>' +
+          '<td class="mono">' + ddmmyyyy(r.workDate) + '</td>' +
+          '<td><strong>' + esc(empName) + '</strong></td>' +
+          '<td>' + esc(r.warehouseId ? warehouseName(r.warehouseId) : 'Facility') + '</td>' +
+          '<td class="mono">' + (r.clockIn ? new Date(r.clockIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—') + '</td>' +
+          '<td class="mono">' + (r.clockOut ? new Date(r.clockOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '<span class="badge badge-received">ACTIVE</span>') + '</td>' +
+          '<td class="mono num">' + (r.hoursWorked ? Number(r.hoursWorked).toFixed(2) + ' hrs' : '—') + '</td>' +
+          '<td class="mono num">' + (r.overtimeHours && Number(r.overtimeHours) > 0 ? Number(r.overtimeHours).toFixed(2) + ' hrs' : '0.00') + '</td>' +
+          '<td><span class="badge ' + statusCls + '">' + esc(r.status || 'PRESENT') + '</span></td>' +
+        '</tr>';
+      }).join('');
+
+      host.innerHTML =
+        '<div class="card"><div class="tablewrap"><table class="table">' +
+          '<thead><tr><th>Date</th><th>Employee</th><th>Facility</th><th>Clock In</th><th>Clock Out</th><th class="num">Hours</th><th class="num">Overtime</th><th>Status</th></tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table></div></div>';
+    }).catch(function (err) {
+      host.innerHTML = '<div class="card pad" style="color:var(--crit)">Failed to load attendance: ' + esc(err.message || 'Error') + '</div>';
+    });
+  }
+
+  var leaveSubTab = 'my';
+  function renderLeaveRequestsView() {
+    var host = $('#leaveRequestsBody');
+    if (!host) return;
+
+    var tabs = $$('#leaveTabs button');
+    tabs.forEach(function (tab) {
+      if (!tab.dataset.bound) {
+        tab.dataset.bound = 'true';
+        tab.onclick = function () {
+          tabs.forEach(function (t) { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
+          tab.classList.add('active');
+          tab.setAttribute('aria-selected', 'true');
+          leaveSubTab = tab.dataset.leaveTab || 'my';
+          renderLeaveRequestsView();
+        };
+      }
+    });
+
+    var btnReq = $('#btnRequestLeave');
+    if (btnReq && !btnReq.dataset.bound) {
+      btnReq.dataset.bound = 'true';
+      btnReq.onclick = function () {
+        openModal('Request Time Off',
+          '<div class="field">' +
+            '<label>Leave Type</label>' +
+            '<select name="leaveType">' +
+              '<option value="VACATION">Vacation Leave</option>' +
+              '<option value="SICK">Sick Leave</option>' +
+              '<option value="PERSONAL">Personal Leave</option>' +
+              '<option value="OTHER">Other / Bereavement</option>' +
+            '</select>' +
+          '</div>' +
+          '<div class="formgrid-2">' +
+            '<div class="field"><label>Start Date</label><input type="date" name="startDate" value="' + today() + '" required></div>' +
+            '<div class="field"><label>End Date</label><input type="date" name="endDate" value="' + today() + '" required></div>' +
+          '</div>' +
+          '<div class="field">' +
+            '<label>Reason / Notes</label>' +
+            '<textarea name="reason" placeholder="Brief reason for the leave request" rows="2"></textarea>' +
+          '</div>',
+          function (fd) {
+            return Api.submitLeaveRequest(fd).then(function () {
+              toast('Leave request submitted.');
+              renderLeaveRequestsView();
+            });
+          }
+        );
+      };
+    }
+
+    host.innerHTML = '<div style="text-align:center;padding:24px"><div class="spin" style="margin:0 auto 10px"></div>Loading leave records…</div>';
+
+    Api.getEmployeeMe().then(function (meEmp) {
+      if (meEmp && meEmp.id) {
+        Api.getLeaveBalances(meEmp.id).then(function (balances) {
+          (balances || []).forEach(function (b) {
+            var rem = Math.max(0, Number(b.allocatedDays || 0) - Number(b.usedDays || 0));
+            if (b.leaveType === 'VACATION') {
+              var elV = $('#kpiLeaveVacation'); if (elV) elV.textContent = rem + 'd';
+              var subV = $('#kpiLeaveVacationSub'); if (subV) subV.textContent = (b.usedDays || 0) + 'd used of ' + (b.allocatedDays || 0) + 'd';
+            } else if (b.leaveType === 'SICK') {
+              var elS = $('#kpiLeaveSick'); if (elS) elS.textContent = rem + 'd';
+              var subS = $('#kpiLeaveSickSub'); if (subS) subS.textContent = (b.usedDays || 0) + 'd used of ' + (b.allocatedDays || 0) + 'd';
+            } else if (b.leaveType === 'PERSONAL') {
+              var elP = $('#kpiLeavePersonal'); if (elP) elP.textContent = rem + 'd';
+              var subP = $('#kpiLeavePersonalSub'); if (subP) subP.textContent = (b.usedDays || 0) + 'd used of ' + (b.allocatedDays || 0) + 'd';
+            }
+          });
+        }).catch(function () {});
+      }
+
+      var qParams = {};
+      if (leaveSubTab === 'my' && meEmp) qParams.employeeId = meEmp.id;
+      else if (leaveSubTab === 'pending') qParams.status = 'PENDING';
+
+      return Api.listLeaveRequests(qParams);
+    }).then(function (requests) {
+      requests = requests || [];
+
+      var pendCount = requests.filter(function (r) { return r.status === 'PENDING'; }).length;
+      var kPend = $('#kpiLeavePending'); if (kPend) kPend.textContent = num(pendCount);
+
+      if (!requests.length) {
+        host.innerHTML = '<div class="card pad" style="text-align:center;color:var(--muted)">No leave requests matching filter.</div>';
+        return;
+      }
+
+      var rows = requests.map(function (r) {
+        var empName = r.employee ? (r.employee.firstName + ' ' + r.employee.lastName) : 'Staff';
+        var statusCls = r.status === 'APPROVED' ? 'badge-paid' : (r.status === 'REJECTED' ? 'badge-failed' : 'badge-pending');
+
+        var actions = '';
+        if (isAdminOrManager() && r.status === 'PENDING') {
+          actions = '<button type="button" class="btn ghost btn-sm btn-approve-leave" data-req-id="' + esc(r.id) + '">Approve</button> ' +
+                    '<button type="button" class="btn ghost btn-sm btn-reject-leave" data-req-id="' + esc(r.id) + '">Reject</button>';
+        }
+
+        return '<tr>' +
+          '<td><strong>' + esc(empName) + '</strong></td>' +
+          '<td><span class="badge">' + esc(r.leaveType) + '</span></td>' +
+          '<td class="mono">' + ddmmyyyy(r.startDate) + '</td>' +
+          '<td class="mono">' + ddmmyyyy(r.endDate) + '</td>' +
+          '<td class="mono num" style="font-weight:600">' + num(r.totalDays || 1) + 'd</td>' +
+          '<td>' + esc(r.reason || '—') + '</td>' +
+          '<td><span class="badge ' + statusCls + '">' + esc(r.status) + '</span></td>' +
+          '<td style="text-align:right">' + actions + '</td>' +
+        '</tr>';
+      }).join('');
+
+      host.innerHTML =
+        '<div class="card"><div class="tablewrap"><table class="table">' +
+          '<thead><tr><th>Employee</th><th>Type</th><th>Start</th><th>End</th><th class="num">Days</th><th>Reason</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table></div></div>';
+
+      $$('.btn-approve-leave', host).forEach(function (btn) {
+        btn.onclick = function () {
+          var notes = prompt('Approval notes (optional):', 'Approved');
+          if (notes === null) return;
+          Api.reviewLeaveRequest(btn.dataset.reqId, { decision: 'APPROVED', reviewNotes: notes }).then(function () {
+            toast('Leave request approved.');
+            renderLeaveRequestsView();
+          });
+        };
+      });
+
+      $$('.btn-reject-leave', host).forEach(function (btn) {
+        btn.onclick = function () {
+          var notes = prompt('Reason for rejection:', 'Not approved at this time');
+          if (notes === null) return;
+          Api.reviewLeaveRequest(btn.dataset.reqId, { decision: 'REJECTED', reviewNotes: notes }).then(function () {
+            toast('Leave request rejected.');
+            renderLeaveRequestsView();
+          });
+        };
+      });
+    }).catch(function (err) {
+      host.innerHTML = '<div class="card pad" style="color:var(--crit)">Failed to load leave requests: ' + esc(err.message || 'Error') + '</div>';
     });
   }
 

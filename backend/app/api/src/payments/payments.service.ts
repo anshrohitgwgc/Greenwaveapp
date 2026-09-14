@@ -1,764 +1,887 @@
 import {
+  BadGatewayException,
   BadRequestException,
-  ForbiddenException,
+  ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
-  UnauthorizedException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import * as crypto from 'crypto';
-import { DataSource, FindOptionsWhere, Repository } from 'typeorm';
+import { randomUUID } from 'crypto';
+import { DataSource, In, Repository, SelectQueryBuilder } from 'typeorm';
 
+import { AccountingPostingService } from '../accounting/accounting-posting.service';
+import { JournalEntry } from '../accounting/entities/journal-entry.entity';
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { addDays, businessDayStartUtc, isIsoDate, toBusinessDate } from '../common/dates';
+import { isUniqueViolation, rowLock, UUID_PATTERN } from '../common/db-types';
+import { decimalToMinor, formatMinor, isSupportedCurrency, minorToDecimalString, normalizeCurrency } from '../common/money';
+import { Customer } from '../customers/entities/customer.entity';
+import { DivisionsService } from '../divisions/divisions.service';
 import { Invoice } from '../invoices/entities/invoice.entity';
+import { InvoicesService } from '../invoices/invoices.service';
+import { isDeliverableAddress, MailService } from '../mail/mail.service';
+import { invoiceEmail } from '../mail/mail.templates';
+import { mapRefundStatus } from '../stripe/stripe-mappers';
+import { StripeService } from '../stripe/stripe.service';
 import { WarehousesService } from '../warehouses/warehouses.service';
-import { ProcessRefundDto } from './dto/process-refund.dto';
-import { SendInvoiceEmailDto } from './dto/send-invoice-email.dto';
+import { CreateRefundDto } from './dto/create-refund.dto';
+import { ListPaymentsQueryDto, PaymentSummaryQueryDto } from './dto/list-payments.query';
+import { SendInvoiceDto } from './dto/send-invoice.dto';
+import { PaymentRefund } from './entities/payment-refund.entity';
 import { Payment } from './entities/payment.entity';
+import { ProviderEvent } from './entities/provider-event.entity';
+import { StripeBalanceTransaction } from './entities/stripe-balance-transaction.entity';
+import { StripeDispute } from './entities/stripe-dispute.entity';
+import { StripePayout } from './entities/stripe-payout.entity';
+import { StripeSyncRun } from './entities/stripe-sync-run.entity';
+import { PaymentLinkService } from './payment-link.service';
+import { NON_PAYABLE_INVOICE_STATUSES, SETTLED_PAYMENT_STATUSES } from './payment-status';
 
-export interface WebhookEventData {
-  id?: string;
-  payment_intent?: string;
-  paymentIntentId?: string;
-  checkout_session_id?: string;
-  sessionId?: string;
-  amount_total?: number;
-  amount?: number;
-  currency?: string;
-  customer_email?: string;
-  metadata?: {
-    invoiceNumber?: string;
-    paymentToken?: string;
-    [key: string]: unknown;
-  };
-  last_payment_error?: {
-    message?: string;
-    [key: string]: unknown;
-  };
-  [key: string]: unknown;
+const IDEMPOTENCY_KEY = /^[A-Za-z0-9_-]{8,128}$/;
+const OPEN_REFUND_STATUSES = ['REQUESTED', 'PENDING', 'REQUIRES_ACTION'] as const;
+const BALANCE_CACHE_MS = 60_000;
+
+function num(value: unknown): number {
+  if (value === null || value === undefined || value === '') return 0;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
 }
 
-export interface WebhookPayload {
-  type?: string;
-  event?: string;
-  data?: {
-    object?: WebhookEventData;
-    [key: string]: unknown;
-  };
-  [key: string]: unknown;
+function iso(value: unknown): string | null {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
-export interface PublicInvoiceDto {
-  invoiceNumber: string;
-  invoiceDate: string;
-  dueDate: string | null;
-  billTo: string | null;
-  shipTo: string | null;
-  poReference: string | null;
-  subtotal: number;
-  discountTotal: number;
-  taxLabel: string | null;
-  taxRate: number;
-  taxTotal: number;
-  total: number;
-  currency: string;
-  paymentStatus: string;
-  paidAt: string | null;
-  paymentInstructions: string | null;
-  items: Array<{
-    description: string;
-    quantity: number;
-    unit: string | null;
-    unitPrice: number;
-    discount: number;
-    isRebate: boolean;
-    lineTotal: number;
-  }>;
+function parseJson(value: unknown): Record<string, unknown> | null {
+  if (!value) return null;
+  if (typeof value === 'object') return value as Record<string, unknown>;
+  try {
+    return JSON.parse(String(value)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
 }
 
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+/**
+ * Manager/admin payment operations. Every read is scoped to the actor's
+ * divisions and warehouses through the payment's invoice; every mutation is
+ * permission-checked by the controller and audited here.
+ */
 @Injectable()
 export class PaymentsService {
-  private readonly defaultWebhookSecret: string;
+  private readonly logger = new Logger(PaymentsService.name);
+  private balanceCache: { at: number; value: unknown } | null = null;
 
   constructor(
-    @InjectRepository(Payment)
-    private readonly paymentRepository: Repository<Payment>,
-    @InjectRepository(Invoice)
-    private readonly invoiceRepository: Repository<Invoice>,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
-    private readonly auditService: AuditService,
-    private readonly warehousesService: WarehousesService,
-    private readonly configService: ConfigService,
-  ) {
-    this.defaultWebhookSecret =
-      this.configService.get<string>('STRIPE_WEBHOOK_SECRET') ||
-      'whsec_greenwave_test_secret_key_v2_authoritative';
+    @InjectDataSource() private readonly dataSource: DataSource,
+    @InjectRepository(Payment) private readonly payments: Repository<Payment>,
+    @InjectRepository(PaymentRefund) private readonly refunds: Repository<PaymentRefund>,
+    @InjectRepository(Invoice) private readonly invoices: Repository<Invoice>,
+    @InjectRepository(Customer) private readonly customers: Repository<Customer>,
+    @InjectRepository(ProviderEvent) private readonly events: Repository<ProviderEvent>,
+    @InjectRepository(StripePayout) private readonly payouts: Repository<StripePayout>,
+    @InjectRepository(StripeDispute) private readonly disputes: Repository<StripeDispute>,
+    @InjectRepository(StripeSyncRun) private readonly syncRuns: Repository<StripeSyncRun>,
+    @InjectRepository(StripeBalanceTransaction) private readonly balanceTxns: Repository<StripeBalanceTransaction>,
+    private readonly warehouses: WarehousesService,
+    private readonly divisions: DivisionsService,
+    private readonly invoicesService: InvoicesService,
+    private readonly links: PaymentLinkService,
+    private readonly stripe: StripeService,
+    private readonly mail: MailService,
+    private readonly posting: AccountingPostingService,
+    private readonly audit: AuditService,
+  ) {}
+
+  // ---------------------------------------------------------------------------
+  // Scoping
+  // ---------------------------------------------------------------------------
+
+  private hasGlobalWarehouseAccess(actor: AuthenticatedUser): boolean {
+    return !!actor.hasGlobalAccess || !!actor.permissions?.includes('warehouses:global_access');
   }
 
-  /**
-   * Generates a cryptographically random 64-character hex payment token.
-   */
-  private generateSecurePaymentToken(): string {
-    return crypto.randomBytes(32).toString('hex');
+  /** Restricts a query joined to invoices as `inv` to what the actor may read. */
+  private async scopeToActor<T extends object>(qb: SelectQueryBuilder<T>, actor: AuthenticatedUser): Promise<void> {
+    const divisions = await this.divisions.scopeDivisionStorageValues(actor);
+    if (divisions.length === 0) {
+      qb.andWhere('1 = 0');
+      return;
+    }
+    qb.andWhere('inv.division IN (:...scopeDivisions)', { scopeDivisions: divisions });
+    if (!this.hasGlobalWarehouseAccess(actor)) {
+      const ids = await this.warehouses.getUserAuthorizedWarehouseIds(actor.id, actor.role, actor.permissions);
+      if (ids.length === 0) qb.andWhere('inv.warehouseId IS NULL');
+      else qb.andWhere('(inv.warehouseId IN (:...scopeWarehouses) OR inv.warehouseId IS NULL)', { scopeWarehouses: ids });
+    }
   }
 
-  /**
-   * Protected: Admin or Manager gets or generates the secure payment token/URL for an invoice.
-   */
-  async getOrCreatePaymentLink(invoiceId: string, actor: AuthenticatedUser) {
-    const invoice = await this.invoiceRepository.findOne({
-      where: { id: invoiceId },
-    });
+  private async assertInvoiceAccess(actor: AuthenticatedUser, invoice: Invoice): Promise<void> {
+    if (invoice.warehouseId) await this.warehouses.assertWarehouseAccess(actor, invoice.warehouseId);
+    await this.divisions.assertStoredDivisionAccess(actor, invoice.division);
+  }
+
+  private async loadInvoiceForActor(invoiceId: string, actor: AuthenticatedUser): Promise<Invoice> {
+    const invoice = await this.invoices.findOne({ where: { id: invoiceId } });
     if (!invoice) throw new NotFoundException('Invoice not found');
+    await this.assertInvoiceAccess(actor, invoice);
+    return invoice;
+  }
 
-    if (invoice.warehouseId) {
-      await this.warehousesService.assertWarehouseAccess(
-        actor,
-        invoice.warehouseId,
-      );
+  private async loadPaymentForActor(paymentId: string, actor: AuthenticatedUser): Promise<{ payment: Payment; invoice: Invoice }> {
+    const payment = await this.payments.findOne({ where: { id: paymentId } });
+    if (!payment) throw new NotFoundException('Payment not found');
+    const invoice = await this.invoices.findOne({ where: { id: payment.invoiceId } });
+    if (!invoice) throw new NotFoundException('Payment not found');
+    await this.assertInvoiceAccess(actor, invoice);
+    return { payment, invoice };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Payments list / detail / summary
+  // ---------------------------------------------------------------------------
+
+  async list(actor: AuthenticatedUser, q: ListPaymentsQueryDto) {
+    const page = q.page ?? 1;
+    const pageSize = q.pageSize ?? 25;
+    const qb = this.payments
+      .createQueryBuilder('p')
+      .innerJoin(Invoice, 'inv', 'inv.id = p.invoiceId')
+      .leftJoin(Customer, 'c', 'c.id = p.customerId');
+    await this.scopeToActor(qb, actor);
+
+    if (q.status) qb.andWhere('p.status = :status', { status: q.status });
+    if (q.customerId) qb.andWhere('p.customerId = :customerId', { customerId: q.customerId });
+    if (q.invoiceId) qb.andWhere('p.invoiceId = :invoiceId', { invoiceId: q.invoiceId });
+    if (q.method) qb.andWhere('p.paymentMethodType = :method', { method: q.method });
+    if (q.currency) qb.andWhere('p.currency = :currency', { currency: q.currency });
+    if (q.from) {
+      if (!isIsoDate(q.from)) throw new BadRequestException('from must be a valid date');
+      qb.andWhere('COALESCE(p.paidAt, p.createdAt) >= :from', { from: businessDayStartUtc(q.from) });
+    }
+    if (q.to) {
+      if (!isIsoDate(q.to)) throw new BadRequestException('to must be a valid date');
+      qb.andWhere('COALESCE(p.paidAt, p.createdAt) < :to', { to: businessDayStartUtc(addDays(q.to, 1)) });
+    }
+    const term = q.q?.trim();
+    if (term) {
+      const like = `%${escapeLike(term.toLowerCase())}%`;
+      const clauses = [
+        "LOWER(inv.invoiceNumber) LIKE :like ESCAPE '\\'",
+        "LOWER(c.name) LIKE :like ESCAPE '\\'",
+        'p.providerPaymentId = :exact',
+        'p.providerChargeId = :exact',
+      ];
+      if (UUID_PATTERN.test(term)) clauses.push('p.id = :uuid');
+      qb.andWhere(`(${clauses.join(' OR ')})`, { like, exact: term, uuid: term.toLowerCase() });
     }
 
-    let token = invoice.paymentToken;
-    if (!token) {
-      token = this.generateSecurePaymentToken();
-      await this.invoiceRepository.update(invoice.id, {
-        paymentToken: token,
-      });
-      invoice.paymentToken = token;
-    }
-
-    const paymentUrl = `/pay/${token}`;
-
-    await this.auditService.record({
-      actorUserId: actor.id,
-      actorRole: actor.role,
-      action: 'payment.link_generated',
-      entityType: 'invoice',
-      entityId: invoice.id,
-      warehouseId: invoice.warehouseId,
-      summary: `${actor.email} generated secure payment link for invoice #${invoice.invoiceNumber}`,
-    });
+    const total = await qb.clone().getCount();
+    const rows = await qb
+      .select([
+        'p.id AS id',
+        'p.invoiceId AS "invoiceId"',
+        'inv.invoiceNumber AS "invoiceNumber"',
+        'p.customerId AS "customerId"',
+        'c.name AS "customerName"',
+        'p.amountMinor AS "amountMinor"',
+        'p.currency AS currency',
+        'p.status AS status',
+        'p.paymentMethodType AS "paymentMethodType"',
+        'p.paymentMethodDisplay AS "paymentMethodDisplay"',
+        'p.paidAt AS "paidAt"',
+        'p.createdAt AS "createdAt"',
+        'p.providerPaymentId AS "providerPaymentId"',
+        'p.feeMinor AS "feeMinor"',
+        'p.netMinor AS "netMinor"',
+        'p.refundedMinor AS "refundedMinor"',
+        'p.disputedMinor AS "disputedMinor"',
+        'p.disputeStatus AS "disputeStatus"',
+        'p.metadata AS metadata',
+      ])
+      .orderBy('COALESCE(p.paidAt, p.createdAt)', 'DESC')
+      .addOrderBy('p.id', 'DESC')
+      .offset((page - 1) * pageSize)
+      .limit(pageSize)
+      .getRawMany<Record<string, unknown>>();
 
     return {
-      invoiceId: invoice.id,
-      invoiceNumber: invoice.invoiceNumber,
-      paymentToken: token,
-      paymentUrl,
-      amount: Number(invoice.total),
-      currency: invoice.currency || 'CAD',
-      paymentStatus: invoice.paymentStatus || 'unpaid',
-      status: invoice.status,
+      page,
+      pageSize,
+      total,
+      items: rows.map((r) => {
+        const meta = parseJson(r.metadata);
+        return {
+          id: r.id,
+          invoiceId: r.invoiceId,
+          invoiceNumber: r.invoiceNumber,
+          customerId: r.customerId ?? null,
+          customerName: r.customerName ?? null,
+          amountMinor: num(r.amountMinor),
+          currency: r.currency,
+          status: r.status,
+          paymentMethodType: r.paymentMethodType ?? null,
+          paymentMethodDisplay: r.paymentMethodDisplay ?? null,
+          paidAt: iso(r.paidAt),
+          createdAt: iso(r.createdAt),
+          providerPaymentId: r.providerPaymentId ?? null,
+          feeMinor: r.feeMinor === null || r.feeMinor === undefined ? null : num(r.feeMinor),
+          netMinor: r.netMinor === null || r.netMinor === undefined ? null : num(r.netMinor),
+          refundedMinor: num(r.refundedMinor),
+          disputedMinor: num(r.disputedMinor),
+          disputeStatus: r.disputeStatus ?? null,
+          reviewRequired: !!meta?.reviewRequired,
+          legacy: !!meta?.legacySimulatedGateway,
+        };
+      }),
     };
   }
 
-  /**
-   * Public: Customer opens /pay/:token.
-   * Returns sanitized public invoice details without internal user IDs, audit trail, or employee secrets.
-   */
-  async getPublicInvoiceByToken(token: string): Promise<PublicInvoiceDto> {
-    if (!token || token.trim().length < 16) {
-      throw new NotFoundException('Invalid or missing payment token');
-    }
-
-    const invoice = await this.invoiceRepository.findOne({
-      where: { paymentToken: token },
-      relations: ['items'],
-    });
-
-    if (!invoice) {
-      throw new NotFoundException(
-        'Invoice not found for the requested payment link',
-      );
-    }
-
-    const items = (invoice.items || [])
-      .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
-      .map((item) => ({
-        description: item.description,
-        quantity: Number(item.quantity || 0),
-        unit: item.unit || null,
-        unitPrice: Number(item.unitPrice || 0),
-        discount: Number(item.discount || 0),
-        isRebate: !!item.isRebate,
-        lineTotal: Number(item.lineTotal || 0),
-      }));
+  async get(paymentId: string, actor: AuthenticatedUser) {
+    const { payment: p, invoice } = await this.loadPaymentForActor(paymentId, actor);
+    const [refunds, disputes, customer, entries] = await Promise.all([
+      this.refunds.find({ where: { paymentId: p.id }, order: { createdAt: 'DESC' } }),
+      this.disputes.find({ where: { paymentId: p.id }, order: { providerCreated: 'DESC' } }),
+      p.customerId ? this.customers.findOne({ where: { id: p.customerId } }) : Promise.resolve(null),
+      this.dataSource.getRepository(JournalEntry).find({
+        where: [
+          { sourceType: 'payment', sourceId: p.id },
+          { sourceType: 'invoice', sourceId: invoice.id },
+        ],
+        order: { createdAt: 'ASC' },
+        take: 50,
+      }),
+    ]);
+    const objectIds = [p.providerPaymentId, p.providerChargeId, ...refunds.map((r) => r.providerRefundId)].filter(
+      (v): v is string => !!v,
+    );
+    const events = objectIds.length
+      ? await this.events.find({ where: { objectId: In(objectIds) }, order: { receivedAt: 'DESC' }, take: 50 })
+      : [];
+    const pendingRefunds = refunds
+      .filter((r) => (OPEN_REFUND_STATUSES as readonly string[]).includes(r.status))
+      .reduce((sum, r) => sum + r.amountMinor, 0);
+    const refundable =
+      (p.status === 'SUCCEEDED' || p.status === 'PARTIALLY_REFUNDED') && p.providerPaymentId && !p.metadata?.legacySimulatedGateway
+        ? Math.max(0, p.amountMinor - p.refundedMinor - pendingRefunds)
+        : 0;
 
     return {
-      invoiceNumber: invoice.invoiceNumber,
-      invoiceDate: invoice.invoiceDate,
-      dueDate: invoice.dueDate || null,
-      billTo: invoice.billTo || null,
-      shipTo: invoice.shipTo || null,
-      poReference: invoice.poReference || null,
-      subtotal: Number(invoice.subtotal || 0),
-      discountTotal: Number(invoice.discountTotal || 0),
-      taxLabel: invoice.taxLabel || null,
-      taxRate: Number(invoice.taxRate || 0),
-      taxTotal: Number(invoice.taxTotal || 0),
-      total: Number(invoice.total || 0),
-      currency: invoice.currency || 'CAD',
-      paymentStatus: invoice.paymentStatus || 'unpaid',
-      paidAt: invoice.paidAt ? invoice.paidAt.toISOString() : null,
-      paymentInstructions: invoice.paymentInstructions || null,
-      items,
-    };
-  }
-
-  /**
-   * Public: Customer clicks [ PAY INVOICE ] on the public payment page.
-   * Server authoritatively pulls amount from DB and initiates checkout session.
-   * Customer cannot manipulate amount!
-   */
-  async createCheckoutSession(token: string) {
-    if (!token || token.trim().length < 16) {
-      throw new NotFoundException('Invalid payment token');
-    }
-
-    const invoice = await this.invoiceRepository.findOne({
-      where: { paymentToken: token },
-    });
-
-    if (!invoice) {
-      throw new NotFoundException('Invoice not found');
-    }
-
-    if (invoice.paymentStatus === 'paid') {
-      throw new BadRequestException(
-        'This invoice has already been paid in full.',
-      );
-    }
-
-    const amount = Number(invoice.total);
-    const currency = (invoice.currency || 'CAD').toUpperCase();
-
-    if (amount <= 0) {
-      throw new BadRequestException(
-        'Invoice total must be greater than zero to process payment.',
-      );
-    }
-
-    // Generate secure session identifier
-    const sessionId = `cs_test_${crypto.randomBytes(16).toString('hex')}`;
-    const paymentId = crypto.randomUUID();
-
-    const payment = this.paymentRepository.create({
-      id: paymentId,
-      invoiceId: invoice.id,
-      customerId: invoice.customerId,
-      warehouseId: invoice.warehouseId,
-      provider: 'stripe',
-      providerCheckoutId: sessionId,
-      amount: String(amount),
-      currency,
-      status: 'pending',
-      metadata: {
-        invoiceNumber: invoice.invoiceNumber,
-        paymentToken: token,
-        createdVia: 'customer_checkout',
+      payment: {
+        id: p.id,
+        status: p.status,
+        amountMinor: p.amountMinor,
+        currency: p.currency,
+        feeMinor: p.feeMinor,
+        netMinor: p.netMinor,
+        refundedMinor: p.refundedMinor,
+        disputedMinor: p.disputedMinor,
+        disputeStatus: p.disputeStatus,
+        refundableMinor: refundable,
+        paymentMethodType: p.paymentMethodType,
+        paymentMethodDisplay: p.paymentMethodDisplay,
+        provider: p.provider,
+        providerPaymentId: p.providerPaymentId,
+        providerChargeId: p.providerChargeId,
+        failureReason: p.failureReason,
+        reviewRequired: !!p.metadata?.reviewRequired,
+        problems: Array.isArray(p.metadata?.problems) ? p.metadata?.problems : [],
+        legacy: !!p.metadata?.legacySimulatedGateway,
+        paidAt: iso(p.paidAt),
+        failedAt: iso(p.failedAt),
+        canceledAt: iso(p.canceledAt),
+        createdAt: iso(p.createdAt),
       },
-    });
+      invoice: {
+        id: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        status: invoice.status,
+        paymentStatus: invoice.paymentStatus,
+        total: invoice.total,
+        currency: invoice.currency,
+        dueDate: invoice.dueDate,
+      },
+      customer: customer ? { id: customer.id, name: customer.name } : null,
+      refunds: refunds.map((r) => ({
+        id: r.id,
+        amountMinor: r.amountMinor,
+        currency: r.currency,
+        status: r.status,
+        reason: r.reason,
+        note: r.note,
+        failureReason: r.failureReason,
+        providerRefundId: r.providerRefundId,
+        requestedBy: r.requestedBy,
+        createdAt: iso(r.createdAt),
+        succeededAt: iso(r.succeededAt),
+      })),
+      disputes: disputes.map((d) => ({
+        id: d.providerDisputeId,
+        amountMinor: d.amountMinor,
+        currency: d.currency,
+        status: d.status,
+        reason: d.reason,
+        evidenceDueBy: iso(d.evidenceDueBy),
+      })),
+      providerEvents: events.map((e) => ({
+        id: e.providerEventId,
+        type: e.eventType,
+        status: e.status,
+        attempts: e.attempts,
+        note: e.lastError,
+        receivedAt: iso(e.receivedAt),
+      })),
+      journalEntries: entries.map((e) => ({
+        id: e.id,
+        entryDate: e.entryDate,
+        description: e.description,
+        status: e.status,
+        sourceType: e.sourceType,
+        sourceEvent: e.sourceEvent,
+      })),
+    };
+  }
 
-    await this.paymentRepository.save(payment);
+  async summary(actor: AuthenticatedUser, q: PaymentSummaryQueryDto) {
+    const currency = normalizeCurrency(q.currency ?? 'CAD');
+    const range = (qb: SelectQueryBuilder<any>, column: string) => {
+      if (q.from) qb.andWhere(`${column} >= :from`, { from: businessDayStartUtc(q.from) });
+      if (q.to) qb.andWhere(`${column} < :to`, { to: businessDayStartUtc(addDays(q.to, 1)) });
+    };
 
-    await this.invoiceRepository.update(invoice.id, {
-      paymentStatus: 'pending',
-      paymentProvider: 'stripe',
-    });
+    const settled = this.payments
+      .createQueryBuilder('p')
+      .innerJoin(Invoice, 'inv', 'inv.id = p.invoiceId')
+      .where('p.currency = :currency', { currency })
+      .andWhere('p.status IN (:...settled)', { settled: [...SETTLED_PAYMENT_STATUSES] });
+    await this.scopeToActor(settled, actor);
+    range(settled, 'p.paidAt');
+    const totals = await settled
+      .select('COALESCE(SUM(p.amountMinor), 0)', 'collected')
+      .addSelect('COALESCE(SUM(p.feeMinor), 0)', 'fees')
+      .addSelect('COUNT(*)', 'count')
+      .addSelect('SUM(CASE WHEN p.feeMinor IS NULL THEN 1 ELSE 0 END)', 'feesUnknown')
+      .getRawOne<Record<string, unknown>>();
 
-    // In production, this would return Stripe Hosted Checkout URL
-    // In local / sandbox test mode, returns structured hosted checkout URL
-    const checkoutUrl = `/pay/${token}?session_id=${sessionId}&provider=stripe`;
+    const refundsQb = this.refunds
+      .createQueryBuilder('r')
+      .innerJoin(Payment, 'p', 'p.id = r.paymentId')
+      .innerJoin(Invoice, 'inv', 'inv.id = p.invoiceId')
+      .where('r.currency = :currency', { currency })
+      .andWhere("r.status = 'SUCCEEDED'");
+    await this.scopeToActor(refundsQb, actor);
+    range(refundsQb, 'r.succeededAt');
+    const refunded = await refundsQb.select('COALESCE(SUM(r.amountMinor), 0)', 'amount').getRawOne<Record<string, unknown>>();
 
+    const disputedQb = this.payments
+      .createQueryBuilder('p')
+      .innerJoin(Invoice, 'inv', 'inv.id = p.invoiceId')
+      .where('p.currency = :currency', { currency })
+      .andWhere("p.status = 'DISPUTED'");
+    await this.scopeToActor(disputedQb, actor);
+    const disputed = await disputedQb.select('COALESCE(SUM(p.disputedMinor), 0)', 'amount').getRawOne<Record<string, unknown>>();
+
+    const byStatusQb = this.payments
+      .createQueryBuilder('p')
+      .innerJoin(Invoice, 'inv', 'inv.id = p.invoiceId')
+      .where('p.currency = :currency', { currency });
+    await this.scopeToActor(byStatusQb, actor);
+    range(byStatusQb, 'p.createdAt');
+    const byStatus = await byStatusQb
+      .select('p.status', 'status')
+      .addSelect('COUNT(*)', 'count')
+      .groupBy('p.status')
+      .getRawMany<Record<string, unknown>>();
+
+    const collected = num(totals?.collected);
+    const fees = num(totals?.fees);
+    const refundedMinor = num(refunded?.amount);
     return {
-      sessionId,
-      checkoutUrl,
-      invoiceNumber: invoice.invoiceNumber,
-      amount,
       currency,
-      status: 'pending',
+      from: q.from ?? null,
+      to: q.to ?? null,
+      collectedMinor: collected,
+      feesMinor: fees,
+      feesUnknownCount: num(totals?.feesUnknown),
+      refundedMinor,
+      disputedMinor: num(disputed?.amount),
+      netMinor: collected - fees - refundedMinor,
+      settledCount: num(totals?.count),
+      countsByStatus: Object.fromEntries(byStatus.map((r) => [String(r.status), num(r.count)])),
+    };
+  }
+
+  /** Legacy KPI shape used by the invoices screen (decimal amounts). Aggregated in SQL. */
+  async metrics(actor: AuthenticatedUser, warehouseId?: string) {
+    if (warehouseId) await this.warehouses.assertWarehouseAccess(actor, warehouseId);
+    const currency = 'CAD';
+    const today = toBusinessDate(new Date());
+
+    const qb = this.invoices.createQueryBuilder('inv').where('inv.currency = :currency', { currency });
+    await this.scopeToActor(qb, actor);
+    if (warehouseId) qb.andWhere('inv.warehouseId = :warehouseId', { warehouseId });
+    const rows = await qb
+      .select('inv.paymentStatus', 'paymentStatus')
+      .addSelect('inv.status', 'status')
+      .addSelect(`CASE WHEN inv.dueDate < :today THEN 1 ELSE 0 END`, 'overdue')
+      .addSelect('COUNT(*)', 'count')
+      .addSelect('COALESCE(SUM(inv.total), 0)', 'total')
+      .setParameter('today', today)
+      .groupBy('inv.paymentStatus')
+      .addGroupBy('inv.status')
+      .addGroupBy(`CASE WHEN inv.dueDate < :today THEN 1 ELSE 0 END`)
+      .getRawMany<Record<string, unknown>>();
+
+    let outstanding = 0;
+    let paidAll = 0;
+    const counts = { unpaid: 0, pending: 0, paid: 0, failed: 0, refunded: 0, overdue: 0, total: 0 };
+    for (const r of rows) {
+      const count = num(r.count);
+      const minor = decimalToMinor(String(r.total ?? '0'), currency);
+      const ps = String(r.paymentStatus || 'unpaid').toLowerCase();
+      const docStatus = String(r.status || '').toLowerCase();
+      counts.total += count;
+      if (ps === 'paid') {
+        counts.paid += count;
+        paidAll += minor;
+      } else if (ps === 'refunded' || ps === 'partially_refunded') {
+        counts.refunded += count;
+      } else if (docStatus !== 'draft' && !NON_PAYABLE_INVOICE_STATUSES.includes(docStatus)) {
+        outstanding += minor;
+        if (ps === 'processing' || ps === 'pending') counts.pending += count;
+        else if (ps === 'failed') counts.failed += count;
+        else counts.unpaid += count;
+        if (num(r.overdue) === 1) counts.overdue += count;
+      }
+    }
+
+    const monthStart = `${today.slice(0, 7)}-01`;
+    const paidMonthQb = this.payments
+      .createQueryBuilder('p')
+      .innerJoin(Invoice, 'inv', 'inv.id = p.invoiceId')
+      .where('p.currency = :currency', { currency })
+      .andWhere('p.status IN (:...settled)', { settled: [...SETTLED_PAYMENT_STATUSES] })
+      .andWhere('p.paidAt >= :monthStart', { monthStart: businessDayStartUtc(monthStart) });
+    await this.scopeToActor(paidMonthQb, actor);
+    if (warehouseId) paidMonthQb.andWhere('inv.warehouseId = :warehouseId', { warehouseId });
+    const paidMonth = await paidMonthQb.select('COALESCE(SUM(p.amountMinor), 0)', 'amount').getRawOne<Record<string, unknown>>();
+
+    const toNumber = (minor: number) => Number(minorToDecimalString(minor, currency));
+    return {
+      totalOutstanding: toNumber(outstanding),
+      paidThisMonth: toNumber(num(paidMonth?.amount)),
+      totalPaidAllTime: toNumber(paidAll),
+      unpaidCount: counts.unpaid,
+      pendingCount: counts.pending,
+      paidCount: counts.paid,
+      failedCount: counts.failed,
+      refundedCount: counts.refunded,
+      overdueCount: counts.overdue,
+      totalInvoicesCount: counts.total,
+      currency,
     };
   }
 
   /**
-   * Verifies the cryptographic HMAC-SHA256 signature of an incoming webhook.
+   * Company-wide Stripe view (balance, payouts, sync and webhook health). The
+   * Stripe account is not division- or warehouse-scoped, so this requires
+   * global access in addition to the controller's permission.
    */
-  verifyWebhookSignature(
-    signatureHeader: string | undefined,
-    rawBody: string,
-    secret?: string,
-  ): boolean {
-    if (!signatureHeader || !rawBody) return false;
-    const webhookSecret = secret || this.defaultWebhookSecret;
+  async stripeOverview(actor: AuthenticatedUser) {
+    if (actor.role !== 'admin' && !this.hasGlobalWarehouseAccess(actor)) {
+      throw new NotFoundException('Not available');
+    }
+    const configured = this.stripe.isPaymentsConfigured();
+    let balance: unknown = { available: [], pending: [], status: configured ? 'unavailable' : 'not_configured' };
+    if (configured) {
+      if (this.balanceCache && Date.now() - this.balanceCache.at < BALANCE_CACHE_MS) {
+        balance = this.balanceCache.value;
+      } else {
+        try {
+          const b = await this.stripe.retrieveBalance();
+          const map = (arr: Array<{ amount: number; currency: string }>) =>
+            arr.map((x) => ({ amountMinor: x.amount, currency: x.currency.toUpperCase() }));
+          balance = { available: map(b.available), pending: map(b.pending), status: 'ok', retrievedAt: new Date().toISOString() };
+          this.balanceCache = { at: Date.now(), value: balance };
+        } catch (err) {
+          this.logger.warn(`Stripe balance unavailable: ${JSON.stringify(StripeService.safeError(err))}`);
+        }
+      }
+    }
+
+    const since = new Date(Date.now() - 24 * 3600 * 1000);
+    const [recentPayouts, lastRun, lastSuccessfulRun, eventHealth, lastEvent, activity] = await Promise.all([
+      this.payouts.find({ order: { providerCreated: 'DESC' }, take: 10 }),
+      this.syncRuns.findOne({ where: {}, order: { startedAt: 'DESC' } }),
+      this.syncRuns.findOne({ where: { status: 'SUCCEEDED' }, order: { startedAt: 'DESC' } }),
+      this.events
+        .createQueryBuilder('e')
+        .select('e.status', 'status')
+        .addSelect('COUNT(*)', 'count')
+        .where('e.receivedAt >= :since', { since })
+        .groupBy('e.status')
+        .getRawMany<Record<string, unknown>>(),
+      this.events.findOne({ where: {}, order: { receivedAt: 'DESC' } }),
+      this.balanceTxns
+        .createQueryBuilder('bt')
+        .select('bt.type', 'type')
+        .addSelect('bt.currency', 'currency')
+        .addSelect('COALESCE(SUM(bt.amountMinor), 0)', 'amount')
+        .addSelect('COALESCE(SUM(bt.feeMinor), 0)', 'fee')
+        .addSelect('COUNT(*)', 'count')
+        .where('bt.providerCreated >= :since30', { since30: new Date(Date.now() - 30 * 86_400_000) })
+        .groupBy('bt.type')
+        .addGroupBy('bt.currency')
+        .getRawMany<Record<string, unknown>>(),
+    ]);
+
+    return {
+      configured,
+      mode: this.stripe.mode(),
+      webhookConfigured: this.stripe.isWebhookConfigured(),
+      balance,
+      recentPayouts: recentPayouts.map((po) => ({
+        id: po.providerPayoutId,
+        amountMinor: po.amountMinor,
+        currency: po.currency,
+        status: po.status,
+        arrivalDate: iso(po.arrivalDate),
+        method: po.method,
+      })),
+      last30DaysActivity: activity.map((a) => ({
+        type: a.type,
+        currency: a.currency,
+        amountMinor: num(a.amount),
+        feeMinor: num(a.fee),
+        count: num(a.count),
+      })),
+      sync: {
+        lastRun: lastRun ? { id: lastRun.id, kind: lastRun.kind, status: lastRun.status, startedAt: iso(lastRun.startedAt), finishedAt: iso(lastRun.finishedAt), error: lastRun.error } : null,
+        lastSuccessAt: iso(lastSuccessfulRun?.finishedAt),
+      },
+      webhooks: {
+        last24h: Object.fromEntries(eventHealth.map((r) => [String(r.status), num(r.count)])),
+        lastReceivedAt: iso(lastEvent?.receivedAt),
+      },
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Refunds
+  // ---------------------------------------------------------------------------
+
+  async refund(paymentId: string, actor: AuthenticatedUser, dto: CreateRefundDto, idempotencyKey: string | undefined, requestId: string | null) {
+    if (!idempotencyKey || !IDEMPOTENCY_KEY.test(idempotencyKey)) {
+      throw new BadRequestException('An Idempotency-Key header (8-128 characters: letters, digits, - or _) is required');
+    }
+    const scopedKey = `refund:${actor.id}:${idempotencyKey}`;
+    const { payment } = await this.loadPaymentForActor(paymentId, actor);
+
+    const prior = await this.refunds.findOne({ where: { idempotencyKey: scopedKey } });
+    if (prior) {
+      if (prior.paymentId !== payment.id) throw new ConflictException('Idempotency-Key was already used for a different payment');
+      return { duplicate: true, refund: this.refundView(prior) };
+    }
+
+    let refund: PaymentRefund;
+    try {
+      refund = await this.dataSource.transaction(async (m) => {
+        const p = await m.getRepository(Payment).findOne({ where: { id: payment.id }, lock: rowLock(m) });
+        if (!p) throw new NotFoundException('Payment not found');
+        if (p.metadata?.legacySimulatedGateway || p.provider !== 'stripe' || !p.providerPaymentId) {
+          throw new ConflictException('This payment was not processed through Stripe and cannot be refunded here');
+        }
+        if (p.status !== 'SUCCEEDED' && p.status !== 'PARTIALLY_REFUNDED') {
+          throw new ConflictException(`A ${p.status} payment cannot be refunded`);
+        }
+        const open = await m.getRepository(PaymentRefund).find({ where: { paymentId: p.id, status: In([...OPEN_REFUND_STATUSES]) } });
+        const pending = open.reduce((s, r) => s + r.amountMinor, 0);
+        const eligible = p.amountMinor - p.refundedMinor - pending;
+        const amount = dto.amountMinor ?? eligible;
+        if (eligible <= 0) throw new ConflictException('Nothing left to refund on this payment');
+        if (amount < 1 || amount > eligible) {
+          throw new BadRequestException(`Refund amount must be between 1 and ${eligible} (${formatMinor(eligible, p.currency)})`);
+        }
+        const repo = m.getRepository(PaymentRefund);
+        const created = await repo.save(
+          repo.create({
+            id: randomUUID(),
+            paymentId: p.id,
+            provider: 'stripe',
+            providerRefundId: null,
+            amountMinor: amount,
+            currency: p.currency,
+            status: 'REQUESTED',
+            reason: dto.reason ?? null,
+            note: dto.note?.trim() || null,
+            failureReason: null,
+            idempotencyKey: scopedKey,
+            requestedBy: actor.id,
+            succeededAt: null,
+          }),
+        );
+        await this.audit.record(
+          {
+            actorUserId: actor.id,
+            actorRole: actor.role,
+            action: 'refund.requested',
+            entityType: 'payment_refund',
+            entityId: created.id,
+            warehouseId: p.warehouseId,
+            summary: `${actor.email} requested a ${amount === p.amountMinor - p.refundedMinor ? 'full' : 'partial'} refund of ${formatMinor(amount, p.currency)} on payment ${p.id}`,
+            metadata: { paymentId: p.id, amountMinor: amount, reason: dto.reason ?? null, requestId },
+          },
+          m,
+        );
+        return created;
+      });
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        const again = await this.refunds.findOne({ where: { idempotencyKey: scopedKey } });
+        if (again) return { duplicate: true, refund: this.refundView(again) };
+      }
+      throw err;
+    }
 
     try {
-      // Standard Stripe format: t=1614555555,v1=5257a869...
-      const parts = signatureHeader.split(',');
-      let timestamp = '';
-      let signature = '';
+      const result = await this.stripe.createRefund(
+        {
+          payment_intent: payment.providerPaymentId!,
+          amount: refund.amountMinor,
+          ...(refund.reason ? { reason: refund.reason as 'duplicate' | 'fraudulent' | 'requested_by_customer' } : {}),
+          metadata: { greenwave_refund_id: refund.id, greenwave_payment_id: payment.id },
+        },
+        `gw-refund-${refund.id}`,
+      );
+      // Only advance from REQUESTED: the refund webhook may already have
+      // applied a later state, which this response must never overwrite.
+      await this.refunds.update({ id: refund.id, providerRefundId: null as unknown as string }, { providerRefundId: result.id });
+      const mapped = mapRefundStatus(result.status);
+      await this.refunds.update(
+        { id: refund.id, status: 'REQUESTED' },
+        { status: mapped === 'FAILED' || mapped === 'CANCELED' ? mapped : 'PENDING' },
+      );
+    } catch (err) {
+      const safe = StripeService.safeError(err);
+      await this.refunds.update({ id: refund.id, status: 'REQUESTED' }, { status: 'FAILED', failureReason: `provider_error:${safe.code ?? safe.type}` });
+      await this.audit.record({
+        actorUserId: actor.id,
+        actorRole: actor.role,
+        action: 'refund.provider_rejected',
+        entityType: 'payment_refund',
+        entityId: refund.id,
+        warehouseId: payment.warehouseId,
+        summary: `Stripe rejected refund ${refund.id}${safe.code ? ` (${safe.code})` : ''}`,
+        metadata: { paymentId: payment.id, stripeRequestId: safe.requestId, requestId },
+      });
+      this.logger.error(`Refund ${refund.id} rejected by Stripe: ${JSON.stringify(safe)} [request ${requestId ?? '-'}]`);
+      throw new BadGatewayException(`Stripe did not accept the refund${safe.code ? ` (${safe.code})` : ''}`);
+    }
 
-      for (const part of parts) {
-        const [key, value] = part.trim().split('=');
-        if (key === 't') timestamp = value;
-        if (key === 'v1') signature = value;
-      }
+    const latest = await this.refunds.findOne({ where: { id: refund.id } });
+    return {
+      duplicate: false,
+      refund: this.refundView(latest ?? refund),
+      message: 'Refund submitted to Stripe. The payment is updated when Stripe confirms it.',
+    };
+  }
 
-      if (!timestamp || !signature) {
-        // Fallback: direct hex signature matching
-        const directExpected = crypto
-          .createHmac('sha256', webhookSecret)
-          .update(rawBody)
-          .digest('hex');
-        return crypto.timingSafeEqual(
-          Buffer.from(signatureHeader, 'hex'),
-          Buffer.from(directExpected, 'hex'),
+  private refundView(r: PaymentRefund) {
+    return {
+      id: r.id,
+      paymentId: r.paymentId,
+      amountMinor: r.amountMinor,
+      currency: r.currency,
+      status: r.status,
+      reason: r.reason,
+      providerRefundId: r.providerRefundId,
+      createdAt: iso(r.createdAt),
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Payment links and sending invoices
+  // ---------------------------------------------------------------------------
+
+  async getPaymentLink(invoiceId: string, actor: AuthenticatedUser, mode: 'get' | 'regenerate', requestId: string | null) {
+    await this.loadInvoiceForActor(invoiceId, actor);
+    return this.dataSource.transaction(async (m) => {
+      const repo = m.getRepository(Invoice);
+      const inv = await repo.findOne({ where: { id: invoiceId }, lock: rowLock(m) });
+      if (!inv) throw new NotFoundException('Invoice not found');
+      const status = (inv.status || '').toLowerCase();
+      if (NON_PAYABLE_INVOICE_STATUSES.includes(status)) throw new ConflictException(`A ${status} invoice cannot be paid`);
+      if ((inv.paymentStatus || '').toLowerCase() === 'paid') throw new ConflictException('This invoice is already paid');
+      if (!isSupportedCurrency(inv.currency)) throw new BadRequestException('Unsupported invoice currency');
+      const currency = normalizeCurrency(inv.currency);
+      const amountMinor = decimalToMinor(inv.total ?? '0', currency);
+      if (amountMinor <= 0) throw new BadRequestException('This invoice has no amount due');
+
+      if (status === 'draft') {
+        // A payable link issues the invoice: it becomes a receivable.
+        inv.status = 'final';
+        await repo.update(inv.id, { status: 'final', updatedBy: actor.id });
+        await this.posting.syncInvoiceIssued(inv, { actorId: actor.id, requestId }, m);
+        await this.audit.record(
+          { actorUserId: actor.id, actorRole: actor.role, action: 'invoice.issued', entityType: 'invoice', entityId: inv.id, warehouseId: inv.warehouseId, summary: `${actor.email} issued invoice #${inv.invoiceNumber}`, metadata: { requestId } },
+          m,
         );
       }
 
-      // Check replay attack window (5 minutes)
-      const currentTime = Math.floor(Date.now() / 1000);
-      const parsedTimestamp = parseInt(timestamp, 10);
-      if (
-        isNaN(parsedTimestamp) ||
-        Math.abs(currentTime - parsedTimestamp) > 300
-      ) {
-        // Timestamp out of tolerance
-        return false;
-      }
-
-      const signedPayload = `${timestamp}.${rawBody}`;
-      const expectedSignature = crypto
-        .createHmac('sha256', webhookSecret)
-        .update(signedPayload)
-        .digest('hex');
-
-      return crypto.timingSafeEqual(
-        Buffer.from(signature, 'hex'),
-        Buffer.from(expectedSignature, 'hex'),
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Public webhook receiver with cryptographic signature verification and strict idempotency.
-   */
-  async handleWebhook(
-    signatureHeader: string | undefined,
-    rawBody: string,
-    payload: WebhookPayload,
-  ) {
-    // 1. Signature verification
-    const isValid = this.verifyWebhookSignature(signatureHeader, rawBody);
-    if (!isValid) {
-      throw new UnauthorizedException('Invalid or missing webhook signature');
-    }
-
-    const eventType = payload?.type || payload?.event;
-    const eventData: WebhookEventData =
-      payload?.data?.object || payload?.data || {};
-
-    const providerPaymentId =
-      eventData.payment_intent ||
-      eventData.paymentIntentId ||
-      (typeof eventData.id === 'string' && eventData.id.startsWith('pi_')
-        ? eventData.id
-        : null);
-    const providerCheckoutId =
-      eventData.checkout_session_id ||
-      eventData.sessionId ||
-      (typeof eventData.id === 'string' && eventData.id.startsWith('cs_')
-        ? eventData.id
-        : eventData.id);
-    const metadata = eventData.metadata || {};
-    const invoiceNumber = metadata.invoiceNumber;
-    const paymentToken = metadata.paymentToken;
-
-    // Handle payment success / checkout completion
-    if (
-      eventType === 'checkout.session.completed' ||
-      eventType === 'payment_intent.succeeded' ||
-      eventType === 'payment.succeeded'
-    ) {
-      // Find invoice
-      let invoice: Invoice | null = null;
-      if (paymentToken) {
-        invoice = await this.invoiceRepository.findOne({
-          where: { paymentToken },
-        });
-      } else if (invoiceNumber) {
-        invoice = await this.invoiceRepository.findOne({
-          where: { invoiceNumber },
-        });
-      } else if (providerCheckoutId) {
-        const paymentRecord = await this.paymentRepository.findOne({
-          where: { providerCheckoutId },
-        });
-        if (paymentRecord) {
-          invoice = await this.invoiceRepository.findOne({
-            where: { id: paymentRecord.invoiceId },
-          });
+      let token: string | null = null;
+      const active = !inv.paymentLinkRevokedAt;
+      if (mode === 'get' && active && inv.paymentLinkNonce && inv.paymentTokenHash) {
+        const derived = this.links.tokenForNonce(inv.paymentLinkNonce);
+        if (this.links.hashToken(derived) !== inv.paymentTokenHash) {
+          throw new ConflictException('The payment-link secret has changed. Regenerate this link.');
         }
+        token = derived;
+      } else if (mode === 'get' && active && !inv.paymentLinkNonce && inv.paymentToken && inv.paymentTokenHash) {
+        token = inv.paymentToken; // pre-019 link, still valid
       }
 
-      if (!invoice) {
-        return {
-          received: true,
-          warning: 'Invoice not found for webhook event',
-        };
-      }
-
-      // IDEMPOTENCY CHECK: If already marked paid, return success without duplicate processing!
-      if (invoice.paymentStatus === 'paid') {
-        return { received: true, idempotent: true, status: 'already_paid' };
-      }
-
-      const paidAt = new Date();
-      const amountPaid = eventData.amount_total
-        ? String(eventData.amount_total / 100)
-        : String(eventData.amount || invoice.total);
-
-      // Find or create payment record
-      const paymentLookup: FindOptionsWhere<Payment>[] = [];
-      if (providerCheckoutId) {
-        paymentLookup.push({ providerCheckoutId });
-      }
-      if (providerPaymentId) {
-        paymentLookup.push({ providerPaymentId });
-      }
-      paymentLookup.push({ invoiceId: invoice.id, status: 'pending' });
-
-      let payment = await this.paymentRepository.findOne({
-        where: paymentLookup,
-      });
-
-      if (payment) {
-        payment.status = 'paid';
-        payment.paidAt = paidAt;
-        payment.providerPaymentId =
-          providerPaymentId || payment.providerPaymentId;
-        payment.amount = amountPaid;
-        payment.metadata = {
-          ...payment.metadata,
-          webhookProcessedAt: paidAt.toISOString(),
-        };
-        await this.paymentRepository.save(payment);
-      } else {
-        payment = this.paymentRepository.create({
-          id: crypto.randomUUID(),
-          invoiceId: invoice.id,
-          customerId: invoice.customerId,
-          warehouseId: invoice.warehouseId,
-          provider: 'stripe',
-          providerPaymentId,
-          providerCheckoutId,
-          amount: amountPaid,
-          currency: invoice.currency || 'CAD',
-          status: 'paid',
-          paidAt,
-          metadata: { webhookProcessedAt: paidAt.toISOString() },
+      let created = false;
+      if (!token) {
+        const nonce = this.links.newNonce();
+        token = this.links.tokenForNonce(nonce);
+        await repo.update(inv.id, {
+          paymentLinkNonce: nonce,
+          paymentTokenHash: this.links.hashToken(token),
+          paymentToken: null,
+          paymentLinkCreatedAt: new Date(),
+          paymentLinkRevokedAt: null,
         });
-        await this.paymentRepository.save(payment);
+        created = true;
+        await this.audit.record(
+          {
+            actorUserId: actor.id,
+            actorRole: actor.role,
+            action: mode === 'regenerate' ? 'payment.link_regenerated' : 'payment.link_created',
+            entityType: 'invoice',
+            entityId: inv.id,
+            warehouseId: inv.warehouseId,
+            summary: `${actor.email} ${mode === 'regenerate' ? 'regenerated' : 'created'} the payment link for invoice #${inv.invoiceNumber}`,
+            metadata: { requestId },
+          },
+          m,
+        );
       }
-
-      // Update Authoritative Invoice State in PostgreSQL
-      await this.invoiceRepository.update(invoice.id, {
-        paymentStatus: 'paid',
-        status: 'paid',
-        paidAt,
-        paymentProvider: 'stripe',
-        paymentReference: providerPaymentId || providerCheckoutId,
-      });
-
-      // Record Audit Event
-      await this.auditService.record({
-        actorUserId: null,
-        actorRole: 'SYSTEM_WEBHOOK',
-        action: 'invoice.paid',
-        entityType: 'invoice',
-        entityId: invoice.id,
-        warehouseId: invoice.warehouseId,
-        summary: `Invoice #${invoice.invoiceNumber} marked PAID via verified Stripe webhook (${invoice.currency} $${amountPaid})`,
-      });
 
       return {
-        received: true,
-        invoiceNumber: invoice.invoiceNumber,
-        status: 'paid',
+        invoiceId: inv.id,
+        invoiceNumber: inv.invoiceNumber,
+        paymentUrl: this.links.urlForToken(token),
+        created,
+        amountMinor,
+        currency,
+        status: inv.status,
+        paymentStatus: inv.paymentStatus,
       };
-    }
-
-    // Handle payment failure
-    if (
-      eventType === 'payment_intent.payment_failed' ||
-      eventType === 'payment.failed'
-    ) {
-      let invoiceId: string | null = null;
-      let targetWarehouseId: string | null = null;
-
-      if (invoiceNumber) {
-        const inv = await this.invoiceRepository.findOne({
-          where: { invoiceNumber },
-        });
-        if (inv) {
-          invoiceId = inv.id;
-          targetWarehouseId = inv.warehouseId;
-        }
-      }
-
-      if (providerCheckoutId || providerPaymentId) {
-        const failedPaymentLookup: FindOptionsWhere<Payment>[] = [];
-        if (providerCheckoutId) {
-          failedPaymentLookup.push({ providerCheckoutId });
-        }
-        if (providerPaymentId) {
-          failedPaymentLookup.push({ providerPaymentId });
-        }
-
-        const payment = await this.paymentRepository.findOne({
-          where: failedPaymentLookup,
-        });
-        if (payment) {
-          payment.status = 'failed';
-          payment.failureReason =
-            eventData.last_payment_error?.message ||
-            'Payment transaction failed';
-          await this.paymentRepository.save(payment);
-          invoiceId = payment.invoiceId;
-          targetWarehouseId = payment.warehouseId;
-        }
-      }
-
-      if (invoiceId) {
-        await this.invoiceRepository.update(invoiceId, {
-          paymentStatus: 'failed',
-        });
-
-        await this.auditService.record({
-          actorUserId: null,
-          actorRole: 'SYSTEM_WEBHOOK',
-          action: 'payment.failed',
-          entityType: 'payment',
-          entityId: invoiceId,
-          warehouseId: targetWarehouseId,
-          summary: `Payment failed for invoice ${invoiceId}: ${eventData.last_payment_error?.message || 'Transaction declined'}`,
-        });
-      }
-
-      return { received: true, status: 'failed_recorded' };
-    }
-
-    return { received: true, unhandledEvent: eventType };
+    });
   }
 
-  /**
-   * Protected: Admin or Manager retrieves financial payment tracking dashboard metrics.
-   * Calculated directly from PostgreSQL data.
-   */
-  async getPaymentMetrics(actor: AuthenticatedUser, warehouseId?: string) {
-    if (warehouseId) {
-      await this.warehousesService.assertWarehouseAccess(actor, warehouseId);
-    }
-
-    const qb = this.invoiceRepository.createQueryBuilder('inv');
-
-    if (warehouseId) {
-      qb.andWhere('inv.warehouseId = :warehouseId', { warehouseId });
-    } else if (
-      !actor.hasGlobalAccess &&
-      (!actor.permissions ||
-        !actor.permissions.includes('warehouses:global_access'))
-    ) {
-      const authorizedIds =
-        await this.warehousesService.getUserAuthorizedWarehouseIds(
-          actor.id,
-          actor.role,
-          actor.permissions,
-        );
-      if (authorizedIds.length === 0) {
-        qb.andWhere('inv.warehouseId IS NULL');
-      } else {
-        qb.andWhere(
-          '(inv.warehouseId IN (:...authorizedIds) OR inv.warehouseId IS NULL)',
-          { authorizedIds },
-        );
-      }
-    }
-
-    const invoices = await qb.getMany();
-
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
-
-    let totalOutstanding = 0;
-    let paidThisMonth = 0;
-    let totalPaidAllTime = 0;
-    let unpaidCount = 0;
-    let pendingCount = 0;
-    let paidCount = 0;
-    let failedCount = 0;
-    let refundedCount = 0;
-    let overdueCount = 0;
-
-    const now = new Date();
-
-    for (const inv of invoices) {
-      const total = Number(inv.total) || 0;
-      const status = (inv.paymentStatus || 'unpaid').toLowerCase();
-
-      if (status === 'paid') {
-        paidCount++;
-        totalPaidAllTime += total;
-        if (inv.paidAt && new Date(inv.paidAt) >= startOfMonth) {
-          paidThisMonth += total;
-        }
-      } else if (status === 'pending') {
-        pendingCount++;
-        totalOutstanding += total;
-      } else if (status === 'failed') {
-        failedCount++;
-        totalOutstanding += total;
-      } else if (status === 'refunded') {
-        refundedCount++;
-      } else {
-        // unpaid
-        unpaidCount++;
-        totalOutstanding += total;
-        if (inv.dueDate && new Date(inv.dueDate) < now) {
-          overdueCount++;
-        }
-      }
-    }
-
-    return {
-      totalOutstanding: Math.round(totalOutstanding * 100) / 100,
-      paidThisMonth: Math.round(paidThisMonth * 100) / 100,
-      totalPaidAllTime: Math.round(totalPaidAllTime * 100) / 100,
-      unpaidCount,
-      pendingCount,
-      paidCount,
-      failedCount,
-      refundedCount,
-      overdueCount,
-      totalInvoicesCount: invoices.length,
-      currency: 'CAD',
-    };
-  }
-
-  /**
-   * Protected: Admin or authorized staff initiates a refund.
-   */
-  async refundPayment(
-    paymentId: string,
-    actor: AuthenticatedUser,
-    dto: ProcessRefundDto,
-  ) {
-    if (
-      actor.role !== 'admin' &&
-      (!actor.permissions || !actor.permissions.includes('payments:refund'))
-    ) {
-      throw new ForbiddenException(
-        'You do not have permission to issue refunds.',
-      );
-    }
-
-    const payment = await this.paymentRepository.findOne({
-      where: { id: paymentId },
-    });
-    if (!payment) throw new NotFoundException('Payment record not found');
-
-    if (payment.warehouseId) {
-      await this.warehousesService.assertWarehouseAccess(
-        actor,
-        payment.warehouseId,
-      );
-    }
-
-    if (payment.status === 'refunded') {
-      throw new BadRequestException('Payment has already been refunded.');
-    }
-
-    payment.status = 'refunded';
-    payment.failureReason = dto.reason || 'Refunded by administrator';
-    await this.paymentRepository.save(payment);
-
-    await this.invoiceRepository.update(payment.invoiceId, {
-      paymentStatus: 'refunded',
-      status: 'refunded',
-    });
-
-    await this.auditService.record({
+  async revokePaymentLink(invoiceId: string, actor: AuthenticatedUser, requestId: string | null) {
+    const inv = await this.loadInvoiceForActor(invoiceId, actor);
+    if (!inv.paymentTokenHash || inv.paymentLinkRevokedAt) return { invoiceId, revoked: false };
+    await this.invoices.update(inv.id, { paymentLinkRevokedAt: new Date() });
+    await this.audit.record({
       actorUserId: actor.id,
       actorRole: actor.role,
-      action: 'payment.refunded',
-      entityType: 'payment',
-      entityId: payment.id,
-      warehouseId: payment.warehouseId,
-      summary: `${actor.email} refunded payment #${payment.id} for invoice (${payment.currency} $${payment.amount})`,
-    });
-
-    return {
-      success: true,
-      paymentId: payment.id,
-      status: 'refunded',
-      reason: payment.failureReason,
-    };
-  }
-
-  /**
-   * Protected: Send invoice with secure payment link to customer.
-   */
-  async sendInvoiceEmail(
-    invoiceId: string,
-    actor: AuthenticatedUser,
-    dto: SendInvoiceEmailDto,
-  ) {
-    const linkResult = await this.getOrCreatePaymentLink(invoiceId, actor);
-    const invoice = await this.invoiceRepository.findOne({
-      where: { id: invoiceId },
-    });
-    if (!invoice) throw new NotFoundException('Invoice not found');
-
-    const recipient =
-      dto.recipientEmail || invoice.billTo || 'customer@example.com';
-
-    // Formatted email payload
-    const emailPayload = {
-      to: recipient,
-      subject: `GreenWave Recycling Invoice #${invoice.invoiceNumber}`,
-      invoiceNumber: invoice.invoiceNumber,
-      amount: Number(invoice.total),
-      currency: invoice.currency || 'CAD',
-      dueDate: invoice.dueDate || 'Upon Receipt',
-      paymentUrl: linkResult.paymentUrl,
-      message:
-        dto.customMessage ||
-        'Thank you for your business. Please click below to review and pay your invoice online.',
-    };
-
-    await this.auditService.record({
-      actorUserId: actor.id,
-      actorRole: actor.role,
-      action: 'invoice.email_sent',
+      action: 'payment.link_revoked',
       entityType: 'invoice',
-      entityId: invoice.id,
-      warehouseId: invoice.warehouseId,
-      summary: `${actor.email} sent invoice #${invoice.invoiceNumber} to ${recipient} with secure payment link`,
+      entityId: inv.id,
+      warehouseId: inv.warehouseId,
+      summary: `${actor.email} revoked the payment link for invoice #${inv.invoiceNumber}`,
+      metadata: { requestId },
+    });
+    return { invoiceId, revoked: true };
+  }
+
+  async sendInvoice(invoiceId: string, actor: AuthenticatedUser, dto: SendInvoiceDto, requestId: string | null) {
+    const inv = await this.loadInvoiceForActor(invoiceId, actor);
+    if (!this.mail.isConfigured()) {
+      throw new ServiceUnavailableException('Outgoing email is not configured on the server; the invoice was not sent');
+    }
+    const status = (inv.status || '').toLowerCase();
+    if (NON_PAYABLE_INVOICE_STATUSES.includes(status)) throw new ConflictException(`A ${status} invoice cannot be sent`);
+
+    const customer = inv.customerId ? await this.customers.findOne({ where: { id: inv.customerId } }) : null;
+    const recipient = dto.recipientEmail?.trim() || customer?.email || null;
+    if (!isDeliverableAddress(recipient)) throw new BadRequestException('A valid recipient email address is required');
+    if (!isSupportedCurrency(inv.currency)) throw new BadRequestException('Unsupported invoice currency');
+    const currency = normalizeCurrency(inv.currency);
+    const totalMinor = decimalToMinor(inv.total ?? '0', currency);
+
+    let paymentUrl: string | null = null;
+    if ((inv.paymentStatus || '').toLowerCase() !== 'paid' && totalMinor > 0) {
+      paymentUrl = (await this.getPaymentLink(inv.id, actor, 'get', requestId)).paymentUrl;
+    } else if (status === 'draft') {
+      await this.dataSource.transaction(async (m) => {
+        await m.getRepository(Invoice).update(inv.id, { status: 'final', updatedBy: actor.id });
+        inv.status = 'final';
+        await this.posting.syncInvoiceIssued(inv, { actorId: actor.id, requestId }, m);
+      });
+    }
+
+    let pdf: Buffer;
+    try {
+      pdf = await this.invoicesService.generatePdf(dto.documentHtml);
+    } catch (err) {
+      this.logger.error(`Invoice PDF render failed for ${inv.id}: ${(err as Error)?.name ?? 'Error'} [request ${requestId ?? '-'}]`);
+      throw new BadGatewayException('The invoice PDF could not be generated; the invoice was not sent');
+    }
+
+    const email = invoiceEmail({
+      invoiceNumber: inv.invoiceNumber,
+      customerName: customer?.name ?? ((inv.billTo || '').split('\n')[0].trim() || null),
+      totalDisplay: formatMinor(totalMinor, currency),
+      dueDate: inv.dueDate,
+      payUrl: paymentUrl,
+      message: dto.customMessage?.trim() || null,
+    });
+    const safeNumber = inv.invoiceNumber.replace(/[^A-Za-z0-9_-]/g, '');
+    const result = await this.mail.sendOnce({
+      dedupeKey: `invoice-send:${inv.id}:${dto.idempotencyKey ?? randomUUID()}`,
+      template: 'invoice',
+      to: recipient,
+      ...email,
+      attachments: [{ filename: `Invoice-${safeNumber}.pdf`, content: pdf, contentType: 'application/pdf' }],
+      entityType: 'invoice',
+      entityId: inv.id,
     });
 
+    if (result.status === 'SKIPPED') throw new ServiceUnavailableException('Outgoing email is not configured; the invoice was not sent');
+    if (result.status === 'FAILED') throw new BadGatewayException('The email server rejected the message; the invoice was not sent');
+
+    const sentAt = new Date();
+    if (result.status === 'SENT') {
+      await this.invoices.update(inv.id, { sentAt, recipientEmail: recipient });
+      await this.audit.record({
+        actorUserId: actor.id,
+        actorRole: actor.role,
+        action: 'invoice.sent',
+        entityType: 'invoice',
+        entityId: inv.id,
+        warehouseId: inv.warehouseId,
+        summary: `${actor.email} emailed invoice #${inv.invoiceNumber} to ${recipient}`,
+        metadata: { withPaymentLink: !!paymentUrl, requestId },
+      });
+    }
     return {
-      success: true,
+      delivered: true,
+      duplicate: result.status === 'DUPLICATE',
       recipient,
-      paymentUrl: linkResult.paymentUrl,
-      invoiceNumber: invoice.invoiceNumber,
-      amount: Number(invoice.total),
-      currency: invoice.currency || 'CAD',
-      emailPayload,
-      dispatchedAt: new Date().toISOString(),
+      invoiceNumber: inv.invoiceNumber,
+      paymentUrl,
+      sentAt: sentAt.toISOString(),
     };
   }
 }

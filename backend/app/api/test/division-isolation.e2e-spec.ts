@@ -36,6 +36,9 @@ import { UsersModule } from '../src/users/users.module';
 import { UserWarehouse } from '../src/warehouses/entities/user-warehouse.entity';
 import { Warehouse } from '../src/warehouses/entities/warehouse.entity';
 import { WarehousesModule } from '../src/warehouses/warehouses.module';
+import { ACCOUNTING_ENTITIES } from '../src/accounting/accounting.module';
+import { EmailOutbox } from '../src/mail/entities/email-outbox.entity';
+import { PAYMENT_ENTITIES } from '../src/payments/payments.module';
 
 /**
  * Cross-division authorization & IDOR matrix.
@@ -116,6 +119,9 @@ describe('E2E Security: Cross-division authorization & IDOR', () => {
           database: ':memory:',
           dropSchema: true,
           entities: [
+            ...PAYMENT_ENTITIES,
+            ...ACCOUNTING_ENTITIES,
+            EmailOutbox,
             User,
             AuditEvent,
             Warehouse,

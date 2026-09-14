@@ -151,6 +151,56 @@ export class Invoice {
   })
   paymentReference: string | null;
 
+  /**
+   * SHA-256 of the opaque payment-link token (migration 019), used for lookup.
+   */
+  @Column({
+    name: 'payment_token_hash',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+    unique: true,
+  })
+  paymentTokenHash: string | null;
+
+  /** Random nonce the payment-link token is derived from (never the token). */
+  @Column({
+    name: 'payment_link_nonce',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+  })
+  paymentLinkNonce: string | null;
+
+  @Column({
+    name: 'payment_link_created_at',
+    type: process.env.NODE_ENV === 'test' ? 'datetime' : 'timestamptz',
+    nullable: true,
+  })
+  paymentLinkCreatedAt: Date | null;
+
+  @Column({
+    name: 'payment_link_revoked_at',
+    type: process.env.NODE_ENV === 'test' ? 'datetime' : 'timestamptz',
+    nullable: true,
+  })
+  paymentLinkRevokedAt: Date | null;
+
+  @Column({
+    name: 'sent_at',
+    type: process.env.NODE_ENV === 'test' ? 'datetime' : 'timestamptz',
+    nullable: true,
+  })
+  sentAt: Date | null;
+
+  @Column({
+    name: 'recipient_email',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+  })
+  recipientEmail: string | null;
+
   @Column({ name: 'warehouse_id', type: 'uuid', nullable: true })
   warehouseId: string | null;
 

@@ -92,16 +92,25 @@ export class CreateInvoiceDto {
   @IsIn(['greenwave', 'recycling', 'healthcare'])
   division?: string;
 
+  /**
+   * Document status a client may request: draft, final (issued), or void.
+   * 'paid' is accepted only as an unchanged echo of the current value — an
+   * invoice becomes paid solely through a verified payment.
+   */
   @IsOptional()
-  @IsIn(['draft', 'final', 'paid'])
+  @IsIn(['draft', 'final', 'paid', 'void'])
   status?: string;
 
   @IsOptional()
   @IsIn(['CAD', 'USD'])
   currency?: string;
 
+  /**
+   * Accepted for backward compatibility with existing clients that echo the
+   * field, and IGNORED: payment status is server-owned (webhooks only).
+   */
   @IsOptional()
-  @IsIn(['unpaid', 'pending', 'paid', 'failed', 'cancelled', 'refunded'])
+  @IsIn(['unpaid', 'pending', 'processing', 'paid', 'failed', 'cancelled', 'refunded', 'partially_refunded', 'disputed'])
   paymentStatus?: string;
 
   @IsArray()

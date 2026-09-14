@@ -1,55 +1,36 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Headers,
-  HttpCode,
-  HttpStatus,
-  Param,
-  Post,
-  Req,
-} from '@nestjs/common';
+import { Controller, Get, Header, HttpCode, HttpStatus, Param, Post, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 
-import { PaymentsService } from './payments.service';
+import { PublicRateLimitGuard, RateLimit } from '../common/guards/public-rate-limit.guard';
+import { getRequestId } from '../common/request-id';
+import { PublicPaymentsService } from './public-payments.service';
 
-@Controller()
+/**
+ * Customer-facing payment API used by pay.gwgcservers.ca. Authorized only by
+ * the opaque link token; rate limited per client IP against enumeration.
+ */
+@Controller('public/pay')
+@UseGuards(PublicRateLimitGuard)
 export class PublicPaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(private readonly payments: PublicPaymentsService) {}
 
-  /**
-   * Public: Customer accesses invoice by secure unpredictable token.
-   */
-  @Get('pay/:token')
-  getPublicInvoice(@Param('token') token: string) {
-    return this.paymentsService.getPublicInvoiceByToken(token);
+  @Get(':token')
+  @Header('X-Robots-Tag', 'noindex, nofollow')
+  @RateLimit({ bucket: 'pay-view', limit: 60, windowSeconds: 60 })
+  getInvoice(@Param('token') token: string) {
+    return this.payments.getPublicInvoice(token);
   }
 
-  /**
-   * Public: Customer initiates checkout.
-   */
-  @Post('pay/:token/checkout')
-  createCheckoutSession(@Param('token') token: string) {
-    return this.paymentsService.createCheckoutSession(token);
+  @Get(':token/status')
+  @RateLimit({ bucket: 'pay-status', limit: 120, windowSeconds: 60 })
+  getStatus(@Param('token') token: string) {
+    return this.payments.getStatus(token);
   }
 
-  /**
-   * Public Webhook Receiver for Stripe / payment provider.
-   */
-  @Post(['payments/webhook', 'pay/webhook'])
+  @Post(':token/intent')
   @HttpCode(HttpStatus.OK)
-  async handleWebhook(
-    @Headers('stripe-signature') signature: string,
-    @Body() body: Record<string, unknown>,
-    @Req() req: Request,
-  ) {
-    const rawReq = req as unknown as { rawBody?: Buffer | string };
-    const rawBody: string = rawReq.rawBody
-      ? rawReq.rawBody.toString('utf8')
-      : typeof body === 'string'
-        ? body
-        : JSON.stringify(body);
-
-    return this.paymentsService.handleWebhook(signature, rawBody, body);
+  @RateLimit({ bucket: 'pay-intent', limit: 10, windowSeconds: 60 })
+  createIntent(@Param('token') token: string, @Req() req: Request) {
+    return this.payments.createIntent(token, getRequestId(req));
   }
 }

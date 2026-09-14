@@ -1,12 +1,13 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
-import { DataSource, QueryRunner, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, QueryRunner, Repository } from 'typeorm';
 
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
@@ -16,7 +17,9 @@ import {
   DIVISION_GREENWAVE,
   normalizeDivision,
 } from '../divisions/divisions.constants';
+import { AccountingPostingService } from '../accounting/accounting-posting.service';
 import { DivisionsService } from '../divisions/divisions.service';
+import { Payment } from '../payments/entities/payment.entity';
 import { WarehousesService } from '../warehouses/warehouses.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { InvoiceItemDto } from './dto/invoice-item.dto';
@@ -108,6 +111,9 @@ export class InvoicesService {
     private readonly auditService: AuditService,
     private readonly warehousesService: WarehousesService,
     private readonly divisionsService: DivisionsService,
+    private readonly postingService: AccountingPostingService,
+    @InjectRepository(Payment)
+    private readonly paymentRepository: Repository<Payment>,
     @InjectRepository(Customer)
     private readonly customerRepository: Repository<Customer>,
   ) {}
@@ -226,6 +232,11 @@ export class InvoicesService {
     const division = await this.resolveCreateDivision(actor, dto.division);
     const divisionStorage = this.divisionsService.storageValueFor(division);
     await this.assertCustomerInDivision(dto.customerId, divisionStorage);
+    if (dto.status === 'paid') {
+      throw new BadRequestException(
+        'An invoice becomes paid only through a recorded payment',
+      );
+    }
 
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -266,9 +277,10 @@ export class InvoicesService {
         paymentInstructions: dto.paymentInstructions ?? null,
         status: dto.status ?? 'draft',
         currency: dto.currency ?? 'CAD',
-        paymentStatus: dto.paymentStatus ?? 'unpaid',
-        paymentToken:
-          randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, ''),
+        // Server-owned. Payment links are created on demand (hashed); no
+        // plaintext token is stored.
+        paymentStatus: 'unpaid',
+        paymentToken: null,
         paidAt: null,
         paymentProvider: null,
         paymentReference: null,
@@ -280,6 +292,12 @@ export class InvoicesService {
 
       await queryRunner.manager.save(Invoice, invoice);
       await queryRunner.manager.save(InvoiceItem, totals.items);
+      // An invoice created directly as final is a receivable immediately.
+      await this.postingService.syncInvoiceIssued(
+        invoice,
+        { actorId: actor.id },
+        queryRunner.manager,
+      );
       await queryRunner.commitTransaction();
     } catch (err) {
       // Only roll back a transaction that is still open. A failure raised
@@ -427,11 +445,13 @@ export class InvoicesService {
       }));
     const taxRate = dto.taxRate ?? Number(existing.taxRate);
     const totals = computeTotals(id, items, taxRate);
+    const nextStatus = this.assertAllowedUpdate(existing, dto, totals.total, await this.financialLock(id));
 
-    await this.invoiceItemRepository.delete({ invoiceId: id });
-    await this.invoiceItemRepository.save(totals.items);
+    await this.dataSource.transaction(async (m: EntityManager) => {
+    await m.getRepository(InvoiceItem).delete({ invoiceId: id });
+    await m.getRepository(InvoiceItem).save(totals.items);
 
-    await this.invoiceRepository.update(id, {
+    await m.getRepository(Invoice).update(id, {
       invoiceDate: dto.invoiceDate ?? existing.invoiceDate,
       dueDate: dto.dueDate ?? existing.dueDate,
       customerId: dto.customerId ?? existing.customerId,
@@ -454,12 +474,23 @@ export class InvoicesService {
       footer: dto.footer ?? existing.footer,
       paymentInstructions:
         dto.paymentInstructions ?? existing.paymentInstructions,
-      status: dto.status ?? existing.status,
+      status: nextStatus,
       currency: dto.currency ?? existing.currency,
-      paymentStatus: dto.paymentStatus ?? existing.paymentStatus,
+      // paymentStatus is server-owned; any client value is ignored.
       warehouseId: dto.warehouseId ?? existing.warehouseId,
       division: divisionStorage,
       updatedBy: actor.id,
+      ...(nextStatus === 'void' && existing.status !== 'void'
+        ? { paymentLinkRevokedAt: new Date() }
+        : {}),
+    });
+
+    // Keep AR/revenue in step with the saved invoice (issue, re-issue on an
+    // amount change, or reverse on draft/void). Same transaction.
+    const saved = await m.getRepository(Invoice).findOne({ where: { id } });
+    if (saved) {
+      await this.postingService.syncInvoiceIssued(saved, { actorId: actor.id }, m);
+    }
     });
 
     await this.auditService.record({
@@ -542,6 +573,66 @@ export class InvoicesService {
     }
 
     return qb.getMany();
+  }
+
+  /** Payments that freeze an invoice's amounts: any open or settled attempt. */
+  private financialLock(invoiceId: string): Promise<number> {
+    return this.paymentRepository.count({
+      where: {
+        invoiceId,
+        status: In([
+          'CREATED',
+          'REQUIRES_ACTION',
+          'PROCESSING',
+          'SUCCEEDED',
+          'PARTIALLY_REFUNDED',
+          'REFUNDED',
+          'DISPUTED',
+        ]),
+      },
+    });
+  }
+
+  /**
+   * Server-side rules for editing an invoice that may already be a receivable
+   * or have money against it. Returns the status to persist.
+   */
+  private assertAllowedUpdate(
+    existing: Invoice,
+    dto: UpdateInvoiceDto,
+    newTotal: number,
+    paymentsAgainstInvoice: number,
+  ): string {
+    const current = (existing.status || 'draft').toLowerCase();
+    const requested = dto.status?.toLowerCase();
+    const paid = ['paid', 'refunded', 'partially_refunded', 'disputed'].includes(
+      (existing.paymentStatus || '').toLowerCase(),
+    );
+
+    if (requested === 'paid' && current !== 'paid') {
+      throw new BadRequestException(
+        'An invoice becomes paid only through a recorded payment',
+      );
+    }
+    if (current === 'void' && requested && requested !== 'void') {
+      throw new ConflictException('A void invoice cannot be reopened; duplicate it instead');
+    }
+
+    const amountChanged =
+      Math.round(Number(existing.total) * 100) !== Math.round(newTotal * 100) ||
+      (dto.currency !== undefined && dto.currency !== existing.currency);
+    if (amountChanged && (paid || paymentsAgainstInvoice > 0)) {
+      throw new ConflictException(
+        'This invoice has a payment in progress or completed; its amount and currency cannot be changed',
+      );
+    }
+    if ((requested === 'void' || requested === 'draft') && requested !== current && (paid || paymentsAgainstInvoice > 0)) {
+      throw new ConflictException(
+        `An invoice with a payment cannot be moved to ${requested}; refund the payment first`,
+      );
+    }
+    if (current === 'paid') return 'paid';
+    return requested ?? current;
   }
 
   async findOne(id: string, actor: AuthenticatedUser): Promise<Invoice> {
