@@ -380,8 +380,10 @@
     photoUrl: function (id, variant) {
       if (!id) return '';
       var t = getToken();
-      var p = baseUrl() + '/api/photos/' + encodeURIComponent(id) + (variant ? '/' + variant : '/view');
-      return t ? (p + '?token=' + encodeURIComponent(t)) : p;
+      var p = (typeof id === 'string' && id.indexOf('/api/photos/') === 0)
+        ? id
+        : (baseUrl() + '/api/photos/' + encodeURIComponent(id) + (variant ? '/' + variant : '/view'));
+      return t ? (p + (p.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(t)) : p;
     },
     photoThumbnailUrl: function (id) {
       return this.photoUrl(id, 'thumbnail');

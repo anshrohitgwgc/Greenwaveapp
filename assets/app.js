@@ -1138,7 +1138,7 @@
           '<div class="tx-photos-grid">' +
           tx.photos.map(function (p, idx) {
             var fileName = p.originalFilename || p.filename || ('Photo #' + (idx + 1));
-            var thumbUrl = p.thumbnailUrl || (p.id ? Api.photoThumbnailUrl(p.id) : (p.url || ''));
+            var thumbUrl = (p.id ? Api.photoThumbnailUrl(p.id) : (p.thumbnailUrl ? Api.photoThumbnailUrl(p.thumbnailUrl) : (p.url || '')));
             return '<div class="tx-photo-card" data-idx="' + idx + '" style="cursor:pointer">' +
               '<div class="photo-thumb-wrap" style="height:110px">' +
                 '<img src="' + esc(thumbUrl) + '" alt="' + esc(fileName) + '" class="tx-photo-img" loading="lazy" onerror="this.style.display=\'none\';if(this.nextElementSibling)this.nextElementSibling.style.display=\'flex\';">' +
@@ -2270,7 +2270,7 @@
         '</div>' +
         '<div class="photogrid pad" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(180px, 1fr));gap:12px">' +
         photoCache.map(function (p, i) {
-          var thumbUrl = p.thumbnailUrl || (p.id ? Api.photoThumbnailUrl(p.id) : (p.url || ''));
+          var thumbUrl = (p.id ? Api.photoThumbnailUrl(p.id) : (p.thumbnailUrl ? Api.photoThumbnailUrl(p.thumbnailUrl) : (p.url || '')));
           var fileName = p.originalFilename || p.filename || ('Photo #' + (i + 1));
           var takenTime = p.takenAt || p.createdAt ? when(p.takenAt || p.createdAt) : '—';
           return '<div class="photo-card-item card" style="overflow:hidden;text-align:left;display:flex;flex-direction:column">' +
@@ -2309,7 +2309,7 @@
           if (img && errBox) {
             errBox.style.display = 'none';
             img.style.display = 'block';
-            var base = p.thumbnailUrl || (p.id ? Api.photoThumbnailUrl(p.id) : (p.url || ''));
+            var base = (p.id ? Api.photoThumbnailUrl(p.id) : (p.thumbnailUrl ? Api.photoThumbnailUrl(p.thumbnailUrl) : (p.url || '')));
             var sep = base.indexOf('?') >= 0 ? '&' : '?';
             img.src = base + sep + '_retry=' + Date.now();
           }
