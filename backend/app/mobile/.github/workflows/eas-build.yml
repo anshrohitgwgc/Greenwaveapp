@@ -1,0 +1,79 @@
+name: Manual EAS Native Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Target Platform'
+        required: true
+        default: 'android'
+        type: choice
+        options:
+          - 'android'
+          - 'ios'
+          - 'all'
+      profile:
+        description: 'EAS Build Profile'
+        required: true
+        default: 'preview'
+        type: choice
+        options:
+          - 'preview'
+          - 'production'
+          - 'development'
+
+jobs:
+  build-native:
+    name: EAS Native Build (${{ inputs.platform }} - ${{ inputs.profile }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript Check
+        run: npx tsc --noEmit
+
+      - name: ESLint Check
+        run: npm run lint
+
+      - name: Expo Config Validation
+        run: npx expo config --type public
+
+      - name: Verify V2 EAS Project ID
+        run: |
+          PROJECT_ID=$(node -e "const app = require('./app.json'); console.log(app.expo?.extra?.eas?.projectId || '');")
+          EXPECTED_ID="4f362b61-c008-41c7-9a5c-1231731fff89"
+          if [ "$PROJECT_ID" != "$EXPECTED_ID" ]; then
+            echo "::error::EAS Project ID safety check failed! Expected $EXPECTED_ID, but found '$PROJECT_ID'."
+            exit 1
+          fi
+          echo "EAS Project ID verified: $PROJECT_ID"
+
+      - name: Check EXPO_TOKEN Secret
+        run: |
+          if [ -z "${{ secrets.EXPO_TOKEN }}" ]; then
+            echo "::error::EXPO_TOKEN secret is missing in GitHub repository settings. Please configure EXPO_TOKEN under Repository Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          echo "EXPO_TOKEN secret is configured."
+
+      - name: Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Trigger EAS Build
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          npx eas-cli build --platform ${{ inputs.platform }} --profile ${{ inputs.profile }} --non-interactive

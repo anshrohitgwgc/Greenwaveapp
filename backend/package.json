@@ -1,0 +1,28 @@
+{
+  "name": "greenwave-full-infra",
+  "version": "0.1.0",
+  "description": "GreenWave Enterprise Infrastructure, Core API, Web Application & Mobile Apps",
+  "private": true,
+  "scripts": {
+    "dev:api": "npm --prefix app/api run start:dev",
+    "dev:web": "npm --prefix app/web run dev",
+    "dev:mobile": "npm --prefix app/mobile run start",
+    "build": "npm run build:api && npm run build:web",
+    "build:api": "npm --prefix app/api run build",
+    "build:web": "npm --prefix app/web run build",
+    "test": "npm run test:unit && npm run test:security",
+    "test:unit": "node --import tsx --test tests/unit/**/*.test.ts",
+    "test:security": "node --import tsx --test tests/security/**/*.test.ts",
+    "test:api": "npm --prefix app/api test",
+    "docker:up": "docker compose -f infrastructure/docker/docker-compose.yml up -d",
+    "docker:down": "docker compose -f infrastructure/docker/docker-compose.yml down",
+    "setup:local": "./infrastructure/scripts/setup-local-dev.sh",
+    "seed": "./infrastructure/scripts/seed-database.sh"
+  },
+  "devDependencies": {
+    "autocannon": "^8.0.0",
+    "bcrypt": "^5.1.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

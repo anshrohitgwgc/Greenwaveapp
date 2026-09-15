@@ -30,12 +30,22 @@ React Native — but that only makes sense once there is a server for them to
 sync with, because a native app with per-device storage has the same limits
 this one does.
 
-## Signing in
+## Signing in (V2 — real server authentication)
 
-The first person to open it creates the administrator account. After that,
-**only email addresses in Staff can sign in** — anything else is refused.
+Sign-in is email **and password**, checked by the real GreenWave API
+(`app/api` in the `FULL-INFRA-V.0001` repo) against PostgreSQL — not by the
+browser. The first time the server has zero accounts, this app's gate offers
+"First time setting this up?", which creates exactly one administrator and
+then permanently disables itself; every other account is created by an
+administrator (`POST /users`), never by anyone signing themselves up.
 
-Three roles:
+The browser is never the authority: a password gets bcrypt-checked on the
+server, a JWT comes back, and that token — not anything typed into this
+page — is what every subsequent request is checked against. See
+`docs/V2_ARCHITECTURE.md` in the API repo for the full model.
+
+Three roles, enforced **server-side** on every request (the sidebar just
+hides buttons a role can't use — it isn't what stops them):
 
 | | Stock, weigh-in, photos, clock | Invoices, customers, materials, history | Staff, settings |
 |---|---|---|---|
@@ -43,11 +53,14 @@ Three roles:
 | **Manager** | ✅ | ✅ | |
 | **Administrator** | ✅ | ✅ | ✅ |
 
-**Be clear-eyed about this: it is a front door, not a lock.** With no server
-there is no password to verify — the app trusts the email typed in. It keeps
-the wrong people out of the interface and records who did what, but anyone
-who can open this browser could sign in as anybody. Real authentication
-arrives with the server.
+**Status note:** sign-in/sign-out, invoices, inventory, customers, materials,
+photos, time clock, staff, and history now all call the real API
+(`assets/api.js`) instead of local browser storage — see
+`docs/V2_IMPLEMENTATION.md` for exact status per area. None of this has been
+browser-tested yet (no display in the sandbox that implemented it) or run
+against a live Postgres/Redis/MinIO — see
+`docs/V2_PRODUCTION_MIGRATION_PLAN.md` before treating it as production-
+ready.
 
 ## Invoices *(Recycling only)*
 
@@ -96,18 +109,17 @@ when. Administrators and managers only.
 
 ## Where your data lives
 
-**In this browser, on this device.** Private, works offline, and gone if you
-clear site data. Nobody else on the team sees it — two people using this on two
-phones have two separate sets of records.
+**On the GreenWave server**, not this device. Invoices, inventory, customers,
+materials, photos, time clock and history are all stored in the team's shared
+Postgres/MinIO backend (`backend/`, see `docs/V2_ARCHITECTURE.md`) — two
+people using this on two phones see the same records, because they're both
+talking to the same server. Only your signed-in session and a few on-device
+preferences (which company/warehouse you last had open, invoice letterhead
+defaults) stay in this browser.
 
-**Settings → Export backup** downloads a `.json`. Do it regularly.
-
-Note the JSON does **not** include photos — they are far too large. Photos stay
-on the device that took them.
-
-That per-device limit is the real reason to move this onto your own servers.
-`greenwave-ops-brief.md` is the plan: Postgres on 192.168.1.22, MinIO for
-photos, the API nodes you already have.
+This is a change from earlier versions of this app, which kept everything in
+per-device browser storage — see `docs/V2_IMPLEMENTATION.md` for exactly what
+moved and when.
 
 ## Not built — and why
 
@@ -130,12 +142,14 @@ recycling and destruction, and the double-entry ledger.
 index.html              app shell and all views
 assets/app.css          styling, print layout, mobile
 assets/app.js           all logic
-assets/store.js         localStorage state
+assets/api.js           GreenWave API client (V2 — auth is wired; see Signing in above)
+assets/store.js         localStorage state (client cache, not server-authoritative — see V2 notes)
 assets/photos.js        IndexedDB photo storage
 assets/logo.png         your logo
 manifest.webmanifest    home-screen install
 sw.js                   offline cache
 serve.sh                local server for phone testing
+backend/                NestJS API, migrations, infra (see docs/REPOSITORY_ARCHITECTURE.md)
 ```
 
 No build step, no dependencies. Open it in Claude Code and extend it directly.

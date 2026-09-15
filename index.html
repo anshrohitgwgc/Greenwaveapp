@@ -7,14 +7,14 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Greenwave">
-<title>Greenwave Ops</title>
-<link rel="manifest" href="manifest.webmanifest?v=20260828_0200">
+<title>GreenWave Operations Platform</title>
+<link rel="manifest" href="manifest.webmanifest?v=20260829_213000">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="icon" href="assets/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/app.css?v=20260828_0200">
+<link rel="stylesheet" href="assets/app.css?v=20260829_213000">
 </head>
 <body>
 
@@ -28,6 +28,11 @@
   <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5.2l3.2 1.9"/></symbol>
   <symbol id="i-cam" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3.4 8.6h3.2L8.2 6h7.6l1.6 2.6h3.2v10.2H3.4z"/><circle cx="12" cy="13.6" r="3.3"/></symbol>
   <symbol id="i-history" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3.6 12a8.4 8.4 0 1 0 2.6-6.1M3.4 4.6v4.6h4.6"/><path d="M12 7.6V12l3 1.8"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></symbol>
+  <symbol id="i-truck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.6 4.6 4.6L19 6.6"/></symbol>
@@ -40,38 +45,56 @@
   <symbol id="i-out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.4 6.6V4.8a1.6 1.6 0 0 0-1.6-1.6H5.6A1.6 1.6 0 0 0 4 4.8v14.4a1.6 1.6 0 0 0 1.6 1.6h7.2a1.6 1.6 0 0 0 1.6-1.6v-1.8"/><path d="M9.6 12h10.8m0 0-3.2-3.2m3.2 3.2-3.2 3.2"/></symbol>
 </svg>
 
-<!-- ============ SIGN IN ============ -->
+<!-- ============ SIGN IN (CLEAN EMAIL-ONLY BUSINESS LOGIN) ============ -->
 <div class="gate" id="gate">
   <div class="gatecard">
-    <img src="assets/logo.png" alt="Greenwave Recycling Inc." class="gatelogo">
+    <div class="gateheader">
+      <div class="gatelogo-wrap">
+        <img src="assets/logo.png" alt="GreenWave Recycling Inc." class="gatelogo">
+      </div>
+      <div class="gatetitles">
+        <h1 class="brandtitle">GreenWave Recycling Inc.</h1>
+        <p class="brandsub">Operations Management Platform</p>
+      </div>
+    </div>
     <div id="gateBody">
-      <h1>Sign in</h1>
-      <p class="lead">Enter your work email to access Greenwave Ops.</p>
-      <form id="signForm">
+      <form id="signForm" novalidate>
         <div class="field">
-          <label for="gateEmail">Work email</label>
-          <input type="email" name="email" id="gateEmail" required placeholder="you@greenwaverecycling.ca" autocomplete="email">
+          <label for="gateEmail">Work Email</label>
+          <input type="email" name="email" id="gateEmail" required placeholder="name@company.com" autocomplete="email">
         </div>
-        <button type="submit" class="btn">Sign in</button>
+        <div class="field">
+          <label for="gatePassword">Password</label>
+          <div class="pw-wrapper">
+            <input type="password" name="password" id="gatePassword" required autocomplete="current-password" placeholder="••••••••">
+            <button type="button" class="pw-toggle" id="togglePasswordBtn" aria-label="Toggle password visibility">Show</button>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block" id="signSubmit">Sign In</button>
       </form>
       <div id="gateMsg"></div>
-      <div class="gatefoot">Only registered team members can sign in. Initial setup creates the administrator.</div>
+      <div class="gatefoot">
+        <span class="gate-secure-badge"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg> Secure Enterprise Portal</span>
+        <div>GreenWave Operations Platform. Authorized personnel only.</div>
+      </div>
       <noscript>
-        <div class="gatefoot" style="color:var(--crit);margin-top:10px">JavaScript is required to run Greenwave Ops. Please enable JavaScript in your browser.</div>
+        <div class="gatefoot" style="color:var(--crit);margin-top:10px">JavaScript is required to run GreenWave Ops. Please enable JavaScript.</div>
       </noscript>
     </div>
   </div>
 </div>
 
-<!-- ============ APP ============ -->
+<!-- ============ APP SHELL ============ -->
 <div class="app" id="app" hidden>
 
+  <!-- Left Rail Navigation -->
   <aside class="rail">
     <div class="brand">
-      <img src="assets/logo.png" alt="Greenwave Recycling Inc." class="raillogo">
+      <img src="assets/logo.png" alt="GreenWave" class="raillogo">
     </div>
 
-    <div class="entsw" role="group" aria-label="Company">
+    <!-- Company Entity Switcher -->
+    <div class="entsw" role="group" aria-label="Company Division">
       <button type="button" data-entity="recycling" aria-pressed="true">Recycling</button>
       <button type="button" data-entity="healthcare" aria-pressed="false">Healthcare</button>
     </div>
@@ -79,16 +102,18 @@
     <nav class="nav" id="nav">
       <span class="navlabel">Operations</span>
       <button type="button" class="navitem" data-view="inventory"><svg><use href="#i-box"></use></svg>Inventory</button>
-      <button type="button" class="navitem" data-view="intake"><svg><use href="#i-scale"></use></svg><span id="intakeNav">Weigh-in</span></button>
       <button type="button" class="navitem" data-view="photos"><svg><use href="#i-cam"></use></svg>Photos</button>
       <button type="button" class="navitem" data-view="timeclock"><svg><use href="#i-clock"></use></svg>Time clock</button>
+
+      <span class="navlabel">Communication</span>
+      <button type="button" class="navitem" data-view="chat"><svg><use href="#i-chat"></use></svg>Global Chat <span class="navchip" id="chatNavBadge" hidden>0</span></button>
 
       <span class="navlabel" data-only="recycling" data-role="admin,manager">Money</span>
       <button type="button" class="navitem" data-view="invoices" data-only="recycling" data-role="admin,manager"><svg><use href="#i-doc"></use></svg>Invoices</button>
 
       <span class="navlabel" data-role="admin,manager">Manage</span>
       <button type="button" class="navitem" data-view="customers" data-role="admin,manager"><svg><use href="#i-users"></use></svg>Customers</button>
-      <button type="button" class="navitem" data-view="products" data-role="admin,manager"><svg><use href="#i-tag"></use></svg><span id="productsNav">Materials</span></button>
+      <button type="button" class="navitem" data-view="products" data-role="admin,manager"><svg><use href="#i-tag"></use></svg><span id="productsNav">Materials Catalog</span></button>
       <button type="button" class="navitem" data-view="staff" data-role="admin"><svg><use href="#i-users"></use></svg>Staff</button>
       <button type="button" class="navitem" data-view="history" data-role="admin,manager"><svg><use href="#i-history"></use></svg>History</button>
       <button type="button" class="navitem" data-view="settings" data-role="admin"><svg><use href="#i-gear"></use></svg>Settings</button>
@@ -98,53 +123,162 @@
       <div class="who">
         <span class="avatar" id="meInitials"></span>
         <span class="whotext"><b id="meName"></b><i id="meRole"></i></span>
-        <button type="button" class="iconbtn" id="signOut" aria-label="Sign out"><svg><use href="#i-out"></use></svg></button>
+        <button type="button" class="iconbtn" id="signOut" aria-label="Sign out" title="Sign out"><svg><use href="#i-out"></use></svg></button>
       </div>
     </div>
   </aside>
 
+  <!-- Main View Area -->
   <main class="main">
     <header class="topbar">
       <button type="button" class="menubtn" id="menuBtn" aria-label="Menu"><svg><use href="#i-box"></use></svg></button>
+      
+      <!-- Top Multi-Warehouse Selector -->
       <div class="wh">
-        <label for="wh">Warehouse</label>
-        <select id="wh"></select>
+        <label for="wh">FACILITY</label>
+        <div class="wh-select-wrap">
+          <select id="wh" aria-label="Selected Warehouse"></select>
+        </div>
       </div>
+
       <span class="grow"></span>
+      <span class="onlinechip" id="onlineStaffChip" title="Active staff online">🟢 1 online</span>
       <span class="shiftchip" id="shiftChip" hidden></span>
-      <span class="taxnote" id="taxNote"></span>
     </header>
 
     <div class="scroll" id="scroll">
+
+      <!-- ============ INVENTORY DASHBOARD VIEW ============ -->
       <section class="view" id="v-inventory">
-        <div class="vhead"><div><h1>Inventory</h1><p id="invenSub"></p></div>
-          <button type="button" class="btn" data-goto="intake"><svg><use href="#i-plus"></use></svg><span id="invenCta">Record a load</span></button></div>
+        <div class="vhead">
+          <div>
+            <h1>Inventory Operations</h1>
+            <p id="invenSub">Live multi-warehouse inventory balances, container tracking, and transaction ledger.</p>
+          </div>
+          <div class="vactions">
+            <button type="button" class="btn btn-primary" id="btnReceiveStock"><svg><use href="#i-plus"></use></svg>Inbound</button>
+            <button type="button" class="btn btn-secondary" id="btnShipStock"><svg><use href="#i-truck"></use></svg>Outbound</button>
+            <button type="button" class="btn ghost" id="btnAdjustStock" data-role="admin,manager"><svg><use href="#i-scale"></use></svg>Adjust Stock</button>
+            <button type="button" class="btn ghost" id="btnExportInventory"><svg><use href="#i-download"></use></svg>Export CSV</button>
+          </div>
+        </div>
+
+        <!-- Inventory KPI Cards -->
+        <div class="kpi-grid" id="inventoryKpis">
+          <div class="kpi-card">
+            <span class="kpi-label">CURRENT STOCK</span>
+            <span class="kpi-value" id="kpiCurrentStock">0</span>
+            <span class="kpi-sub" id="kpiStockSub">Total across all materials</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">INBOUND RECEIVED</span>
+            <span class="kpi-value text-success" id="kpiInboundTotal">0</span>
+            <span class="kpi-sub">Total inbound stock</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">OUTBOUND SHIPPED</span>
+            <span class="kpi-value text-warning" id="kpiOutboundTotal">0</span>
+            <span class="kpi-sub">Total dispatched stock</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">ADJUSTMENTS</span>
+            <span class="kpi-value text-accent" id="kpiAdjustmentTotal">0</span>
+            <span class="kpi-sub">Net recount adjustments</span>
+          </div>
+        </div>
+
+        <!-- Inventory Section Sub-Navigation & Filters -->
+        <div class="inven-toolbar">
+          <div class="inven-tabs" role="tablist">
+            <button type="button" class="inven-tab active" data-tab="balances" role="tab" aria-selected="true">Stock Balances</button>
+            <button type="button" class="inven-tab" data-tab="transactions" role="tab" aria-selected="false">Transactions Ledger</button>
+            <button type="button" class="inven-tab" data-tab="containers" role="tab" aria-selected="false">Containers &amp; Loading</button>
+          </div>
+          <div class="inven-filters">
+            <div class="search-wrap">
+              <svg class="search-ico"><use href="#i-search"></use></svg>
+              <input type="search" id="invenSearch" placeholder="Search order #, container #, seal #, product...">
+            </div>
+            <select id="invenProductFilter">
+              <option value="">All Products / Materials</option>
+            </select>
+            <select id="invenTypeFilter">
+              <option value="">All Transaction Types</option>
+              <option value="inbound">Inbound (IN)</option>
+              <option value="outbound">Outbound (OUT)</option>
+              <option value="adjustment">Adjustment (ADJ)</option>
+            </select>
+          </div>
+        </div>
+
         <div id="invenBody"></div>
       </section>
 
+      <!-- ============ GLOBAL STAFF CHAT VIEW ============ -->
+      <section class="view" id="v-chat">
+        <div class="chat-container">
+          <div class="chat-header">
+            <div>
+              <h2>Global Staff Chat</h2>
+              <span class="chat-presence" id="chatPresenceText">All authenticated staff members</span>
+            </div>
+            <div class="chat-header-actions">
+              <button type="button" class="btn ghost btn-sm" id="chatRefreshBtn" title="Refresh messages"><svg><use href="#i-history"></use></svg> Refresh</button>
+            </div>
+          </div>
+
+          <div class="chat-body" id="chatMessagesWrap">
+            <div class="chat-older-wrap" id="chatOlderWrap" hidden>
+              <button type="button" class="btn ghost btn-sm" id="btnLoadOlderChat">Load older messages</button>
+            </div>
+            <div class="chat-messages" id="chatMessagesList">
+              <div class="chat-empty">Loading messages…</div>
+            </div>
+          </div>
+
+          <div class="chat-composer-wrap">
+            <form id="chatForm" class="chat-composer">
+              <textarea id="chatInput" placeholder="Type a message to the team… (Enter to send, Shift+Enter for newline)" rows="1" required></textarea>
+              <button type="submit" class="btn btn-primary" id="chatSendBtn" aria-label="Send message">
+                <svg><use href="#i-send"></use></svg><span>Send</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ WEIGH-IN / INTAKE VIEW ============ -->
       <section class="view" id="v-intake">
         <div class="vhead"><div><h1 id="intakeTitle">Weigh-in</h1><p id="intakeSub"></p></div></div>
         <div id="intakeBody"></div>
       </section>
 
+      <!-- ============ PHOTOS VIEW ============ -->
       <section class="view" id="v-photos">
-        <div class="vhead"><div><h1>Photos</h1><p id="photoSub"></p></div>
-          <button type="button" class="btn" id="addPhoto"><svg><use href="#i-cam"></use></svg>Add photo</button></div>
+        <div class="vhead">
+          <div><h1>Photos</h1><p id="photoSub">Operational photos with GPS EXIF stripping and warehouse association.</p></div>
+          <button type="button" class="btn" id="addPhoto"><svg><use href="#i-cam"></use></svg>Add photo</button>
+        </div>
         <input type="file" id="photoFile" accept="image/*" capture="environment" multiple hidden>
         <div id="photoBody"></div>
       </section>
 
+      <!-- ============ TIME CLOCK VIEW ============ -->
       <section class="view" id="v-timeclock">
-        <div class="vhead"><div><h1>Time clock</h1><p id="clockSub"></p></div></div>
+        <div class="vhead"><div><h1>Time clock</h1><p id="clockSub">Clock in/out with warehouse association and live shift tracking.</p></div></div>
         <div id="clockBody"></div>
       </section>
 
+      <!-- ============ INVOICES VIEW ============ -->
       <section class="view" id="v-invoices">
-        <div class="vhead"><div><h1>Invoices</h1><p>Every field is free text — type over anything. Rebate lines subtract, so one document covers money owed both ways.</p></div>
-          <button type="button" class="btn" id="newInvoice"><svg><use href="#i-plus"></use></svg>New invoice</button></div>
+        <div class="vhead">
+          <div><h1>Invoices</h1><p>Every field is free text. Rebate lines subtract, covering both directions in one document.</p></div>
+          <button type="button" class="btn" id="newInvoice"><svg><use href="#i-plus"></use></svg>New invoice</button>
+        </div>
         <div id="invoiceList"></div>
       </section>
 
+      <!-- ============ INVOICE EDITOR VIEW ============ -->
       <section class="view" id="v-editor">
         <div class="vhead noprint">
           <div><button type="button" class="linkback" data-goto="invoices"><svg><use href="#i-back"></use></svg>All invoices</button>
@@ -157,62 +291,88 @@
         <div id="editorBody"></div>
       </section>
 
+      <!-- ============ CUSTOMERS VIEW ============ -->
       <section class="view" id="v-customers">
-        <div class="vhead"><div><h1>Customers</h1><p>Saved details to prefill an invoice. You can always type over them.</p></div>
-          <button type="button" class="btn" id="newCustomer"><svg><use href="#i-plus"></use></svg>Add customer</button></div>
+        <div class="vhead">
+          <div><h1>Customers</h1><p>Saved customer details to prefill invoices.</p></div>
+          <button type="button" class="btn" id="newCustomer"><svg><use href="#i-plus"></use></svg>Add customer</button>
+        </div>
         <div id="customerBody"></div>
       </section>
 
+      <!-- ============ MATERIALS / PRODUCTS VIEW ============ -->
       <section class="view" id="v-products">
-        <div class="vhead"><div><h1 id="prodTitle">Materials</h1><p id="prodSub"></p></div>
-          <button type="button" class="btn" id="newProduct"><svg><use href="#i-plus"></use></svg><span id="prodCta">Add material</span></button></div>
+        <div class="vhead">
+          <div><h1 id="prodTitle">Materials</h1><p id="prodSub">Catalog items and standard commodity pricing.</p></div>
+          <button type="button" class="btn" id="newProduct"><svg><use href="#i-plus"></use></svg><span id="prodCta">Add material</span></button>
+        </div>
         <div id="productBody"></div>
       </section>
 
+      <!-- ============ STAFF VIEW ============ -->
       <section class="view" id="v-staff">
-        <div class="vhead"><div><h1>Staff</h1><p>Only these email addresses can sign in. Nobody else gets past the front door.</p></div>
-          <button type="button" class="btn" id="newStaff"><svg><use href="#i-plus"></use></svg>Add staff</button></div>
+        <div class="vhead">
+          <div><h1>Staff Management</h1><p>Only administrators can create staff accounts and assign roles.</p></div>
+          <button type="button" class="btn" id="newStaff"><svg><use href="#i-plus"></use></svg>Add staff</button>
+        </div>
         <div id="staffBody"></div>
       </section>
 
+      <!-- ============ HISTORY / AUDIT VIEW ============ -->
       <section class="view" id="v-history">
-        <div class="vhead"><div><h1>History</h1><p>Everything anyone has done, newest first.</p></div></div>
+        <div class="vhead"><div><h1>History &amp; Audit Log</h1><p>Append-only operational audit trail, newest first.</p></div></div>
         <div id="historyBody"></div>
       </section>
 
+      <!-- ============ SETTINGS VIEW ============ -->
       <section class="view" id="v-settings">
-        <div class="vhead"><div><h1>Settings</h1><p>Company details appear on every invoice.</p></div></div>
+        <div class="vhead"><div><h1>Settings</h1><p>Company details and operational parameters.</p></div></div>
         <div id="settingsBody"></div>
       </section>
     </div>
 
-    <!-- mobile bottom bar -->
+    <!-- Mobile Bottom Navigation Bar -->
     <nav class="tabbar" id="tabbar"></nav>
   </main>
 </div>
 
+<!-- Toast Notifications -->
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+<!-- Generic Modal -->
 <div class="modalwrap" id="modalWrap" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-    <div class="modalhead"><h2 id="modalTitle"></h2>
-      <button type="button" class="iconbtn" id="modalClose" aria-label="Close"><svg><use href="#i-x"></use></svg></button></div>
-    <form id="modalForm" class="modalbody"></form>
+    <div class="modalhead">
+      <h2 id="modalTitle"></h2>
+      <button type="button" class="iconbtn" id="modalClose" aria-label="Close"><svg><use href="#i-x"></use></svg></button>
+    </div>
+    <form id="modalForm" class="modalbody" novalidate></form>
     <div class="modalfoot">
       <button type="button" class="btn ghost" id="modalCancel">Cancel</button>
-      <button type="submit" form="modalForm" class="btn" id="modalOk">Save</button>
+      <button type="submit" form="modalForm" class="btn btn-primary" id="modalOk">Save</button>
     </div>
   </div>
 </div>
 
+<!-- Photo Lightbox -->
 <div class="lightbox" id="lightbox" hidden>
   <button type="button" class="lbclose" id="lbClose" aria-label="Close"><svg><use href="#i-x"></use></svg></button>
   <img id="lbImg" alt="">
   <div class="lbmeta" id="lbMeta"></div>
 </div>
 
-<script src="assets/store.js?v=20260828_0200"></script>
-<script src="assets/photos.js?v=20260828_0200"></script>
-<script src="assets/app.js?v=20260828_0200"></script>
+<script src="assets/api.js?v=20260829_213000"></script>
+<script src="assets/store.js?v=20260829_213000"></script>
+<script src="assets/photos.js?v=20260829_213000"></script>
+<script src="assets/app.js?v=20260829_213000"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('/sw.js').then(function (reg) {
+      reg.update();
+    }).catch(function () {});
+  });
+}
+</script>
 </body>
 </html>

@@ -1,0 +1,198 @@
+/* ==========================================================================
+   GreenWave API Client (V2)
+
+   Full server-authoritative API client for GreenWave Operations.
+   Communicates with the NestJS API backend for authentication, multi-warehouse
+   inventory, containers, invoices, photos, timesheets, global chat, and audit.
+
+   Base URL defaults to same-origin with optional localStorage override:
+     localStorage.setItem('greenwave.apiBase', 'http://localhost:3000')
+
+   The JWT token is securely kept in sessionStorage.
+   ========================================================================== */
+(function (global) {
+  'use strict';
+
+  var TOKEN_KEY = 'greenwave.session.token';
+
+  function baseUrl() {
+    try {
+      var override = global.localStorage.getItem('greenwave.apiBase');
+      if (override) return override.replace(/\/+$/, '');
+    } catch (e) { /* localStorage unavailable in private modes */ }
+    return ''; // same-origin
+  }
+
+  function getToken() {
+    try { return global.sessionStorage.getItem(TOKEN_KEY); } catch (e) { return null; }
+  }
+  function setToken(t) {
+    try {
+      if (t) global.sessionStorage.setItem(TOKEN_KEY, t);
+      else global.sessionStorage.removeItem(TOKEN_KEY);
+    } catch (e) { /* ignore */ }
+  }
+
+  function handleResponse(res) {
+    return res.text().then(function (text) {
+      var data = null;
+      try { data = text ? JSON.parse(text) : null; } catch (e) { /* non-JSON response */ }
+      if (!res.ok) {
+        var err = new Error((data && data.message) || ('Request failed (' + res.status + ')'));
+        err.status = res.status;
+        err.body = data;
+        throw err;
+      }
+      return data;
+    });
+  }
+
+  function networkError() {
+    var err = new Error('Unable to connect to GreenWave services. Please try again.');
+    err.status = 0;
+    throw err;
+  }
+
+  function request(method, path, body) {
+    var headers = { 'Content-Type': 'application/json' };
+    var token = getToken();
+    if (token) headers.Authorization = 'Bearer ' + token;
+
+    return global.fetch(baseUrl() + path, {
+      method: method,
+      headers: headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined
+    }).then(handleResponse, networkError);
+  }
+
+  function upload(path, formData) {
+    var headers = {};
+    var token = getToken();
+    if (token) headers.Authorization = 'Bearer ' + token;
+
+    return global.fetch(baseUrl() + path, {
+      method: 'POST',
+      headers: headers,
+      body: formData
+    }).then(handleResponse, networkError);
+  }
+
+  var Api = {
+    isAuthenticated: function () { return !!getToken(); },
+    clearSession: function () { setToken(null); },
+    getToken: getToken,
+    getBaseUrl: baseUrl,
+
+    // Authentication
+    login: function (email, password) {
+      return request('POST', '/auth/login', { email: email, password: password }).then(function (res) {
+        setToken(res.access_token);
+        return res.user;
+      });
+    },
+
+    me: function () { return request('GET', '/auth/me'); },
+
+    // Staff / Users
+    listUsers: function () { return request('GET', '/users'); },
+    getUser: function (id) { return request('GET', '/users/' + id); },
+    createUser: function (data) { return request('POST', '/users', data); },
+    updateUser: function (id, data) { return request('PATCH', '/users/' + id, data); },
+    getUserWarehouses: function (userId) { return request('GET', '/users/' + userId + '/warehouses'); },
+    assignUserWarehouses: function (userId, warehouseIds) { return request('PUT', '/users/' + userId + '/warehouses', { warehouseIds: warehouseIds }); },
+
+    // Warehouses
+    listWarehouses: function (includeInactive) {
+      return request('GET', '/warehouses' + qs({ includeInactive: includeInactive ? 'true' : undefined }));
+    },
+    createWarehouse: function (data) { return request('POST', '/warehouses', data); },
+    updateWarehouse: function (id, data) { return request('PATCH', '/warehouses/' + id, data); },
+
+    // Customers
+    listCustomers: function (warehouseId) { return request('GET', '/customers' + qs({ warehouseId: warehouseId })); },
+    createCustomer: function (data) { return request('POST', '/customers', data); },
+    updateCustomer: function (id, data) { return request('PATCH', '/customers/' + id, data); },
+
+    // Materials
+    listMaterials: function (includeInactive) {
+      return request('GET', '/materials' + qs({ includeInactive: includeInactive ? 'true' : undefined }));
+    },
+    createMaterial: function (data) { return request('POST', '/materials', data); },
+    updateMaterial: function (id, data) { return request('PATCH', '/materials/' + id, data); },
+
+    // Containers
+    listContainers: function (params) {
+      if (typeof params === 'string') params = { warehouseId: params };
+      return request('GET', '/containers' + qs(params));
+    },
+    createContainer: function (data) { return request('POST', '/containers', data); },
+
+    // Inventory Ledger & Balances
+    listInventoryTransactions: function (params) {
+      return request('GET', '/inventory/transactions' + qs(params));
+    },
+    getInventoryTransaction: function (id) {
+      return request('GET', '/inventory/transactions/' + id);
+    },
+    createInventoryTransaction: function (data) {
+      return request('POST', '/inventory/transactions', data);
+    },
+    getInventoryBalances: function (warehouseId) {
+      return request('GET', '/inventory/balances' + qs({ warehouseId: warehouseId }));
+    },
+
+    // Global Staff Chat
+    listChatMessages: function (params) {
+      return request('GET', '/chat/messages' + qs(params));
+    },
+    sendChatMessage: function (message) {
+      return request('POST', '/chat/messages', { message: message });
+    },
+    getOnlineStaff: function () {
+      return request('GET', '/chat/online');
+    },
+    chatStreamUrl: function () {
+      return baseUrl() + '/chat/stream?token=' + encodeURIComponent(getToken() || '');
+    },
+
+    // Invoices
+    listInvoices: function (params) { return request('GET', '/invoices' + qs(params)); },
+    getInvoice: function (id) { return request('GET', '/invoices/' + id); },
+    createInvoice: function (data) { return request('POST', '/invoices', data); },
+    updateInvoice: function (id, data) { return request('PATCH', '/invoices/' + id, data); },
+    duplicateInvoice: function (id) { return request('POST', '/invoices/' + id + '/duplicate'); },
+
+    // Time clock
+    clockIn: function (warehouseId) { return request('POST', '/timesheets/clock-in', { warehouseId: warehouseId }); },
+    clockOut: function () { return request('POST', '/timesheets/clock-out'); },
+    currentShift: function () { return request('GET', '/timesheets/me/current'); },
+    shiftHistory: function (from, to) { return request('GET', '/timesheets/me/history' + qs({ from: from, to: to })); },
+    teamShifts: function () { return request('GET', '/timesheets/team'); },
+
+    // Photos
+    listPhotos: function (params) { return request('GET', '/photos' + qs(params)); },
+    getPhoto: function (id) { return request('GET', '/photos/' + id); },
+    uploadPhoto: function (file, meta) {
+      var fd = new FormData();
+      fd.append('file', file, file.name || 'photo.jpg');
+      Object.keys(meta || {}).forEach(function (k) {
+        if (meta[k] !== undefined && meta[k] !== null && meta[k] !== '') fd.append(k, meta[k]);
+      });
+      return upload('/photos', fd);
+    },
+    deletePhoto: function (id) { return request('DELETE', '/photos/' + id); },
+
+    // History / Audit
+    listAudit: function (params) { return request('GET', '/audit' + qs(params)); }
+  };
+
+  function qs(params) {
+    if (!params) return '';
+    var parts = Object.keys(params)
+      .filter(function (k) { return params[k] !== undefined && params[k] !== null && params[k] !== ''; })
+      .map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); });
+    return parts.length ? '?' + parts.join('&') : '';
+  }
+
+  global.GreenwaveApi = Api;
+})(window);

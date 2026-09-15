@@ -1,0 +1,65 @@
+name: GreenWave CI & Security Pipeline
+
+on:
+  push:
+    branches: [ main, development ]
+  pull_request:
+    branches: [ main, development ]
+
+jobs:
+  test-and-build:
+    name: Build, Test & Security Audit
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: greenwave_dev
+          POSTGRES_PASSWORD: localdevpass123
+          POSTGRES_DB: greenwave_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Root Dependencies
+        run: npm ci || npm install
+
+      - name: Run Unit & Security Tests
+        run: npm test
+
+      - name: Build Core API
+        run: |
+          cd app/api
+          npm ci || npm install
+          npm run build
+
+      - name: Build Web Frontend
+        run: |
+          cd app/web
+          npm ci || npm install
+          npm run build
