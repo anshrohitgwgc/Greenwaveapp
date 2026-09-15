@@ -485,7 +485,7 @@ describe('InventoryService', () => {
   });
 
   describe('TRANSACTION DETAILS & PHOTOS', () => {
-    it('retrieves complete transaction details with associated photos and presigned URLs', async () => {
+    it('retrieves complete transaction details with associated photos and secure URLs', async () => {
       const detail = await service.getTransactionById('tx-1', staffActor);
 
       expect(detail.id).toBe('tx-1');
@@ -496,9 +496,62 @@ describe('InventoryService', () => {
       expect(detail.weightValue).toBe(3658);
       expect(detail.weightUnit).toBe('kg');
       expect(detail.total).toBe(6);
+      expect(detail.containerNumber).toBe('MSMU6896930');
+      expect(detail.sealNumber).toBe('SEAL-99');
+      expect(detail.notes).toBe('Clean pallet batch');
+      expect(detail.date).toBeDefined();
+      expect(detail.time).toBeDefined();
       expect(detail.creatorName).toBe('Staff Member');
       expect(detail.photos).toHaveLength(1);
-      expect(detail.photos[0].url).toContain('signed=true');
+      expect(detail.photos[0].url).toBe('/api/photos/photo-1/view');
+      expect(detail.photos[0].thumbnailUrl).toBe(
+        '/api/photos/photo-1/thumbnail',
+      );
+      expect(detail.photos[0].downloadUrl).toBe('/api/photos/photo-1/download');
+    });
+
+    it('enforces RBAC and warehouse authorization on transaction detail fetch', async () => {
+      warehousesService.assertWarehouseAccess.mockRejectedValueOnce(
+        new ForbiddenException('Cross-warehouse access denied'),
+      );
+
+      await expect(
+        service.getTransactionById('tx-1', staffActor),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('throws NotFoundException when transaction does not exist', async () => {
+      transactionRepo.findOne.mockResolvedValueOnce(null);
+
+      await expect(
+        service.getTransactionById('nonexistent-tx', staffActor),
+      ).rejects.toThrow();
+    });
+
+    it('persists date when provided in createTransaction DTO', async () => {
+      const tx = await service.createTransaction(
+        {
+          warehouseId: 'w1',
+          materialId: 'm1',
+          type: 'inbound',
+          division: 'recycling',
+          unitType: 'pallet',
+          palletQty: 5,
+          date: '2026-09-10',
+          containerNumber: 'CONT-999',
+          sealNumber: 'SEAL-888',
+        },
+        staffActor,
+      );
+
+      expect(tx.createdAt).toBeInstanceOf(Date);
+      expect(tx.createdAt.toISOString()).toContain('2026-09-10');
+      expect(transactionRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          containerNumber: 'CONT-999',
+          sealNumber: 'SEAL-888',
+        }),
+      );
     });
   });
 });

@@ -1,4 +1,10 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as Minio from 'minio';
 
@@ -43,31 +49,73 @@ export class StorageService implements OnModuleInit {
     return this.bucket;
   }
 
+  validateObjectKey(objectKey: string): void {
+    if (!objectKey || typeof objectKey !== 'string') {
+      throw new BadRequestException('Storage object key is required');
+    }
+    if (
+      objectKey.includes('\\') ||
+      objectKey.includes('..') ||
+      objectKey.startsWith('/') ||
+      objectKey.endsWith('/') ||
+      !/^[a-zA-Z0-9_./-]+$/.test(objectKey)
+    ) {
+      throw new BadRequestException('Invalid storage object key');
+    }
+  }
+
   async upload(
     objectKey: string,
     buffer: Buffer,
     mimeType: string,
   ): Promise<void> {
+    this.validateObjectKey(objectKey);
     await this.client.putObject(this.bucket, objectKey, buffer, buffer.length, {
       'Content-Type': mimeType,
     });
   }
 
-  /**
-   * Never expose MinIO credentials to the browser — only short-lived signed
-   * URLs. Must be returned absolute (scheme + MINIO_ENDPOINT host + port):
-   * the signature MinIO validates on GET covers the `host` header
-   * (X-Amz-SignedHeaders=host), so stripping or rewriting the host after
-   * signing breaks the signature rather than just "hiding" it — the browser
-   * would fetch from its own page origin instead of MinIO and get a 404 (or,
-   * against a same-host reverse proxy, a 403 SignatureDoesNotMatch). The
-   * configured MINIO_ENDPOINT must therefore be a host the browser can
-   * actually reach, same as any other asset URL returned to the client.
-   */
+  async getObject(objectKey: string): Promise<NodeJS.ReadableStream> {
+    this.validateObjectKey(objectKey);
+    try {
+      return await this.client.getObject(this.bucket, objectKey);
+    } catch (err: unknown) {
+      const code = (err as Record<string, unknown>)?.code;
+      if (code === 'NoSuchKey' || code === 'NotFound') {
+        throw new NotFoundException('Object not found in storage');
+      }
+      throw err;
+    }
+  }
+
+  async statObject(objectKey: string): Promise<Minio.BucketItemStat> {
+    this.validateObjectKey(objectKey);
+    try {
+      return await this.client.statObject(this.bucket, objectKey);
+    } catch (err: unknown) {
+      const code = (err as Record<string, unknown>)?.code;
+      if (code === 'NoSuchKey' || code === 'NotFound') {
+        throw new NotFoundException('Object not found in storage');
+      }
+      throw err;
+    }
+  }
+
+  async objectExists(objectKey: string): Promise<boolean> {
+    try {
+      this.validateObjectKey(objectKey);
+      await this.client.statObject(this.bucket, objectKey);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async presignedGetUrl(
     objectKey: string,
     expirySeconds = 3600,
   ): Promise<string> {
+    this.validateObjectKey(objectKey);
     return this.client.presignedGetObject(
       this.bucket,
       objectKey,
@@ -76,6 +124,7 @@ export class StorageService implements OnModuleInit {
   }
 
   async delete(objectKey: string): Promise<void> {
+    this.validateObjectKey(objectKey);
     await this.client.removeObject(this.bucket, objectKey);
   }
 }

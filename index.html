@@ -1206,14 +1206,28 @@
 <!-- Photo Lightbox -->
 <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Photo viewer" hidden>
   <button type="button" class="lbclose" id="lbClose" aria-label="Close"><svg><use href="#i-x"></use></svg></button>
-  <img id="lbImg" alt="">
+  <button type="button" class="lb-nav lb-prev" id="lbPrev" aria-label="Previous photo" title="Previous photo (Left arrow)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+  </button>
+  <div class="lb-stage" id="lbStage">
+    <img id="lbImg" alt="Photo viewer">
+    <div class="lb-error" id="lbError" hidden>
+      <svg><use href="#i-alert"></use></svg>
+      <div class="lb-error-title">Photo unavailable</div>
+      <div class="lb-error-sub">The image could not be loaded from secure storage.</div>
+      <button type="button" class="btn btn-secondary btn-sm" id="lbRetry">Retry</button>
+    </div>
+  </div>
+  <button type="button" class="lb-nav lb-next" id="lbNext" aria-label="Next photo" title="Next photo (Right arrow)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+  </button>
   <div class="lbmeta" id="lbMeta"></div>
 </div>
 
-<script src="assets/api.js?v=20260913_financeops"></script>
-<script src="assets/store.js?v=20260913_financeops"></script>
-<script src="assets/photos.js?v=20260913_financeops"></script>
-<script src="assets/app.js?v=20260913_financeops"></script>
+<script src="assets/api.js?v=20260915_inventoryphotos"></script>
+<script src="assets/store.js?v=20260915_inventoryphotos"></script>
+<script src="assets/photos.js?v=20260915_inventoryphotos"></script>
+<script src="assets/app.js?v=20260915_inventoryphotos"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {

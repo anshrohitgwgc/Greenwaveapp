@@ -98,4 +98,8 @@ export class CreateInventoryTransactionDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsString()
+  date?: string;
 }

@@ -786,12 +786,18 @@
               var typeLabel = t.type === 'inbound' ? 'Inbound' : (t.type === 'outbound' ? 'Outbound' : 'Adjustment');
               var typeBadge = t.type === 'inbound' ? 'badge-received' : (t.type === 'outbound' ? 'badge-out' : 'badge-transit');
               var m = matById[t.materialId] || { name: t.materialName || 'Item' };
-              return '<tr><td class="mono" style="font-size:13px" title="' + esc(when(t.createdAt)) + '">' + esc(friendlyTime(t.createdAt)) + '</td>' +
+              return '<tr class="clickable-row" data-tx="' + esc(t.id) + '" title="Click to view full transaction details and photos" style="cursor:pointer"><td class="mono" style="font-size:13px" title="' + esc(when(t.createdAt)) + '">' + esc(friendlyTime(t.createdAt)) + '</td>' +
                 '<td><span class="badge ' + typeBadge + '">' + typeLabel + '</span></td>' +
                 '<td>' + esc(m.name) + '</td>' +
                 '<td class="num">' + num(Number(t.total) || 0) + '</td>' +
                 '<td style="color:var(--muted)">' + esc((me && t.createdBy === me.id) ? me.name : userName(t.createdBy)) + '</td></tr>';
             }).join('') + '</tbody></table></div>';
+
+          $$('#dashRecentActivity .clickable-row[data-tx]').forEach(function (row) {
+            row.addEventListener('click', function () {
+              openTransactionDetailModal(row.dataset.tx);
+            });
+          });
         }
       }
     }).catch(function (err) {
@@ -1130,10 +1136,16 @@
         photoHtml = '<div class="tx-photos-section" style="margin-top:16px">' +
           '<span class="tx-detail-label">Associated Photos (' + tx.photos.length + ') — Click thumbnail to open lightbox</span>' +
           '<div class="tx-photos-grid">' +
-          tx.photos.map(function (p) {
-            var fileName = p.originalFilename || p.filename || 'Photo';
-            return '<div class="tx-photo-card" data-url="' + esc(p.url) + '" data-meta="' + esc(fileName) + '">' +
-              '<img src="' + esc(p.url) + '" alt="Photo" class="tx-photo-img">' +
+          tx.photos.map(function (p, idx) {
+            var fileName = p.originalFilename || p.filename || ('Photo #' + (idx + 1));
+            var thumbUrl = p.thumbnailUrl || (p.id ? Api.photoThumbnailUrl(p.id) : (p.url || ''));
+            return '<div class="tx-photo-card" data-idx="' + idx + '" style="cursor:pointer">' +
+              '<div class="photo-thumb-wrap" style="height:110px">' +
+                '<img src="' + esc(thumbUrl) + '" alt="' + esc(fileName) + '" class="tx-photo-img" loading="lazy" onerror="this.style.display=\'none\';if(this.nextElementSibling)this.nextElementSibling.style.display=\'flex\';">' +
+                '<div class="photo-error-placeholder" style="display:none">' +
+                  '<span>⚠️ Photo unavailable</span>' +
+                '</div>' +
+              '</div>' +
               '<div class="tx-photo-meta">' + esc(fileName) + '</div>' +
               '</div>';
           }).join('') +
@@ -1162,11 +1174,25 @@
           '<div class="tx-detail-item" style="grid-column: 1 / -1"><span class="tx-detail-label">Size Breakdown (Whole BOX counts only)</span><span class="tx-detail-val mono">XL: ' + num(tx.xl) + '  |  L: ' + num(tx.l) + '  |  M: ' + num(tx.m) + '  |  S: ' + num(tx.s) + '</span></div>';
       }
 
+      var displayDate = '—';
+      var displayTime = '—';
+      if (tx.createdAt) {
+        var d = new Date(tx.createdAt);
+        if (!isNaN(d.getTime())) {
+          displayDate = tx.date || d.toISOString().split('T')[0];
+          displayTime = tx.time || d.toTimeString().split(' ')[0];
+        }
+      } else if (tx.date) {
+        displayDate = tx.date;
+        displayTime = tx.time || '—';
+      }
+
       var bodyHtml =
         '<div class="tx-detail-card">' +
           '<div class="tx-detail-grid">' +
-            '<div class="tx-detail-item"><span class="tx-detail-label">Transaction ID</span><span class="tx-detail-val mono" style="font-size:12px">' + esc(tx.id) + '</span></div>' +
-            '<div class="tx-detail-item"><span class="tx-detail-label">Recorded At</span><span class="tx-detail-val mono">' + esc(when(tx.createdAt)) + '</span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Inventory / Record ID</span><span class="tx-detail-val mono" style="font-size:12px">' + esc(tx.id) + '</span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Date</span><span class="tx-detail-val mono">📅 ' + esc(displayDate) + '</span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Time</span><span class="tx-detail-val mono">⏰ ' + esc(displayTime) + '</span></div>' +
             '<div class="tx-detail-item"><span class="tx-detail-label">Facility / Warehouse</span><span class="tx-detail-val">📍 ' + esc(tx.warehouseName || 'Assigned Facility') + (tx.warehouseCode ? ' (' + esc(tx.warehouseCode) + ')' : '') + '</span></div>' +
             '<div class="tx-detail-item"><span class="tx-detail-label">Division</span><span class="tx-detail-val">🏢 ' + esc(divLabel) + '</span></div>' +
             '<div class="tx-detail-item"><span class="tx-detail-label">Transaction Type</span><span class="tx-detail-val"><strong>' + esc(typeLabel) + '</strong></span></div>' +
@@ -1174,12 +1200,12 @@
             '<div class="tx-detail-item"><span class="tx-detail-label">' + (txIsRec ? 'Material' : 'Product') + '</span><span class="tx-detail-val"><strong>' + esc(tx.materialName || '—') + '</strong></span></div>' +
             '<div class="tx-detail-item"><span class="tx-detail-label">Unit Type</span><span class="tx-detail-val">' + esc(unitLabel) + '</span></div>' +
             divisionSpecificFields +
-            '<div class="tx-detail-item"><span class="tx-detail-label">Container Number</span><span class="tx-detail-val mono">' + esc(tx.containerNumber || '—') + '</span></div>' +
-            '<div class="tx-detail-item"><span class="tx-detail-label">Seal Number</span><span class="tx-detail-val mono">' + esc(tx.sealNumber || '—') + '</span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Container Number</span><span class="tx-detail-val mono"><strong>' + esc(tx.containerNumber || '—') + '</strong></span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Seal Number</span><span class="tx-detail-val mono"><strong>' + esc(tx.sealNumber || '—') + '</strong></span></div>' +
             '<div class="tx-detail-item"><span class="tx-detail-label">BL / Tracking Number</span><span class="tx-detail-val mono">' + esc(tx.blNumber || '—') + '</span></div>' +
             '<div class="tx-detail-item"><span class="tx-detail-label">Shipping Line / Carrier</span><span class="tx-detail-val">' + esc(tx.shippingLine || '—') + '</span></div>' +
             '<div class="tx-detail-item"><span class="tx-detail-label">ETA / Expected Date</span><span class="tx-detail-val mono">' + esc(tx.eta || '—') + '</span></div>' +
-            '<div class="tx-detail-item"><span class="tx-detail-label">Recorded By</span><span class="tx-detail-val">👤 ' + esc(tx.creatorName || ('Staff #' + tx.createdBy)) + '</span></div>' +
+            '<div class="tx-detail-item"><span class="tx-detail-label">Recorded By</span><span class="tx-detail-val">👤 ' + esc(tx.creatorName || (tx.createdBy ? ('Staff #' + tx.createdBy) : 'Staff')) + '</span></div>' +
             '<div class="tx-detail-item" style="grid-column: 1 / -1"><span class="tx-detail-label">Notes / Reason</span><span class="tx-detail-val">' + esc(tx.reason || tx.notes || '—') + '</span></div>' +
           '</div>' +
           photoHtml +
@@ -1191,16 +1217,8 @@
 
       $$('.tx-photo-card').forEach(function (card) {
         card.addEventListener('click', function () {
-          var url = card.dataset.url;
-          var meta = card.dataset.meta;
-          var lb = $('#lightbox');
-          var lbImg = $('#lbImg');
-          var lbMeta = $('#lbMeta');
-          if (lb && lbImg) {
-            lbImg.src = url;
-            if (lbMeta) lbMeta.textContent = meta;
-            lb.hidden = false;
-          }
+          var idx = Number(card.dataset.idx);
+          openLightbox(idx, tx.photos);
         });
       });
     }).catch(function (err) {
@@ -1239,7 +1257,7 @@
 
     var body = rows.map(function (c) {
       var stBadge = c.status === 'received' ? 'badge-received' : c.status === 'dispatched' ? 'badge-dispatched' : 'badge-transit';
-      return '<tr>' +
+      return '<tr class="clickable-row" data-container-no="' + esc(c.containerNumber || '') + '" data-order-no="' + esc(c.orderNumber || '') + '" title="Click to view transaction details">' +
         '<td class="mono"><strong>' + esc(c.containerNumber || '—') + '</strong></td>' +
         '<td class="mono">' + esc(c.sealNumber || '—') + '</td>' +
         '<td class="mono">' + esc(c.orderNumber || '—') + '</td>' +
@@ -1263,6 +1281,25 @@
         '<thead>' + head + '</thead>' +
         '<tbody>' + (body || '<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:30px">No container records found.</td></tr>') + '</tbody>' +
         '</table></div></div>';
+
+      $$('#invenBody .clickable-row[data-container-no]').forEach(function (row) {
+        row.addEventListener('click', function () {
+          var cNo = row.dataset.containerNo;
+          var oNo = row.dataset.orderNo;
+          var query = cNo || oNo;
+          if (!query) return;
+          Api.listInventoryTransactions({ search: query, limit: 1 }).then(function (res) {
+            var list = (res && res.items) || (Array.isArray(res) ? res : []);
+            if (list && list.length > 0) {
+              openTransactionDetailModal(list[0].id);
+            } else {
+              toast('No matching transaction record found for ' + query);
+            }
+          }).catch(function (err) {
+            toast('Could not load record: ' + (err.message || err));
+          });
+        });
+      });
     }
   }
 
@@ -1434,6 +1471,7 @@
             type: 'inbound',
             division: divName,
             unitType: unitType,
+            date: fd.date || undefined,
             weightValue: weightVal,
             weightUnit: weightUnit,
             photoId: photoId || undefined,
@@ -1643,6 +1681,7 @@
           type: 'outbound',
           division: divName,
           unitType: unitType,
+          date: fd.date || undefined,
           orderNumber: fd.orderNumber,
           reference: fd.orderNumber,
           containerNumber: fd.containerNumber || undefined,
@@ -2181,16 +2220,24 @@
           var by = (me && t.createdBy === me.id) ? me.name : (usersCache ? userName(t.createdBy) : ('Staff #' + t.createdBy));
           var kind = t.type === 'outbound' ? 'Out' : t.type === 'adjustment' ? 'Adj' : 'In';
           var badgeClass = t.type === 'outbound' ? 'badge-out' : t.type === 'adjustment' ? 'badge-adj' : 'badge-in';
-          return '<tr><td class="mono" style="font-size:13px">' + esc(when(t.createdAt).split(' ')[0]) + '</td><td>' + esc(m.name) + '</td>' +
+          return '<tr class="clickable-row" data-tx="' + esc(t.id) + '" title="Click to view full transaction details and photos" style="cursor:pointer"><td class="mono" style="font-size:13px">' + esc(when(t.createdAt).split(' ')[0]) + '</td><td>' + esc(m.name) + '</td>' +
             '<td class="mono" style="font-size:12.5px;color:var(--muted)">' + esc(t.orderNumber || t.reference || t.reason || '—') + '</td>' +
             '<td style="color:var(--ink-2)">' + esc(by) + '</td>' +
             '<td><span class="badge ' + badgeClass + '">' + kind + '</span></td>' +
             '<td class="num"><strong>' + esc(q) + '</strong></td></tr>';
         }).join('') + '</tbody></table></div></div>';
+
+      $$('#tkRecent .clickable-row[data-tx]').forEach(function (row) {
+        row.addEventListener('click', function () {
+          openTransactionDetailModal(row.dataset.tx);
+        });
+      });
     }).catch(function () { var host = $('#tkRecent'); if (host) host.innerHTML = ''; });
   }
 
   var photoCache = [];
+  var currentLbPhotos = [];
+  var currentLbIndex = 0;
 
   function renderPhotos() {
     var isAdmin = isAdminOrManager();
@@ -2205,7 +2252,7 @@
     loadUsersCache();
     var w = warehouse();
     Api.listPhotos({ warehouseId: w ? w.id : undefined }).then(function (all) {
-      photoCache = all;
+      photoCache = all || [];
       var used = photoCache.reduce(function (a, p) { return a + (p.sizeBytes || 0); }, 0);
       var pBody = $('#photoBody');
       if (!pBody) return;
@@ -2223,13 +2270,50 @@
         '</div>' +
         '<div class="photogrid pad" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(180px, 1fr));gap:12px">' +
         photoCache.map(function (p, i) {
-          return '<button type="button" class="photo btn ghost" data-photo="' + i + '" style="padding:0;overflow:hidden;text-align:left;display:flex;flex-direction:column">' +
-            '<img src="' + esc(p.url) + '" alt="' + esc(p.originalFilename || 'photo') + '" loading="lazy" style="width:100%;height:130px;object-fit:cover">' +
-            '<span style="padding:8px;font-size:11.5px;color:var(--muted)"><b>' + esc(userName(p.takenBy)) + '</b><br>' + esc(when(p.takenAt)) + '</span></button>';
+          var thumbUrl = p.thumbnailUrl || (p.id ? Api.photoThumbnailUrl(p.id) : (p.url || ''));
+          var fileName = p.originalFilename || p.filename || ('Photo #' + (i + 1));
+          var takenTime = p.takenAt || p.createdAt ? when(p.takenAt || p.createdAt) : '—';
+          return '<div class="photo-card-item card" style="overflow:hidden;text-align:left;display:flex;flex-direction:column">' +
+            '<div class="photo-thumb-wrap" data-photo-idx="' + i + '" style="cursor:pointer;position:relative;width:100%;height:130px;background:var(--panel-2,#182234);display:flex;align-items:center;justify-content:center;overflow:hidden">' +
+              '<img src="' + esc(thumbUrl) + '" alt="' + esc(fileName) + '" loading="lazy" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display=\'none\';if(this.nextElementSibling)this.nextElementSibling.style.display=\'flex\';">' +
+              '<div class="photo-error-placeholder" style="display:none;flex-direction:column;align-items:center;justify-content:center;padding:8px;text-align:center;color:var(--muted);font-size:11px;width:100%;height:100%">' +
+                '<span>⚠️ Photo unavailable</span>' +
+                '<button type="button" class="btn ghost btn-sm photo-retry-thumb" data-retry-idx="' + i + '" style="margin-top:6px;font-size:10.5px;padding:2px 8px">Retry</button>' +
+              '</div>' +
+            '</div>' +
+            '<div style="padding:8px;font-size:11.5px;color:var(--muted);display:flex;flex-direction:column;gap:2px">' +
+              '<span><strong style="color:var(--ink)">' + esc(userName(p.takenBy)) + '</strong></span>' +
+              '<span>' + esc(takenTime) + '</span>' +
+              (p.jobReference ? '<span class="mono" style="color:var(--brand);font-size:11px">Ref: ' + esc(p.jobReference) + '</span>' : '') +
+            '</div>' +
+          '</div>';
         }).join('') + '</div></div>';
 
-      $$('[data-photo]').forEach(function (b) {
-        b.addEventListener('click', function () { openLightbox(Number(b.dataset.photo)); });
+      $$('.photo-thumb-wrap[data-photo-idx]').forEach(function (wrap) {
+        wrap.addEventListener('click', function (e) {
+          if (e.target && e.target.classList.contains('photo-retry-thumb')) return;
+          openLightbox(Number(wrap.dataset.photoIdx), photoCache);
+        });
+      });
+
+      $$('.photo-retry-thumb').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var idx = Number(btn.dataset.retryIdx);
+          var p = photoCache[idx];
+          if (!p) return;
+          var wrap = btn.closest('.photo-thumb-wrap');
+          if (!wrap) return;
+          var img = wrap.querySelector('img');
+          var errBox = wrap.querySelector('.photo-error-placeholder');
+          if (img && errBox) {
+            errBox.style.display = 'none';
+            img.style.display = 'block';
+            var base = p.thumbnailUrl || (p.id ? Api.photoThumbnailUrl(p.id) : (p.url || ''));
+            var sep = base.indexOf('?') >= 0 ? '&' : '?';
+            img.src = base + sep + '_retry=' + Date.now();
+          }
+        });
       });
     }).catch(function (err) { apiErrorState('#photoBody', err); });
   }
@@ -2242,32 +2326,137 @@
     dialogOpenerEl = null;
   }
 
-  function openLightbox(i) {
-    var p = photoCache[i]; if (!p) return;
-    dialogOpenerEl = document.activeElement;
-    var lbImg = $('#lbImg'); if (lbImg) lbImg.src = p.url;
-    var lbMeta = $('#lbMeta');
-    if (lbMeta) {
-      lbMeta.innerHTML = esc(userName(p.takenBy)) + ' · ' + esc(when(p.takenAt)) +
-        ' · ' + bytes(p.sizeBytes) +
-        (p.jobReference ? '<br>' + esc(p.jobReference) : '') +
-        '<br><a href="' + esc(p.url) + '" download="' + esc(p.originalFilename || 'photo.jpg') + '" target="_blank" rel="noopener" class="btn ghost btn-sm" id="lbDownload" style="margin-top:12px;text-decoration:none;display:inline-flex">Download</a>' +
-        (me && me.role === 'admin' ? ' <button type="button" class="btn danger" id="lbDel" style="margin-top:12px">Delete this photo</button>' : '');
+  function openLightbox(indexOrPhotos, maybePhotos) {
+    if (Array.isArray(indexOrPhotos)) {
+      currentLbPhotos = indexOrPhotos;
+      currentLbIndex = typeof maybePhotos === 'number' ? maybePhotos : 0;
+    } else if (typeof indexOrPhotos === 'number') {
+      if (Array.isArray(maybePhotos)) {
+        currentLbPhotos = maybePhotos;
+        currentLbIndex = indexOrPhotos;
+      } else {
+        currentLbPhotos = photoCache || [];
+        currentLbIndex = indexOrPhotos;
+      }
+    } else {
+      return;
     }
+
+    if (!currentLbPhotos || !currentLbPhotos.length) return;
+    if (currentLbIndex < 0) currentLbIndex = 0;
+    if (currentLbIndex >= currentLbPhotos.length) currentLbIndex = currentLbPhotos.length - 1;
+
+    dialogOpenerEl = document.activeElement;
     var lb = $('#lightbox');
     if (lb) lb.hidden = false;
+    renderLightboxCurrent();
     var lbCloseBtn = $('#lbClose');
     if (lbCloseBtn) lbCloseBtn.focus();
+  }
+
+  function navigateLightbox(delta) {
+    if (!currentLbPhotos || currentLbPhotos.length <= 1) return;
+    var next = currentLbIndex + delta;
+    if (next < 0) next = currentLbPhotos.length - 1;
+    if (next >= currentLbPhotos.length) next = 0;
+    currentLbIndex = next;
+    renderLightboxCurrent();
+  }
+
+  function retryLightboxImage() {
+    var p = currentLbPhotos[currentLbIndex];
+    var lbImg = $('#lbImg');
+    var lbError = $('#lbError');
+    if (!p || !lbImg) return;
+    if (lbError) lbError.hidden = true;
+    lbImg.hidden = false;
+    var viewUrl = p.id ? Api.photoUrl(p.id, 'view') : (p.url || '');
+    var sep = viewUrl.indexOf('?') >= 0 ? '&' : '?';
+    lbImg.src = viewUrl + sep + '_retry=' + Date.now();
+  }
+
+  function renderLightboxCurrent() {
+    var p = currentLbPhotos[currentLbIndex];
+    if (!p) return;
+
+    var lbImg = $('#lbImg');
+    var lbError = $('#lbError');
+    var lbMeta = $('#lbMeta');
+    var lbPrev = $('#lbPrev');
+    var lbNext = $('#lbNext');
+
+    if (lbPrev) lbPrev.hidden = currentLbPhotos.length <= 1;
+    if (lbNext) lbNext.hidden = currentLbPhotos.length <= 1;
+
+    if (lbError) lbError.hidden = true;
+    if (lbImg) {
+      lbImg.hidden = false;
+      lbImg.onload = function () {
+        if (lbError) lbError.hidden = true;
+      };
+      lbImg.onerror = function () {
+        lbImg.hidden = true;
+        if (lbError) lbError.hidden = false;
+      };
+      var viewUrl = p.id ? Api.photoUrl(p.id, 'view') : (p.url || '');
+      lbImg.src = viewUrl;
+    }
+
+    var downloadUrl = p.id ? Api.photoDownloadUrl(p.id) : (p.downloadUrl || p.url || '');
+    var fileName = p.originalFilename || p.filename || ('photo_' + (p.id ? p.id.slice(0, 8) : (currentLbIndex + 1)) + '.jpg');
+
+    var counterHtml = currentLbPhotos.length > 1
+      ? '<span class="lb-counter" style="margin-right:8px;font-weight:600">Photo ' + (currentLbIndex + 1) + ' of ' + currentLbPhotos.length + '</span> · '
+      : '';
+
+    var uploader = p.takenBy ? userName(p.takenBy) : (p.creatorName || (p.createdBy ? ('Staff #' + p.createdBy) : 'Staff'));
+    var takenTime = p.takenAt || p.createdAt ? when(p.takenAt || p.createdAt) : '';
+    var sizeStr = p.sizeBytes ? (' · ' + bytes(p.sizeBytes)) : '';
+
+    var recordBtnHtml = '';
+    if (p.jobReference) {
+      recordBtnHtml = ' <button type="button" class="btn ghost btn-sm" id="lbViewRecord" style="margin-top:12px;margin-left:8px">View Record (' + esc(p.jobReference) + ')</button>';
+    }
+
+    if (lbMeta) {
+      lbMeta.innerHTML =
+        counterHtml + esc(uploader) + (takenTime ? ' · ' + esc(takenTime) : '') + sizeStr +
+        (p.jobReference ? '<br><span class="mono" style="font-size:12px">Ref: ' + esc(p.jobReference) + '</span>' : '') +
+        '<div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+          '<a href="' + esc(downloadUrl) + '" download="' + esc(fileName) + '" class="btn ghost btn-sm" id="lbDownload" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px"><svg style="width:14px;height:14px"><use href="#i-download"></use></svg> Download</a>' +
+          recordBtnHtml +
+          (me && me.role === 'admin' && p.id ? ' <button type="button" class="btn danger btn-sm" id="lbDel" style="margin-top:12px">Delete</button>' : '') +
+        '</div>';
+    }
+
+    var viewRecordBtn = $('#lbViewRecord');
+    if (viewRecordBtn && p.jobReference) {
+      viewRecordBtn.addEventListener('click', function () {
+        closeLightbox();
+        Api.listInventoryTransactions({ search: p.jobReference, limit: 1 }).then(function (res) {
+          var list = (res && res.items) || (Array.isArray(res) ? res : []);
+          if (list && list.length > 0) {
+            openTransactionDetailModal(list[0].id);
+          } else {
+            toast('No inventory transaction found for reference ' + p.jobReference);
+          }
+        }).catch(function (err) {
+          toast('Could not load record: ' + (err.message || err));
+        });
+      });
+    }
 
     var del = $('#lbDel');
-    if (del) del.addEventListener('click', function () {
-      if (!confirm('Delete this photo permanently?')) return;
-      Api.deletePhoto(p.id).then(function () {
-        closeLightbox();
-        renderPhotos();
-        toast('Photo deleted.');
-      }).catch(function (err) { toast(err.message || 'Could not delete photo.'); });
-    });
+    if (del && p.id) {
+      del.addEventListener('click', function () {
+        if (!confirm('Delete this photo permanently?')) return;
+        Api.deletePhoto(p.id).then(function () {
+          closeLightbox();
+          renderPhotos();
+          toast('Photo deleted.');
+        }).catch(function (err) { toast(err.message || 'Could not delete photo.'); });
+      });
+    }
   }
 
   function addPhotos(files) {
@@ -5509,6 +5698,12 @@
     if (photoFileEl) photoFileEl.addEventListener('change', function (e) { addPhotos(e.target.files); });
     var lbCloseBtn = $('#lbClose');
     if (lbCloseBtn) lbCloseBtn.addEventListener('click', closeLightbox);
+    var lbPrevBtn = $('#lbPrev');
+    if (lbPrevBtn) lbPrevBtn.addEventListener('click', function () { navigateLightbox(-1); });
+    var lbNextBtn = $('#lbNext');
+    if (lbNextBtn) lbNextBtn.addEventListener('click', function () { navigateLightbox(1); });
+    var lbRetryBtn = $('#lbRetry');
+    if (lbRetryBtn) lbRetryBtn.addEventListener('click', retryLightboxImage);
 
     document.addEventListener('keydown', function (e) {
       var lb = $('#lightbox');
@@ -5521,6 +5716,16 @@
         if (lbOpen) { closeLightbox(); return; }
         var modalCloseBtn = $('#modalClose'); if (modalCloseBtn) modalCloseBtn.click();
         return;
+      }
+      if (lbOpen) {
+        if (e.key === 'ArrowLeft') {
+          navigateLightbox(-1);
+          return;
+        }
+        if (e.key === 'ArrowRight') {
+          navigateLightbox(1);
+          return;
+        }
       }
       if (e.key === 'Tab') {
         trapFocus(lbOpen ? lb : modalWrap, e);
@@ -5921,7 +6126,7 @@
       Api.listPayments({ status: payFilterState === 'all' ? undefined : payFilterState, q: paySearchState || undefined })
     ]).then(function (results) {
       var summary = results[0];
-      var payments = results[1] || [];
+      var payments = (results[1] && results[1].items) ? results[1].items : (Array.isArray(results[1]) ? results[1] : []);
 
       if (summary) {
         var elS = $('#kpiPaySettled'); if (elS) elS.textContent = money(summary.settledTotalMinor || 0);
@@ -5940,30 +6145,55 @@
         var statusLabel = p.status || 'CREATED';
         if (p.status === 'SUCCEEDED') { statusCls = 'badge-paid'; statusLabel = 'SUCCEEDED'; }
         else if (p.status === 'REFUNDED') { statusCls = 'badge-refunded'; statusLabel = 'REFUNDED'; }
+        else if (p.status === 'PARTIALLY_REFUNDED') { statusCls = 'badge-refunded'; statusLabel = 'PARTIAL REFUND'; }
         else if (p.status === 'FAILED') { statusCls = 'badge-failed'; statusLabel = 'FAILED'; }
         else if (p.status === 'PROCESSING') { statusCls = 'badge-pending'; statusLabel = 'PROCESSING'; }
+        else if (p.status === 'CANCELED') { statusCls = 'badge-neutral'; statusLabel = 'CANCELED'; }
 
-        var canRefund = isAdminOrManager() && p.status === 'SUCCEEDED';
+        var amtMinor = p.amountMinor != null ? p.amountMinor : Math.round((Number(p.amount) || 0) * 100);
+        var refMinor = p.refundedMinor || 0;
+        var remMinor = Math.max(0, amtMinor - refMinor);
+        var canRefund = (me && (me.role === 'admin' || (me.permissions && me.permissions.indexOf('payments:refund') !== -1))) && (p.status === 'SUCCEEDED' || p.status === 'PARTIALLY_REFUNDED') && remMinor > 0;
         var refundBtn = canRefund ?
-          '<button type="button" class="btn ghost btn-sm btn-refund" data-pay-id="' + esc(p.id) + '" data-pay-amount="' + esc(p.amount) + '" data-pay-curr="' + esc(p.currency || 'CAD') + '">Refund</button>' : '';
+          '<button type="button" class="btn ghost btn-sm btn-refund" data-pay-id="' + esc(p.id) + '" data-pay-rem-minor="' + remMinor + '" data-pay-curr="' + esc(p.currency || 'CAD') + '" title="Issue Stripe refund">Refund</button>' : '';
 
         var copyBtn = p.paymentToken ?
           '<button type="button" class="btn ghost btn-sm btn-copylink" data-token="' + esc(p.paymentToken) + '" title="Copy customer payment link">Copy Link</button>' : '';
 
+        var detailBtn = '<button type="button" class="btn ghost btn-sm btn-pay-detail" data-pay-id="' + esc(p.id) + '" title="View Stripe and ledger details">Details</button>';
+
+        var feeNetDisplay = (p.feeMinor != null && p.netMinor != null) ?
+          '<span style="font-size:12px;color:var(--muted)">Fee: ' + money(p.feeMinor) + '<br>Net: ' + money(p.netMinor) + '</span>' :
+          '<span style="color:var(--muted)">—</span>';
+
+        var refundInfoDisplay = '<span style="color:var(--muted)">—</span>';
+        if (p.status === 'FAILED' && p.failureReason) {
+          refundInfoDisplay = '<span class="text-crit" style="font-size:12px;display:block" title="' + esc(p.failureReason) + '">' + esc(p.failureReason.slice(0, 24)) + '</span>';
+        } else if (refMinor > 0) {
+          refundInfoDisplay = '<span class="text-warning" style="font-size:12px;font-weight:600">Refunded: ' + money(refMinor) + '</span>';
+        }
+
+        var stripeIdDisplay = p.providerPaymentId ?
+          '<code class="mono" style="font-size:11px">' + esc(p.providerPaymentId) + '</code>' :
+          '<span style="color:var(--muted)">—</span>';
+
         return '<tr>' +
-          '<td class="mono"><strong>' + esc((p.providerPaymentId || p.id).slice(0, 18)) + '</strong></td>' +
           '<td>' + (p.invoiceNumber ? '<a href="#invoices" class="link-inv" data-inv-id="' + esc(p.invoiceId) + '">#' + esc(p.invoiceNumber) + '</a>' : (p.invoiceId ? '#' + esc(p.invoiceId.slice(0, 8)) : '—')) + '</td>' +
           '<td>' + esc(p.customerName || (p.metadata && p.metadata.customerName) || 'Customer') + '</td>' +
-          '<td class="mono" style="font-weight:600">' + moneyDollars(p.amount) + ' <small>' + esc(p.currency || 'CAD') + '</small></td>' +
+          '<td class="mono" style="font-weight:600">' + money(amtMinor) + ' <small>' + esc(p.currency || 'CAD') + '</small></td>' +
           '<td><span class="badge ' + statusCls + '">' + statusLabel + '</span></td>' +
-          '<td class="mono">' + ddmmyyyy(p.createdAt) + '</td>' +
-          '<td style="text-align:right;white-space:nowrap">' + copyBtn + ' ' + refundBtn + '</td>' +
+          '<td class="mono">' + ddmmyyyy(p.paidAt || p.createdAt) + '</td>' +
+          '<td>' + esc(p.paymentMethodDisplay || p.paymentMethodType || '—') + '</td>' +
+          '<td>' + stripeIdDisplay + '</td>' +
+          '<td>' + feeNetDisplay + '</td>' +
+          '<td>' + refundInfoDisplay + '</td>' +
+          '<td style="text-align:right;white-space:nowrap">' + detailBtn + ' ' + copyBtn + ' ' + refundBtn + '</td>' +
         '</tr>';
       }).join('');
 
       host.innerHTML =
         '<div class="card"><div class="tablewrap"><table class="table">' +
-          '<thead><tr><th>Reference</th><th>Invoice</th><th>Customer</th><th>Amount</th><th>Status</th><th>Date</th><th style="text-align:right">Actions</th></tr></thead>' +
+          '<thead><tr><th>Invoice</th><th>Customer</th><th>Amount</th><th>Status</th><th>Date</th><th>Method</th><th>Stripe Payment ID</th><th>Fee / Net</th><th>Refund / Info</th><th style="text-align:right">Actions</th></tr></thead>' +
           '<tbody>' + rows + '</tbody>' +
         '</table></div></div>';
 
@@ -5978,17 +6208,75 @@
         };
       });
 
+      $$('.btn-pay-detail', host).forEach(function (btn) {
+        btn.onclick = function () {
+          var pId = btn.dataset.payId;
+          Api.getPayment(pId).then(function (data) {
+            var p = data.payment || {};
+            var refunds = data.refunds || [];
+            var events = data.providerEvents || [];
+
+            var refundRows = refunds.length ? refunds.map(function (r) {
+              return '<tr><td class="mono">' + esc(r.providerRefundId || r.id.slice(0, 8)) + '</td>' +
+                '<td>' + money(r.amountMinor) + ' ' + esc(r.currency) + '</td>' +
+                '<td><span class="badge ' + (r.status === 'SUCCEEDED' ? 'badge-paid' : 'badge-pending') + '">' + esc(r.status) + '</span></td>' +
+                '<td>' + esc(r.reason || '—') + '</td>' +
+                '<td class="mono">' + ddmmyyyy(r.createdAt) + '</td></tr>';
+            }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--muted)">No refunds issued for this payment.</td></tr>';
+
+            var eventRows = events.length ? events.map(function (ev) {
+              return '<tr><td class="mono" style="font-size:11px">' + esc(ev.providerEventId) + '</td>' +
+                '<td class="mono" style="font-size:11px">' + esc(ev.eventType) + '</td>' +
+                '<td><span class="badge ' + (ev.status === 'PROCESSED' ? 'badge-paid' : 'badge-neutral') + '">' + esc(ev.status) + '</span></td>' +
+                '<td class="mono">' + ddmmyyyy(ev.receivedAt) + '</td></tr>';
+            }).join('') : '<tr><td colspan="4" style="text-align:center;color:var(--muted)">No webhook events recorded.</td></tr>';
+
+            var html =
+              '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;font-size:13px">' +
+                '<div><strong>Stripe Payment ID:</strong> <code class="mono" style="font-size:12px">' + esc(p.providerPaymentId || '—') + '</code></div>' +
+                '<div><strong>Stripe Charge ID:</strong> <code class="mono" style="font-size:12px">' + esc(p.providerChargeId || '—') + '</code></div>' +
+                '<div><strong>Invoice:</strong> #' + esc(p.invoiceNumber || '—') + '</div>' +
+                '<div><strong>Customer:</strong> ' + esc(p.customerName || '—') + '</div>' +
+                '<div><strong>Payment Method:</strong> ' + esc(p.paymentMethodDisplay || p.paymentMethodType || 'Credit / Debit Card') + '</div>' +
+                '<div><strong>Gross Amount:</strong> ' + money(p.amountMinor) + ' ' + esc(p.currency || 'CAD') + '</div>' +
+                '<div><strong>Stripe Processing Fee:</strong> ' + (p.feeMinor != null ? money(p.feeMinor) : '—') + '</div>' +
+                '<div><strong>Net Settlement:</strong> ' + (p.netMinor != null ? money(p.netMinor) : '—') + '</div>' +
+                '<div><strong>Total Refunded:</strong> ' + money(p.refundedMinor || 0) + '</div>' +
+                '<div><strong>Remaining Refundable:</strong> ' + money(p.refundableMinor != null ? p.refundableMinor : (p.amountMinor - (p.refundedMinor || 0))) + '</div>' +
+                '<div><strong>Status:</strong> <span class="badge badge-paid">' + esc(p.status) + '</span></div>' +
+                '<div><strong>Date Paid:</strong> ' + (p.paidAt ? ddmmyyyy(p.paidAt) : '—') + '</div>' +
+                (p.failureReason ? '<div style="grid-column:1/-1" class="text-crit"><strong>Failure Reason:</strong> ' + esc(p.failureReason) + '</div>' : '') +
+              '</div>' +
+              '<h4 style="margin:16px 0 8px;font-size:13px;font-weight:700">Refund History</h4>' +
+              '<div class="tablewrap"><table class="table" style="font-size:12px">' +
+                '<thead><tr><th>Refund ID</th><th>Amount</th><th>Status</th><th>Reason</th><th>Date</th></tr></thead>' +
+                '<tbody>' + refundRows + '</tbody>' +
+              '</table></div>' +
+              '<h4 style="margin:16px 0 8px;font-size:13px;font-weight:700">Stripe Webhook Audit History</h4>' +
+              '<div class="tablewrap"><table class="table" style="font-size:12px">' +
+                '<thead><tr><th>Event ID</th><th>Type</th><th>Status</th><th>Received</th></tr></thead>' +
+                '<tbody>' + eventRows + '</tbody>' +
+              '</table></div>';
+
+            openModal('Payment & Stripe Provider Details', html, null, { okLabel: 'Close', okClass: 'btn-secondary' });
+          }).catch(function (err) {
+            toast(err.message || 'Could not load payment details');
+          });
+        };
+      });
+
       $$('.btn-refund', host).forEach(function (btn) {
         btn.onclick = function () {
           var pId = btn.dataset.payId;
-          var pAmt = btn.dataset.payAmount;
-          var pCurr = btn.dataset.payCurr;
+          var pCurr = btn.dataset.payCurr || 'CAD';
+          var pRemMinor = Number(btn.dataset.payRemMinor || 0);
+          var pRemDollars = (pRemMinor / 100).toFixed(2);
 
           openModal('Issue Payment Refund',
             '<div class="field">' +
               '<label>Refund Amount (' + esc(pCurr) + ')</label>' +
-              '<input type="number" step="0.01" min="0.01" max="' + esc(pAmt) + '" name="amount" value="' + esc(pAmt) + '" required>' +
-              '<small style="color:var(--muted)">Original charge: ' + moneyDollars(pAmt) + ' ' + esc(pCurr) + '</small>' +
+              '<input type="number" step="0.01" min="0.01" max="' + esc(pRemDollars) + '" name="amount" value="' + esc(pRemDollars) + '" required>' +
+              '<small style="color:var(--muted)">Max refundable: $' + esc(pRemDollars) + ' ' + esc(pCurr) + '</small>' +
             '</div>' +
             '<div class="field">' +
               '<label>Reason for Refund</label>' +
@@ -6000,10 +6288,15 @@
             '</div>',
             function (fd) {
               var minor = Math.round(Number(fd.amount) * 100);
-              if (!minor || minor <= 0) { toast('Please enter a valid refund amount.'); return Promise.reject(); }
+              if (!minor || minor <= 0 || minor > pRemMinor) {
+                toast('Please enter a valid refund amount up to $' + pRemDollars);
+                return Promise.reject();
+              }
               return Api.refundPayment(pId, minor, fd.reason).then(function () {
-                toast('Refund issued successfully.');
+                toast('Refund requested successfully.');
                 renderPaymentsList();
+              }).catch(function (err) {
+                toast(err.message || 'Refund failed');
               });
             },
             { okLabel: 'Issue Refund', okClass: 'btn-primary' }

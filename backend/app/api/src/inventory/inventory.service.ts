@@ -315,6 +315,33 @@ export class InventoryService {
     // Automatic server calculation of Total = XL + L + M + S
     const total = xl + l + m + s;
 
+    let createdAt: Date | undefined = undefined;
+    if (dto.date) {
+      const parts = dto.date.split('-');
+      if (parts.length === 3) {
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        const now = new Date();
+        createdAt = new Date(
+          Date.UTC(
+            year,
+            month,
+            day,
+            now.getUTCHours(),
+            now.getUTCMinutes(),
+            now.getUTCSeconds(),
+            now.getUTCMilliseconds(),
+          ),
+        );
+      } else {
+        const parsed = new Date(dto.date);
+        if (!isNaN(parsed.getTime())) {
+          createdAt = parsed;
+        }
+      }
+    }
+
     const transaction = this.transactionRepository.create({
       id: randomUUID(),
       warehouseId: dto.warehouseId,
@@ -338,6 +365,7 @@ export class InventoryService {
       sealNumber: dto.sealNumber ?? null,
       notes: dto.notes ?? null,
       createdBy: actor.id,
+      createdAt,
     });
 
     const saved = await this.transactionRepository.save(transaction);
@@ -345,7 +373,7 @@ export class InventoryService {
     // Link/trace container record if container number provided
     if (!dto.containerId && (dto.containerNumber || dto.sealNumber)) {
       try {
-        await this.createContainer(
+        const container = await this.createContainer(
           {
             warehouseId: dto.warehouseId,
             orderNumber: dto.orderNumber ?? dto.reference,
@@ -372,6 +400,12 @@ export class InventoryService {
           },
           actor,
         );
+        if (container && container.id) {
+          saved.containerId = container.id;
+          await this.transactionRepository.update(saved.id, {
+            containerId: container.id,
+          });
+        }
       } catch {
         // Trace container failure should not fail transaction
       }
@@ -421,60 +455,95 @@ export class InventoryService {
     // knowing a Healthcare transaction id would be enough to read it.
     await this.divisionsService.assertStoredDivisionAccess(actor, tx.division);
 
-    const [warehouse, material, creator, container] = await Promise.all([
+    let container: Container | null = null;
+    if (tx.containerId) {
+      container = await this.containerRepository.findOne({
+        where: { id: tx.containerId },
+      });
+    }
+    if (!container && tx.containerNumber) {
+      container = await this.containerRepository.findOne({
+        where: {
+          warehouseId: tx.warehouseId,
+          containerNumber: tx.containerNumber,
+        },
+      });
+    }
+    if (!container && tx.orderNumber) {
+      container = await this.containerRepository.findOne({
+        where: { warehouseId: tx.warehouseId, orderNumber: tx.orderNumber },
+      });
+    }
+
+    const [warehouse, material, creator] = await Promise.all([
       this.warehouseRepository.findOne({ where: { id: tx.warehouseId } }),
       this.materialRepository.findOne({ where: { id: tx.materialId } }),
       this.userRepository.findOne({ where: { id: tx.createdBy } }),
-      tx.containerId
-        ? this.containerRepository.findOne({ where: { id: tx.containerId } })
-        : null,
     ]);
 
-    // Find associated photos
-    const photoQb = this.photoRepository
-      .createQueryBuilder('p')
-      .where('p.warehouseId = :warehouseId', { warehouseId: tx.warehouseId });
+    // Find associated photos across photoId, container.photoId, and reference keys
+    const photoQb = this.photoRepository.createQueryBuilder('p');
+    const refs = [
+      tx.orderNumber,
+      tx.reference,
+      tx.containerNumber,
+      tx.id,
+      container?.containerNumber,
+      container?.orderNumber,
+    ].filter(Boolean) as string[];
+
+    const photoIdConditions: string[] = [];
+    const params: Record<string, any> = {
+      warehouseId: tx.warehouseId,
+    };
 
     if (tx.photoId) {
-      photoQb.andWhere(
-        '(p.id = :photoId OR p.jobReference = :ref OR p.jobReference = :orderNum)',
+      photoIdConditions.push('p.id = :txPhotoId');
+      params.txPhotoId = tx.photoId;
+    }
+    if (container?.photoId && container.photoId !== tx.photoId) {
+      photoIdConditions.push('p.id = :cPhotoId');
+      params.cPhotoId = container.photoId;
+    }
+
+    if (photoIdConditions.length > 0 && refs.length > 0) {
+      photoQb.where(
+        `(${photoIdConditions.join(' OR ')} OR ((p.warehouseId = :warehouseId OR p.warehouseId IS NULL) AND p.jobReference IN (:...refs)))`,
+        { ...params, refs },
+      );
+    } else if (photoIdConditions.length > 0) {
+      photoQb.where(`(${photoIdConditions.join(' OR ')})`, params);
+    } else if (refs.length > 0) {
+      photoQb.where(
+        '((p.warehouseId = :warehouseId OR p.warehouseId IS NULL) AND p.jobReference IN (:...refs))',
+        { warehouseId: tx.warehouseId, refs },
+      );
+    } else {
+      photoQb.where(
+        '(p.warehouseId = :warehouseId OR p.warehouseId IS NULL) AND p.jobReference = :txId',
         {
-          photoId: tx.photoId,
-          ref: tx.reference || tx.orderNumber || tx.id,
-          orderNum: tx.orderNumber || tx.id,
+          warehouseId: tx.warehouseId,
+          txId: tx.id,
         },
       );
-    } else if (tx.orderNumber || tx.reference) {
-      photoQb.andWhere('p.jobReference IN (:...refs)', {
-        refs: [tx.orderNumber, tx.reference, tx.id].filter(Boolean),
-      });
-    } else {
-      photoQb.andWhere('p.jobReference = :txId', { txId: tx.id });
     }
 
     const photoAssets = await photoQb.getMany();
-    const photos = await Promise.all(
-      photoAssets.map(async (p) => {
-        let presignedUrl = '';
-        try {
-          presignedUrl = await this.storageService.presignedGetUrl(p.objectKey);
-        } catch {
-          presignedUrl = `/photos/${p.id}/view`;
-        }
-        return {
-          id: p.id,
-          url: presignedUrl,
-          originalFilename: p.originalFilename,
-          mimeType: p.mimeType,
-          // bigint column comes back from pg as a string — see the same
-          // note in photos.service.ts#toDto.
-          sizeBytes: Number(p.sizeBytes),
-          photoType: p.photoType,
-          takenBy: p.takenBy,
-          takenAt: p.takenAt,
-        };
-      }),
-    );
+    const photos = photoAssets.map((p) => {
+      return {
+        id: p.id,
+        url: `/api/photos/${p.id}/view`,
+        thumbnailUrl: `/api/photos/${p.id}/thumbnail`,
+        downloadUrl: `/api/photos/${p.id}/download`,
+        originalFilename: p.originalFilename,
+        mimeType: p.mimeType,
+        sizeBytes: Number(p.sizeBytes),
+        photoType: p.photoType,
+        takenBy: p.takenBy,
+        takenAt: p.takenAt,
+        createdAt: p.createdAt,
+      };
+    });
 
     return {
       id: tx.id,
@@ -485,7 +554,7 @@ export class InventoryService {
       materialName: material?.name || '—',
       materialCategory: material?.category || '—',
       materialUnit: material?.unit || '—',
-      containerId: tx.containerId,
+      containerId: tx.containerId || container?.id || null,
       type: tx.type,
       unitType:
         tx.unitType || (tx.division === 'healthcare' ? 'box' : 'pallet'),
@@ -499,18 +568,25 @@ export class InventoryService {
       s: Number(tx.s),
       total: Number(tx.total),
       reason: tx.reason || '—',
-      reference: tx.reference || '—',
-      orderNumber: tx.orderNumber || '—',
-      containerNumber: tx.containerNumber || '—',
-      sealNumber: tx.sealNumber || '—',
+      reference: tx.reference || tx.orderNumber || '—',
+      orderNumber:
+        tx.orderNumber || tx.reference || container?.orderNumber || '—',
+      containerNumber: tx.containerNumber || container?.containerNumber || '—',
+      sealNumber: tx.sealNumber || container?.sealNumber || '—',
       blNumber: container?.blNumber || '—',
       shippingLine: container?.shippingLine || '—',
       eta: container?.eta || '—',
-      notes: tx.notes || '—',
+      notes: tx.notes || container?.notes || '—',
       createdBy: tx.createdBy,
       creatorName: creator?.fullName || creator?.email || '—',
       creatorEmail: creator?.email || '—',
       creatorRole: creator?.role || '—',
+      date: tx.createdAt
+        ? new Date(tx.createdAt).toISOString().split('T')[0]
+        : null,
+      time: tx.createdAt
+        ? new Date(tx.createdAt).toISOString().split('T')[1].split('.')[0]
+        : null,
       createdAt: tx.createdAt,
       photos,
     };

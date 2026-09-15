@@ -7,11 +7,14 @@ import {
   Param,
   Post,
   Query,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
+import sharp from 'sharp';
 
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
@@ -71,6 +74,111 @@ export class PhotosController {
       jobReference,
       photoType,
     });
+  }
+
+  @Get(':id/view')
+  async view(
+    @Param('id') id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Res() res: Response,
+  ) {
+    const { stream, photo } = await this.photosService.getPhotoStream(
+      id,
+      actor,
+    );
+    res.setHeader('Content-Type', photo.mimeType || 'image/jpeg');
+    if (photo.sizeBytes) {
+      res.setHeader('Content-Length', String(photo.sizeBytes));
+    }
+    res.setHeader(
+      'Cache-Control',
+      'private, no-cache, no-store, must-revalidate',
+    );
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    stream.on('error', () => {
+      if (!res.headersSent) {
+        res.status(500).json({ message: 'Error streaming photo' });
+      }
+    });
+    stream.pipe(res);
+  }
+
+  @Get(':id/thumbnail')
+  async thumbnail(
+    @Param('id') id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Res() res: Response,
+  ) {
+    const { stream, photo } = await this.photosService.getPhotoStream(
+      id,
+      actor,
+    );
+    res.setHeader('Content-Type', photo.mimeType || 'image/jpeg');
+    res.setHeader(
+      'Cache-Control',
+      'private, no-cache, no-store, must-revalidate',
+    );
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+
+    try {
+      const transformer = sharp().resize(300, 300, {
+        fit: 'inside',
+        withoutEnlargement: true,
+      });
+      if (photo.mimeType === 'image/jpeg') {
+        transformer.jpeg({ quality: 80 });
+      } else if (photo.mimeType === 'image/webp') {
+        transformer.webp({ quality: 80 });
+      } else if (photo.mimeType === 'image/png') {
+        transformer.png();
+      }
+      transformer.on('error', () => {
+        if (!res.headersSent) {
+          stream.pipe(res);
+        }
+      });
+      stream.pipe(transformer).pipe(res);
+    } catch {
+      stream.pipe(res);
+    }
+  }
+
+  @Get(':id/download')
+  async download(
+    @Param('id') id: string,
+    @CurrentUser() actor: AuthenticatedUser,
+    @Res() res: Response,
+  ) {
+    const { stream, photo } = await this.photosService.getPhotoStream(
+      id,
+      actor,
+    );
+    const filename = photo.originalFilename || `photo-${photo.id}.jpg`;
+    res.setHeader('Content-Type', photo.mimeType || 'application/octet-stream');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    );
+    if (photo.sizeBytes) {
+      res.setHeader('Content-Length', String(photo.sizeBytes));
+    }
+    res.setHeader(
+      'Cache-Control',
+      'private, no-cache, no-store, must-revalidate',
+    );
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    stream.on('error', () => {
+      if (!res.headersSent) {
+        res.status(500).json({ message: 'Error downloading photo' });
+      }
+    });
+    stream.pipe(res);
   }
 
   @Get(':id')

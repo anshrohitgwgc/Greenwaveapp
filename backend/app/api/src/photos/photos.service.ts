@@ -159,7 +159,7 @@ export class PhotosService {
       });
 
     const photos = await qb.getMany();
-    return Promise.all(photos.map((photo) => this.toDto(photo)));
+    return photos.map((photo) => this.toDto(photo));
   }
 
   async findOneAuthorized(id: string, actor: AuthenticatedUser) {
@@ -170,7 +170,7 @@ export class PhotosService {
       throw new ForbiddenException('Not authorized to view this photo');
     }
 
-    if (photo.warehouseId && PRIVILEGED_ROLES.includes(actor.role)) {
+    if (photo.warehouseId) {
       await this.warehousesService.assertWarehouseAccess(
         actor,
         photo.warehouseId,
@@ -178,6 +178,32 @@ export class PhotosService {
     }
 
     return this.toDto(photo);
+  }
+
+  async getPhotoStream(id: string, actor: AuthenticatedUser) {
+    const photo = await this.photoRepository.findOne({ where: { id } });
+    if (!photo) throw new NotFoundException('Photo not found');
+
+    if (!PRIVILEGED_ROLES.includes(actor.role) && photo.takenBy !== actor.id) {
+      throw new ForbiddenException('Not authorized to view this photo');
+    }
+
+    if (photo.warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(
+        actor,
+        photo.warehouseId,
+      );
+    }
+
+    try {
+      const stream = await this.storageService.getObject(photo.objectKey);
+      return { stream, photo };
+    } catch (err: any) {
+      if (err instanceof NotFoundException) {
+        throw new NotFoundException('Photo storage object not found');
+      }
+      throw err;
+    }
   }
 
   async remove(id: string, actor: AuthenticatedUser) {
@@ -205,11 +231,12 @@ export class PhotosService {
     });
   }
 
-  private async toDto(photo: PhotoAsset) {
-    const url = await this.storageService.presignedGetUrl(photo.objectKey);
+  toDto(photo: PhotoAsset) {
     return {
       id: photo.id,
-      url,
+      url: `/api/photos/${photo.id}/view`,
+      thumbnailUrl: `/api/photos/${photo.id}/thumbnail`,
+      downloadUrl: `/api/photos/${photo.id}/download`,
       originalFilename: photo.originalFilename,
       mimeType: photo.mimeType,
       // pg/TypeORM returns `bigint` columns as strings to avoid precision
@@ -225,6 +252,7 @@ export class PhotosService {
       photoType: photo.photoType,
       takenBy: photo.takenBy,
       takenAt: photo.takenAt,
+      createdAt: photo.createdAt,
     };
   }
 }

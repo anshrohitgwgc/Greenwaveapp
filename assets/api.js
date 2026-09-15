@@ -61,7 +61,7 @@
     throw err;
   }
 
-  function request(method, path, body) {
+  function request(method, path, body, customHeaders) {
     var headers = { 'Content-Type': 'application/json' };
     var token = getToken();
     if (token) headers.Authorization = 'Bearer ' + token;
@@ -69,6 +69,14 @@
     if (method !== 'GET' && method !== 'HEAD') {
       var csrf = getCsrfToken();
       if (csrf) headers['X-CSRF-Token'] = csrf;
+    }
+
+    if (customHeaders && typeof customHeaders === 'object') {
+      for (var k in customHeaders) {
+        if (Object.prototype.hasOwnProperty.call(customHeaders, k)) {
+          headers[k] = customHeaders[k];
+        }
+      }
     }
 
     return global.fetch(baseUrl() + path, {
@@ -264,8 +272,9 @@
     },
     getStripeOverview: function () { return request('GET', '/api/payments/stripe/overview'); },
     syncStripe: function (body) { return request('POST', '/api/payments/stripe/sync', body || {}); },
-    refundPayment: function (paymentId, amountMinor, reason) {
-      return request('POST', '/api/payments/' + paymentId + '/refund', { amountMinor: amountMinor, reason: reason });
+    refundPayment: function (paymentId, amountMinor, reason, idempotencyKey) {
+      var key = (idempotencyKey && String(idempotencyKey).trim()) || ('gw-rf-' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36));
+      return request('POST', '/api/payments/' + paymentId + '/refunds', { amountMinor: amountMinor, reason: reason }, { 'Idempotency-Key': key });
     },
 
     // Public Customer Checkout (Stripe Payment Element)
@@ -279,7 +288,7 @@
       return request('POST', '/api/public/pay/' + token + '/intent');
     },
     createCheckoutSession: function (token) {
-      return request('POST', '/api/pay/' + token + '/checkout');
+      return this.createPaymentIntent(token);
     },
 
     // Accounting Foundation
@@ -368,6 +377,18 @@
       return upload('/api/photos', fd);
     },
     deletePhoto: function (id) { return request('DELETE', '/api/photos/' + id); },
+    photoUrl: function (id, variant) {
+      if (!id) return '';
+      var t = getToken();
+      var p = baseUrl() + '/api/photos/' + encodeURIComponent(id) + (variant ? '/' + variant : '/view');
+      return t ? (p + '?token=' + encodeURIComponent(t)) : p;
+    },
+    photoThumbnailUrl: function (id) {
+      return this.photoUrl(id, 'thumbnail');
+    },
+    photoDownloadUrl: function (id) {
+      return this.photoUrl(id, 'download');
+    },
 
     // History / Audit
     listAudit: function (params) { return request('GET', '/api/audit' + qs(params)); }

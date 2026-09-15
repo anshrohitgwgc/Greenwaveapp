@@ -1,3 +1,4 @@
+import { Readable } from 'stream';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -125,6 +126,64 @@ describe('PhotosService', () => {
       await expect(
         service.findOneAuthorized('missing', staffActor),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('getPhotoStream', () => {
+    it('returns stream and stat for an authorized photo', async () => {
+      const mockStream = Readable.from([]);
+      photoRepo.findOne.mockResolvedValue({
+        id: 'p1',
+        takenBy: 1,
+        warehouseId: 'w1',
+        objectKey: 'photos/w1/p1.png',
+        mimeType: 'image/png',
+        sizeBytes: 2048,
+      });
+      (storageService as unknown as { getObject: jest.Mock }).getObject = jest
+        .fn()
+        .mockResolvedValue(mockStream);
+
+      const result = await service.getPhotoStream('p1', staffActor);
+      expect(result.stream).toBe(mockStream);
+      expect(result.photo.id).toBe('p1');
+    });
+
+    it('rejects cross-warehouse access with ForbiddenException', async () => {
+      warehousesService.assertWarehouseAccess.mockRejectedValue(
+        new ForbiddenException('Cross-warehouse denied'),
+      );
+      photoRepo.findOne.mockResolvedValue({
+        id: 'p1',
+        takenBy: 1,
+        warehouseId: 'w2',
+        objectKey: 'photos/w2/p1.png',
+      });
+
+      await expect(service.getPhotoStream('p1', staffActor)).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+  });
+
+  describe('toDto', () => {
+    it('returns relative API endpoints instead of internal MinIO URLs', () => {
+      const dto = service.toDto({
+        id: 'photo-100',
+        objectKey: 'photos/w1/p100.jpg',
+        originalFilename: 'receipt.jpg',
+        mimeType: 'image/jpeg',
+        sizeBytes: 5000,
+        takenBy: 1,
+        takenAt: new Date(),
+        warehouseId: 'w1',
+      } as PhotoAsset);
+
+      expect(dto.url).toBe('/api/photos/photo-100/view');
+      expect(dto.thumbnailUrl).toBe('/api/photos/photo-100/thumbnail');
+      expect(dto.downloadUrl).toBe('/api/photos/photo-100/download');
+      expect(dto.url).not.toContain('localhost:9000');
+      expect(dto.url).not.toContain('minio');
     });
   });
 });
