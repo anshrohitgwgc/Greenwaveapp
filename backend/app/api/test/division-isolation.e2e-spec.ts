@@ -1,3 +1,5 @@
+import { randomUUID } from 'crypto';
+import { gateDatabase } from './gate-database';
 /* eslint-disable */
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -17,6 +19,7 @@ import { UserDivision } from '../src/divisions/entities/user-division.entity';
 import { Container } from '../src/inventory/entities/container.entity';
 import { InventoryBalance } from '../src/inventory/entities/inventory-balance.entity';
 import { InventoryTransaction } from '../src/inventory/entities/inventory-transaction.entity';
+import { InventoryTransactionPhoto } from '../src/inventory/entities/inventory-transaction-photo.entity';
 import { InventoryModule } from '../src/inventory/inventory.module';
 import { InvoiceItem } from '../src/invoices/entities/invoice-item.entity';
 import { Invoice } from '../src/invoices/entities/invoice.entity';
@@ -115,9 +118,7 @@ describe('E2E Security: Cross-division authorization & IDOR', () => {
       imports: [
         ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }),
         TypeOrmModule.forRoot({
-          type: 'better-sqlite3',
-          database: ':memory:',
-          dropSchema: true,
+          ...gateDatabase('division'),
           entities: [
             ...PAYMENT_ENTITIES,
             ...ACCOUNTING_ENTITIES,
@@ -130,6 +131,7 @@ describe('E2E Security: Cross-division authorization & IDOR', () => {
             Material,
             Container,
             InventoryTransaction,
+            InventoryTransactionPhoto,
             InventoryBalance,
             Customer,
             Invoice,
@@ -140,7 +142,6 @@ describe('E2E Security: Cross-division authorization & IDOR', () => {
             RolePermission,
             UserRole,
           ],
-          synchronize: true,
         }),
         AuthModule,
         UsersModule,
@@ -227,7 +228,7 @@ describe('E2E Security: Cross-division authorization & IDOR', () => {
       }
       if (warehouseIds !== 'global') {
         for (const warehouseId of warehouseIds) {
-          await whRepo.save({ id: `${u.id}-${warehouseId}`.slice(0, 36), userId: u.id, warehouseId, createdBy: null });
+          await whRepo.save({ id: randomUUID(), userId: u.id, warehouseId, createdBy: null });
         }
       }
       return u;

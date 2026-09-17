@@ -1,3 +1,4 @@
+import { gateDatabase } from './gate-database';
 /* eslint-disable */
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -175,7 +176,7 @@ describe('E2E: Stripe payments, webhooks, refunds, ledger', () => {
       imports: [
         ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }),
         TypeOrmModule.forRoot({
-          type: 'better-sqlite3', database: ':memory:', dropSchema: true, synchronize: true,
+          ...gateDatabase('stripe'),
           entities: [User, AuditEvent, Warehouse, UserWarehouse, UserDivision, Customer, Invoice, InvoiceItem,
             Role, Permission, RolePermission, UserRole, EmailOutbox, ...PAYMENT_ENTITIES, ...ACCOUNTING_ENTITIES],
         }),
@@ -203,10 +204,10 @@ describe('E2E: Stripe payments, webhooks, refunds, ledger', () => {
     await ds.getRepository(Customer).save({ id: CUSTOMER, name: 'Acme Metals Ltd', email: 'ap@acme.example', division: 'recycling', warehouseId: WH } as any);
 
     const keys = ['warehouses:global_access', 'invoices:manage', 'payments:manage', 'payments:read_all', 'payments:refund', 'payments:sync', 'accounting:read'];
-    const perms = await ds.getRepository(Permission).save(keys.map((key, i) => ({ id: `p${i}`, key, description: key })));
-    const admin = await ds.getRepository(Role).save({ id: 'r-admin', name: 'admin' });
-    const manager = await ds.getRepository(Role).save({ id: 'r-manager', name: 'manager' });
-    await ds.getRepository(Role).save({ id: 'r-staff', name: 'staff' });
+    const perms = await ds.getRepository(Permission).save(keys.map((key, i) => ({ id: randomUUID(), key, description: key })));
+    const admin = await ds.getRepository(Role).save({ id: randomUUID(), name: 'admin' });
+    const manager = await ds.getRepository(Role).save({ id: randomUUID(), name: 'manager' });
+    await ds.getRepository(Role).save({ id: randomUUID(), name: 'staff' });
     await ds.getRepository(RolePermission).save([
       ...perms.map((p) => ({ roleId: admin.id, permissionId: p.id })),
       ...perms.filter((p) => ['invoices:manage', 'payments:manage', 'payments:read_all'].includes(p.key)).map((p) => ({ roleId: manager.id, permissionId: p.id })),
@@ -218,7 +219,7 @@ describe('E2E: Stripe payments, webhooks, refunds, ledger', () => {
       { fullName: 'Manager', email: 'manager@gw.test', password, role: 'manager', status: 'active' },
       { fullName: 'Staff', email: 'staff@gw.test', password, role: 'staff', status: 'active' },
     ] as any);
-    await ds.getRepository(UserWarehouse).save(users.slice(1).map((u: any, i: number) => ({ id: `uw${i}`, userId: u.id, warehouseId: WH })) as any);
+    await ds.getRepository(UserWarehouse).save(users.slice(1).map((u: any, i: number) => ({ id: randomUUID(), userId: u.id, warehouseId: WH })) as any);
     await grantDivisions(ds, users.map((u: any) => u.id), ['greenwave']);
 
     const login = async (email: string) => (await request(server).post('/auth/login').send({ email, password: 'TestPass123!' })).body.access_token;

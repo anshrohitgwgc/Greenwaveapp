@@ -218,6 +218,7 @@ export class InvoicesService {
   async create(
     dto: CreateInvoiceDto,
     actor: AuthenticatedUser,
+    existingRunner?: QueryRunner,
   ): Promise<Invoice> {
     if (dto.warehouseId) {
       await this.warehousesService.assertWarehouseAccess(
@@ -238,9 +239,11 @@ export class InvoicesService {
       );
     }
 
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
+    const queryRunner = existingRunner ?? this.dataSource.createQueryRunner();
+    if (!existingRunner) {
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+    }
 
     // Declared outside the try so the post-commit audit/re-read below can
     // still see them once the connection has been released.
@@ -298,17 +301,21 @@ export class InvoicesService {
         { actorId: actor.id },
         queryRunner.manager,
       );
+      if (existingRunner) {
+        invoice.items = totals.items;
+        return invoice;
+      }
       await queryRunner.commitTransaction();
     } catch (err) {
       // Only roll back a transaction that is still open. A failure raised
       // after commitTransaction() would otherwise be masked by the
       // "transaction not started" error thrown from here.
-      if (queryRunner.isTransactionActive) {
+      if (!existingRunner && queryRunner.isTransactionActive) {
         await queryRunner.rollbackTransaction();
       }
       throw err;
     } finally {
-      await queryRunner.release();
+      if (!existingRunner) await queryRunner.release();
     }
 
     // IMPORTANT: everything below runs *after* the query runner has returned

@@ -202,11 +202,10 @@ describe('E2E Security: Server-side EXIF/GPS stripping on photo upload', () => {
 
     // Retrieve the ACTUAL stored object bytes from the ACTUAL local MinIO
     // bucket — not from the app's DB/API response, not from a mock.
-    const bucket = storageService.getBucketName();
-    const objectUrl = `http://localhost:9000/${bucket}/${stored!.objectKey}`;
-    const fetched = await fetch(objectUrl);
-    expect(fetched.status).toBe(200);
-    const storedBytes = Buffer.from(await fetched.arrayBuffer());
+    const storedStream = await storageService.getObject(stored!.objectKey);
+    const chunks: Buffer[] = [];
+    for await (const chunk of storedStream) chunks.push(Buffer.from(chunk));
+    const storedBytes = Buffer.concat(chunks);
 
     // 1. GPS metadata is absent from the object as stored in MinIO.
     const afterExif = await exifr.parse(storedBytes, {

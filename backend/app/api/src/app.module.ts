@@ -22,6 +22,7 @@ import { PayablesModule } from './payables/payables.module';
 import { PaymentsModule } from './payments/payments.module';
 import { PhotosModule } from './photos/photos.module';
 import { PickupsModule } from './pickups/pickups.module';
+import { ProformasModule } from './proformas/proformas.module';
 import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { RedisModule } from './redis/redis.module';
 import { RolesModule } from './roles/roles.module';
@@ -82,6 +83,7 @@ import { WarehousesModule } from './warehouses/warehouses.module';
     MaterialsModule,
     InventoryModule,
     InvoicesModule,
+    ProformasModule,
     PurchaseOrdersModule,
     StripeModule,
     AccountingModule,

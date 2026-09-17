@@ -1,3 +1,5 @@
+import { randomUUID } from 'crypto';
+import { gateDatabase } from './gate-database';
 /* eslint-disable */
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -79,9 +81,7 @@ describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
       imports: [
         ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }),
         TypeOrmModule.forRoot({
-          type: 'better-sqlite3',
-          database: ':memory:',
-          dropSchema: true,
+          ...gateDatabase('payments'),
           entities: [
             ...PAYMENT_ENTITIES,
             ...ACCOUNTING_ENTITIES,
@@ -105,7 +105,6 @@ describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
             UserRole,
             Timesheet,
           ],
-          synchronize: true,
         }),
         AuthModule,
         UsersModule,
@@ -235,25 +234,25 @@ describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
 
     const seededPerms = await permRepo.save([
       {
-        id: '1',
+        id: randomUUID(),
         key: 'warehouses:global_access',
         description: 'Global Access',
       },
-      { id: '2', key: 'warehouses:manage', description: 'Manage Warehouses' },
-      { id: '3', key: 'invoices:manage', description: 'Manage Invoices' },
-      { id: '4', key: 'payments:manage', description: 'Manage Payments' },
-      { id: '5', key: 'payments:refund', description: 'Process Refunds' },
-      { id: '6', key: 'staff:manage', description: 'Manage Staff' },
-      { id: '7', key: 'inventory:write', description: 'Write Inventory' },
+      { id: randomUUID(), key: 'warehouses:manage', description: 'Manage Warehouses' },
+      { id: randomUUID(), key: 'invoices:manage', description: 'Manage Invoices' },
+      { id: randomUUID(), key: 'payments:manage', description: 'Manage Payments' },
+      { id: randomUUID(), key: 'payments:refund', description: 'Process Refunds' },
+      { id: randomUUID(), key: 'staff:manage', description: 'Manage Staff' },
+      { id: randomUUID(), key: 'inventory:write', description: 'Write Inventory' },
     ]);
 
-    const adminRole = await roleRepo.save({ id: 'r-admin', name: 'admin' });
+    const adminRole = await roleRepo.save({ id: randomUUID(), name: 'admin' });
     const managerRole = await roleRepo.save({
-      id: 'r-manager',
+      id: randomUUID(),
       name: 'manager',
     });
-    const staffRole = await roleRepo.save({ id: 'r-staff', name: 'staff' });
-    const driverRole = await roleRepo.save({ id: 'r-driver', name: 'driver' });
+    const staffRole = await roleRepo.save({ id: randomUUID(), name: 'staff' });
+    const driverRole = await roleRepo.save({ id: randomUUID(), name: 'driver' });
 
     // Link admin permissions
     await rolePermRepo.save(
@@ -316,14 +315,14 @@ describe('E2E Acceptance: Management Portal RBAC & Customer Payments', () => {
     const userWhRepo = dataSource.getRepository(UserWarehouse);
     await userWhRepo.save([
       // Manager: Calgary + Maple Ridge
-      { id: 'uw-1', userId: managerUser.id, warehouseId: WAREHOUSE_CGY },
-      { id: 'uw-2', userId: managerUser.id, warehouseId: WAREHOUSE_MR },
+      { id: randomUUID(), userId: managerUser.id, warehouseId: WAREHOUSE_CGY },
+      { id: randomUUID(), userId: managerUser.id, warehouseId: WAREHOUSE_MR },
       // Staff: Calgary only
-      { id: 'uw-3', userId: staffUser.id, warehouseId: WAREHOUSE_CGY },
+      { id: randomUUID(), userId: staffUser.id, warehouseId: WAREHOUSE_CGY },
       // Driver: Maple Ridge only
-      { id: 'uw-4', userId: driverUser.id, warehouseId: WAREHOUSE_MR },
+      { id: randomUUID(), userId: driverUser.id, warehouseId: WAREHOUSE_MR },
       // Ontario Staff: Ontario only
-      { id: 'uw-5', userId: ontarioStaffUser.id, warehouseId: WAREHOUSE_ON },
+      { id: randomUUID(), userId: ontarioStaffUser.id, warehouseId: WAREHOUSE_ON },
     ]);
 
     // Obtain JWT Tokens

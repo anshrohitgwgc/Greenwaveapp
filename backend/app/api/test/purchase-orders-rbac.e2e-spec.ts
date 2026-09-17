@@ -1,3 +1,4 @@
+import { gateDatabase } from './gate-database';
 /* eslint-disable */
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -96,9 +97,7 @@ describe('E2E: Purchase Orders — admin RBAC, numbering & server-side totals', 
       imports: [
         ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }),
         TypeOrmModule.forRoot({
-          type: 'better-sqlite3',
-          database: ':memory:',
-          dropSchema: true,
+          ...gateDatabase('po'),
           entities: [
             User,
             AuditEvent,
@@ -112,7 +111,6 @@ describe('E2E: Purchase Orders — admin RBAC, numbering & server-side totals', 
             RolePermission,
             UserRole,
           ],
-          synchronize: true,
         }),
         AuthModule,
         UsersModule,
