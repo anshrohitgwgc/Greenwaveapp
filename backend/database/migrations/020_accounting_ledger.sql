@@ -98,7 +98,11 @@ DECLARE
     v_credits BIGINT;
     v_lines INTEGER;
 BEGIN
-    v_entry := CASE WHEN TG_TABLE_NAME = 'journal_lines' THEN NEW.entry_id ELSE NEW.id END;
+    IF TG_TABLE_NAME = 'journal_lines' THEN
+        v_entry := NEW.entry_id;
+    ELSE
+        v_entry := NEW.id;
+    END IF;
     SELECT status INTO v_status FROM journal_entries WHERE id = v_entry;
     IF v_status IS NULL OR v_status = 'DRAFT' THEN
         RETURN NULL;

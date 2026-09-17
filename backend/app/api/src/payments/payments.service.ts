@@ -2,6 +2,7 @@ import {
   BadGatewayException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -19,7 +20,9 @@ import { addDays, businessDayStartUtc, isIsoDate, toBusinessDate } from '../comm
 import { isUniqueViolation, rowLock, UUID_PATTERN } from '../common/db-types';
 import { decimalToMinor, formatMinor, isSupportedCurrency, minorToDecimalString, normalizeCurrency } from '../common/money';
 import { Customer } from '../customers/entities/customer.entity';
+import { DIVISION_GREENWAVE, DIVISION_STORAGE_SYNONYMS, normalizeDivision } from '../divisions/divisions.constants';
 import { DivisionsService } from '../divisions/divisions.service';
+import { assertGreenWaveRecyclingFinanceAccess } from '../common/guards/recycling-finance.guard';
 import { Invoice } from '../invoices/entities/invoice.entity';
 import { InvoicesService } from '../invoices/invoices.service';
 import { isDeliverableAddress, MailService } from '../mail/mail.service';
@@ -109,13 +112,10 @@ export class PaymentsService {
     return !!actor.hasGlobalAccess || !!actor.permissions?.includes('warehouses:global_access');
   }
 
-  /** Restricts a query joined to invoices as `inv` to what the actor may read. */
+  /** Restricts a query joined to invoices as `inv` to what the actor may read (strictly GreenWave Recycling). */
   private async scopeToActor<T extends object>(qb: SelectQueryBuilder<T>, actor: AuthenticatedUser): Promise<void> {
-    const divisions = await this.divisions.scopeDivisionStorageValues(actor);
-    if (divisions.length === 0) {
-      qb.andWhere('1 = 0');
-      return;
-    }
+    assertGreenWaveRecyclingFinanceAccess(actor);
+    const divisions = DIVISION_STORAGE_SYNONYMS[DIVISION_GREENWAVE];
     qb.andWhere('inv.division IN (:...scopeDivisions)', { scopeDivisions: divisions });
     if (!this.hasGlobalWarehouseAccess(actor)) {
       const ids = await this.warehouses.getUserAuthorizedWarehouseIds(actor.id, actor.role, actor.permissions);
@@ -125,8 +125,13 @@ export class PaymentsService {
   }
 
   private async assertInvoiceAccess(actor: AuthenticatedUser, invoice: Invoice): Promise<void> {
+    assertGreenWaveRecyclingFinanceAccess(actor);
     if (invoice.warehouseId) await this.warehouses.assertWarehouseAccess(actor, invoice.warehouseId);
     await this.divisions.assertStoredDivisionAccess(actor, invoice.division);
+    const invoiceCanonical = normalizeDivision(invoice.division);
+    if (invoiceCanonical !== DIVISION_GREENWAVE) {
+      throw new ForbiddenException('Financial operations are strictly restricted to the GreenWave Recycling division');
+    }
   }
 
   private async loadInvoiceForActor(invoiceId: string, actor: AuthenticatedUser): Promise<Invoice> {
@@ -496,6 +501,7 @@ export class PaymentsService {
    * global access in addition to the controller's permission.
    */
   async stripeOverview(actor: AuthenticatedUser) {
+    assertGreenWaveRecyclingFinanceAccess(actor);
     if (actor.role !== 'admin' && !this.hasGlobalWarehouseAccess(actor)) {
       throw new NotFoundException('Not available');
     }

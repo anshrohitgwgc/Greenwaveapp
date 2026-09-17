@@ -20,6 +20,7 @@ import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
+import { RecyclingFinanceGuard } from '../common/guards/recycling-finance.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { getRequestId } from '../common/request-id';
 import { CreateRefundDto } from './dto/create-refund.dto';
@@ -29,7 +30,7 @@ import { PaymentsService } from './payments.service';
 import { StripeSyncService } from './stripe-sync.service';
 
 @Controller('payments')
-@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard, RecyclingFinanceGuard)
 @Roles('admin', 'manager')
 export class PaymentsController {
   constructor(

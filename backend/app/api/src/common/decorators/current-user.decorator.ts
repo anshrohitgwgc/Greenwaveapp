@@ -16,6 +16,8 @@ export interface AuthenticatedUser {
    * array means no division-scoped data is readable at all.
    */
   divisions?: string[];
+  /** Set only by the finance guard after membership/context validation. */
+  activeFinanceDivision?: string;
 }
 
 export const CurrentUser = createParamDecorator(

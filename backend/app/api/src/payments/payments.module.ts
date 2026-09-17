@@ -4,10 +4,12 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AccountingModule } from '../accounting/accounting.module';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { PublicRateLimitGuard } from '../common/guards/public-rate-limit.guard';
+import { RecyclingFinanceGuard } from '../common/guards/recycling-finance.guard';
 import { Customer } from '../customers/entities/customer.entity';
 import { DivisionsModule } from '../divisions/divisions.module';
 import { Invoice } from '../invoices/entities/invoice.entity';
 import { InvoicesModule } from '../invoices/invoices.module';
+import { MailModule } from '../mail/mail.module';
 import { RedisModule } from '../redis/redis.module';
 import { StripeModule } from '../stripe/stripe.module';
 import { WarehousesModule } from '../warehouses/warehouses.module';
@@ -45,6 +47,7 @@ export const PAYMENT_ENTITIES = [
     DivisionsModule,
     InvoicesModule,
     AccountingModule,
+    MailModule,
     StripeModule,
     RedisModule,
   ],
@@ -58,6 +61,7 @@ export const PAYMENT_ENTITIES = [
     PaymentNotificationsService,
     PublicRateLimitGuard,
     PermissionsGuard,
+    RecyclingFinanceGuard,
   ],
   exports: [PaymentsService, PaymentLinkService],
 })
