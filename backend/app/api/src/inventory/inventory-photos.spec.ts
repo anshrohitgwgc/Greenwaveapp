@@ -14,6 +14,7 @@ import { WarehousesService } from '../warehouses/warehouses.service';
 import { Container } from './entities/container.entity';
 import { InventoryBalance } from './entities/inventory-balance.entity';
 import { InventoryTransaction } from './entities/inventory-transaction.entity';
+import { InventoryTransactionPhoto } from './entities/inventory-transaction-photo.entity';
 import { InventoryService } from './inventory.service';
 import { provideDivisionsService } from '../../test/fixtures/divisions-test.helper';
 
@@ -125,6 +126,17 @@ describe('InventoryService — photo attachment', () => {
         {
           provide: getRepositoryToken(InventoryTransaction),
           useValue: transactionRepo,
+        },
+        {
+          provide: getRepositoryToken(InventoryTransactionPhoto),
+          useValue: {
+            create: jest.fn((d: Record<string, unknown>) => ({ ...d })),
+            save: jest.fn((d: Record<string, unknown>) => Promise.resolve(d)),
+            find: jest.fn().mockResolvedValue([]),
+            findOne: jest.fn().mockResolvedValue(null),
+            delete: jest.fn().mockResolvedValue({ affected: 1 }),
+            count: jest.fn().mockResolvedValue(0),
+          },
         },
         {
           provide: getRepositoryToken(InventoryBalance),
@@ -281,7 +293,7 @@ describe('InventoryService — photo attachment', () => {
     expect(savedTx().photoId).toBe(photoId(1));
   });
 
-  it('stamps the transaction id on photos that carry no reference of their own', async () => {
+  it('does not use metadata stamping as ownership', async () => {
     photoRepo.find.mockResolvedValue(ownedPhotos(2));
 
     await service.createTransaction(
@@ -289,9 +301,6 @@ describe('InventoryService — photo attachment', () => {
       staffActor,
     );
 
-    expect(updateBuilder.set).toHaveBeenCalledWith({ jobReference: 'tx-1' });
-    expect(updateBuilder.where).toHaveBeenCalledWith('id IN (:...photoIds)', {
-      photoIds: [photoId(1), photoId(2)],
-    });
+    expect(updateBuilder.set).not.toHaveBeenCalled();
   });
 });

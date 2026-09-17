@@ -13,6 +13,7 @@ import { WarehousesService } from '../warehouses/warehouses.service';
 import { Container } from './entities/container.entity';
 import { InventoryBalance } from './entities/inventory-balance.entity';
 import { InventoryTransaction } from './entities/inventory-transaction.entity';
+import { InventoryTransactionPhoto } from './entities/inventory-transaction-photo.entity';
 import { InventoryService } from './inventory.service';
 import { provideDivisionsService } from '../../test/fixtures/divisions-test.helper';
 
@@ -198,6 +199,17 @@ describe('InventoryService', () => {
         {
           provide: getRepositoryToken(InventoryTransaction),
           useValue: transactionRepo,
+        },
+        {
+          provide: getRepositoryToken(InventoryTransactionPhoto),
+          useValue: {
+            create: jest.fn((d: Record<string, unknown>) => ({ ...d })),
+            save: jest.fn((d: Record<string, unknown>) => Promise.resolve(d)),
+            find: jest.fn().mockResolvedValue([{ transactionId: 'tx-1', photoId: 'photo-1' }]),
+            findOne: jest.fn().mockResolvedValue(null),
+            delete: jest.fn().mockResolvedValue({ affected: 1 }),
+            count: jest.fn().mockResolvedValue(0),
+          },
         },
         {
           provide: getRepositoryToken(InventoryBalance),
@@ -486,6 +498,7 @@ describe('InventoryService', () => {
 
   describe('TRANSACTION DETAILS & PHOTOS', () => {
     it('retrieves complete transaction details with associated photos and secure URLs', async () => {
+      photoRepo.find.mockResolvedValueOnce([{ id: 'photo-1', sizeBytes: 102400 }]);
       const detail = await service.getTransactionById('tx-1', staffActor);
 
       expect(detail.id).toBe('tx-1');

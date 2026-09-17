@@ -28,6 +28,7 @@ import { CreateInventoryTransactionDto } from './dto/create-inventory-transactio
 import { Container } from './entities/container.entity';
 import { InventoryBalance } from './entities/inventory-balance.entity';
 import { InventoryTransaction } from './entities/inventory-transaction.entity';
+import { InventoryTransactionPhoto } from './entities/inventory-transaction-photo.entity';
 
 export interface ListTransactionsFilter {
   warehouseId?: string;
@@ -48,6 +49,8 @@ export class InventoryService {
     private readonly containerRepository: Repository<Container>,
     @InjectRepository(InventoryTransaction)
     private readonly transactionRepository: Repository<InventoryTransaction>,
+    @InjectRepository(InventoryTransactionPhoto)
+    private readonly txPhotoRepository: Repository<InventoryTransactionPhoto>,
     @InjectRepository(InventoryBalance)
     private readonly balanceRepository: Repository<InventoryBalance>,
     @InjectRepository(Material)
@@ -326,37 +329,16 @@ export class InventoryService {
     return unique;
   }
 
-  /**
-   * Bind a photo set to the entry that now owns it.
-   *
-   * Photos are uploaded before the transaction exists, so they are tagged at
-   * upload time with the operator's order number and found again by the
-   * reference match in getTransactionById. That match is left intact — it is
-   * what makes an order's photos discoverable in the photo library, and what
-   * keeps already-stored photos visible.
-   *
-   * The gap it leaves is an entry with no order number: those photos carry no
-   * reference at all and would be orphaned the moment the modal closed. Only
-   * those get stamped with the transaction id, which the same reference match
-   * already looks for.
-   */
+  /** Persist explicit photo ownership; jobReference remains metadata only. */
   private async bindPhotosToTransaction(
     photoIds: string[],
     transactionId: string,
   ): Promise<void> {
     if (photoIds.length === 0) return;
-    try {
-      await this.photoRepository
-        .createQueryBuilder()
-        .update(PhotoAsset)
-        .set({ jobReference: transactionId })
-        .where('id IN (:...photoIds)', { photoIds })
-        .andWhere("(job_reference IS NULL OR job_reference = '')")
-        .execute();
-    } catch {
-      // The photos are already stored and the entry is already saved; a
-      // failure to stamp the reference must not fail the transaction.
-    }
+    const records = photoIds.map((photoId, idx) => this.txPhotoRepository.create({
+      id: randomUUID(), transactionId, photoId, sortOrder: idx,
+    }));
+    await this.txPhotoRepository.save(records);
   }
 
   async createTransaction(
@@ -587,54 +569,24 @@ export class InventoryService {
       this.userRepository.findOne({ where: { id: tx.createdBy } }),
     ]);
 
-    // Find associated photos across photoId, container.photoId, and reference keys
-    const photoQb = this.photoRepository.createQueryBuilder('p');
-    const refs = [
-      tx.orderNumber,
-      tx.reference,
-      tx.containerNumber,
-      tx.id,
-      container?.containerNumber,
-      container?.orderNumber,
-    ].filter(Boolean) as string[];
+    // Load photos associated via explicit relational join table (inventory_transaction_photos)
+    const joinRows = await this.txPhotoRepository.find({
+      where: { transactionId: tx.id },
+      order: { sortOrder: 'ASC', createdAt: 'ASC' },
+    });
 
-    const photoIdConditions: string[] = [];
-    const params: Record<string, any> = {
-      warehouseId: tx.warehouseId,
-    };
-
-    if (tx.photoId) {
-      photoIdConditions.push('p.id = :txPhotoId');
-      params.txPhotoId = tx.photoId;
-    }
-    if (container?.photoId && container.photoId !== tx.photoId) {
-      photoIdConditions.push('p.id = :cPhotoId');
-      params.cPhotoId = container.photoId;
+    let photoAssets: PhotoAsset[] = [];
+    if (joinRows.length > 0) {
+      const photoIds = joinRows.map((r) => r.photoId);
+      const loaded = await this.photoRepository.find({
+        where: { id: In(photoIds) },
+      });
+      const photoMap = new Map(loaded.map((p) => [p.id, p]));
+      photoAssets = photoIds
+        .map((id) => photoMap.get(id))
+        .filter((p): p is PhotoAsset => !!p);
     }
 
-    if (photoIdConditions.length > 0 && refs.length > 0) {
-      photoQb.where(
-        `(${photoIdConditions.join(' OR ')} OR ((p.warehouseId = :warehouseId OR p.warehouseId IS NULL) AND p.jobReference IN (:...refs)))`,
-        { ...params, refs },
-      );
-    } else if (photoIdConditions.length > 0) {
-      photoQb.where(`(${photoIdConditions.join(' OR ')})`, params);
-    } else if (refs.length > 0) {
-      photoQb.where(
-        '((p.warehouseId = :warehouseId OR p.warehouseId IS NULL) AND p.jobReference IN (:...refs))',
-        { warehouseId: tx.warehouseId, refs },
-      );
-    } else {
-      photoQb.where(
-        '(p.warehouseId = :warehouseId OR p.warehouseId IS NULL) AND p.jobReference = :txId',
-        {
-          warehouseId: tx.warehouseId,
-          txId: tx.id,
-        },
-      );
-    }
-
-    const photoAssets = await photoQb.getMany();
     const photos = photoAssets.map((p) => {
       return {
         id: p.id,
@@ -696,6 +648,138 @@ export class InventoryService {
       createdAt: tx.createdAt,
       photos,
     };
+  }
+
+  async attachPhotos(
+    transactionId: string,
+    photoIds: string[],
+    actor: AuthenticatedUser,
+  ) {
+    const tx = await this.transactionRepository.findOne({
+      where: { id: transactionId },
+    });
+    if (!tx) throw new NotFoundException('Transaction not found');
+    await this.warehousesService.assertWarehouseAccess(actor, tx.warehouseId);
+    await this.divisionsService.assertStoredDivisionAccess(actor, tx.division);
+
+    const privileged =
+      actor.role === 'admin' ||
+      actor.role === 'manager' ||
+      actor.role === 'staff' ||
+      (actor.permissions && actor.permissions.includes('inventory:write'));
+    if (!privileged) {
+      throw new ForbiddenException(
+        'You do not have permission to attach photos to inventory entries',
+      );
+    }
+
+    await this.resolveAttachedPhotos({ warehouseId: tx.warehouseId, photoIds } as CreateInventoryTransactionDto, actor);
+
+    await this.transactionRepository.manager.transaction(async manager => {
+      const transactions = manager.getRepository(InventoryTransaction);
+      const links = manager.getRepository(InventoryTransactionPhoto);
+      if (manager.connection.options.type === 'postgres') {
+        await transactions.findOne({ where: { id: transactionId }, lock: { mode: 'pessimistic_write' } });
+      }
+    const currentLinks = await links.find({
+      where: { transactionId },
+      order: { sortOrder: 'ASC' },
+    });
+
+    const uniqueNewIds = Array.from(new Set(photoIds)).filter(
+      (id) => !currentLinks.some((l) => l.photoId === id),
+    );
+
+    if (currentLinks.length + uniqueNewIds.length > MAX_INVENTORY_PHOTOS) {
+      throw new BadRequestException(
+        `A maximum of ${MAX_INVENTORY_PHOTOS} photos can be attached to one inventory entry`,
+      );
+    }
+
+    if (uniqueNewIds.length > 0) {
+      const photos = await this.photoRepository.find({
+        where: { id: In(uniqueNewIds) },
+      });
+      const foundIds = new Set(photos.map((p) => p.id));
+      const missing = uniqueNewIds.filter((id) => !foundIds.has(id));
+      if (missing.length > 0) {
+        throw new BadRequestException(`Photos not found: ${missing.join(', ')}`);
+      }
+
+      let sortOrder = currentLinks.length;
+      for (const photoId of uniqueNewIds) {
+        await links.save(
+          links.create({
+            id: randomUUID(),
+            transactionId,
+            photoId,
+            sortOrder: sortOrder++,
+          }),
+        );
+      }
+
+      if (!tx.photoId && uniqueNewIds.length > 0) {
+        tx.photoId = uniqueNewIds[0];
+        await transactions.save(tx);
+      }
+
+    }
+    });
+
+    await this.auditService.record({ actorUserId: actor.id, actorRole: actor.role,
+      action: 'inventory.photos_attached', entityType: 'inventory_transaction',
+      entityId: transactionId, warehouseId: tx.warehouseId,
+      summary: `Attached photos to transaction ${transactionId}`, metadata: { photoIds } });
+
+    return this.getTransactionById(transactionId, actor);
+  }
+
+  async detachPhoto(
+    transactionId: string,
+    photoId: string,
+    actor: AuthenticatedUser,
+  ) {
+    const tx = await this.transactionRepository.findOne({
+      where: { id: transactionId },
+    });
+    if (!tx) throw new NotFoundException('Transaction not found');
+    await this.warehousesService.assertWarehouseAccess(actor, tx.warehouseId);
+    await this.divisionsService.assertStoredDivisionAccess(actor, tx.division);
+
+    const privileged =
+      actor.role === 'admin' ||
+      actor.role === 'manager' ||
+      actor.role === 'staff' ||
+      (actor.permissions && actor.permissions.includes('inventory:write'));
+    if (!privileged) {
+      throw new ForbiddenException(
+        'You do not have permission to remove photos from inventory entries',
+      );
+    }
+
+    await this.txPhotoRepository.delete({ transactionId, photoId });
+
+    if (tx.photoId === photoId) {
+      const remaining = await this.txPhotoRepository.find({
+        where: { transactionId },
+        order: { sortOrder: 'ASC' },
+      });
+      tx.photoId = remaining.length > 0 ? remaining[0].photoId : null;
+      await this.transactionRepository.save(tx);
+    }
+
+    await this.auditService.record({
+      actorUserId: actor.id,
+      actorRole: actor.role,
+      action: 'inventory.photo_detached',
+      entityType: 'inventory_transaction',
+      entityId: transactionId,
+      warehouseId: tx.warehouseId,
+      summary: `Removed photo attachment ${photoId} from transaction ${transactionId}`,
+      metadata: { detachedPhotoId: photoId },
+    });
+
+    return { success: true, transactionId, photoId };
   }
 
   async listTransactions(

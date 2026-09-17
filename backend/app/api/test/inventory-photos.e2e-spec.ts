@@ -1,3 +1,4 @@
+import { gateDatabase } from './gate-database';
 /* eslint-disable */
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -14,6 +15,7 @@ import { AuthModule } from '../src/auth/auth.module';
 import { Container } from '../src/inventory/entities/container.entity';
 import { InventoryBalance } from '../src/inventory/entities/inventory-balance.entity';
 import { InventoryTransaction } from '../src/inventory/entities/inventory-transaction.entity';
+import { InventoryTransactionPhoto } from '../src/inventory/entities/inventory-transaction-photo.entity';
 import { InventoryModule } from '../src/inventory/inventory.module';
 import { MaterialsModule } from '../src/materials/materials.module';
 import { Material } from '../src/materials/entities/material.entity';
@@ -87,9 +89,7 @@ describe('E2E Acceptance: Inventory History Details & Photo Storage Retrieval', 
       imports: [
         ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }),
         TypeOrmModule.forRoot({
-          type: 'better-sqlite3',
-          database: ':memory:',
-          dropSchema: true,
+          ...gateDatabase('inventory'),
           entities: [
             User,
             AuditEvent,
@@ -99,6 +99,7 @@ describe('E2E Acceptance: Inventory History Details & Photo Storage Retrieval', 
             Material,
             Container,
             InventoryTransaction,
+            InventoryTransactionPhoto,
             InventoryBalance,
             PhotoAsset,
             Role,
@@ -106,7 +107,6 @@ describe('E2E Acceptance: Inventory History Details & Photo Storage Retrieval', 
             RolePermission,
             UserRole,
           ],
-          synchronize: true,
         }),
         AuthModule,
         UsersModule,
@@ -241,6 +241,7 @@ describe('E2E Acceptance: Inventory History Details & Photo Storage Retrieval', 
       createdBy: staffCgy.id,
       createdAt: new Date('2026-09-15T10:00:00Z'),
     });
+    await dataSource.getRepository(InventoryTransactionPhoto).save({ id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', transactionId: TX_ID_1, photoId: PHOTO_ID_1, sortOrder: 0 });
 
     // Obtain JWT tokens
     const login = async (email: string) => {
@@ -304,7 +305,7 @@ describe('E2E Acceptance: Inventory History Details & Photo Storage Retrieval', 
 
     it('3. Returns 404 for nonexistent transaction', async () => {
       await request(app.getHttpServer())
-        .get('/inventory/transactions/nonexistent-id')
+        .get('/inventory/transactions/ffffffff-ffff-4fff-8fff-ffffffffffff')
         .set('Authorization', `Bearer ${adminToken}`)
         .expect(404);
     });

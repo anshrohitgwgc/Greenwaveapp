@@ -11,6 +11,7 @@ import { WarehousesModule } from '../warehouses/warehouses.module';
 import { Container } from './entities/container.entity';
 import { InventoryBalance } from './entities/inventory-balance.entity';
 import { InventoryTransaction } from './entities/inventory-transaction.entity';
+import { InventoryTransactionPhoto } from './entities/inventory-transaction-photo.entity';
 import { InventoryController } from './inventory.controller';
 import { InventoryService } from './inventory.service';
 
@@ -19,6 +20,7 @@ import { InventoryService } from './inventory.service';
     TypeOrmModule.forFeature([
       Container,
       InventoryTransaction,
+      InventoryTransactionPhoto,
       InventoryBalance,
       Material,
       User,

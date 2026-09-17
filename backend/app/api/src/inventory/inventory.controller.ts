@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Post,
@@ -15,6 +16,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CreateContainerDto } from './dto/create-container.dto';
 import { CreateInventoryTransactionDto } from './dto/create-inventory-transaction.dto';
+import { AttachInventoryPhotosDto } from './dto/attach-inventory-photos.dto';
 import { InventoryService } from './inventory.service';
 
 @Controller()
@@ -90,6 +92,26 @@ export class InventoryController {
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     return this.inventoryService.getTransactionById(id, actor);
+  }
+
+  @Post('inventory/transactions/:id/photos')
+  @Roles('admin', 'manager', 'staff')
+  attachPhotos(
+    @Param('id') id: string,
+    @Body() dto: AttachInventoryPhotosDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.inventoryService.attachPhotos(id, dto.photoIds, actor);
+  }
+
+  @Delete('inventory/transactions/:id/photos/:photoId')
+  @Roles('admin', 'manager', 'staff')
+  detachPhoto(
+    @Param('id') id: string,
+    @Param('photoId') photoId: string,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.inventoryService.detachPhoto(id, photoId, actor);
   }
 
   @Get('inventory/balances')
