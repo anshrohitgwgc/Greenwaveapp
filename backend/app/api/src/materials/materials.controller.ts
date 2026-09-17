@@ -18,12 +18,28 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CreateMaterialDto } from './dto/create-material.dto';
 import { UpdateMaterialDto } from './dto/update-material.dto';
+import { HealthcareProductCopyService } from './healthcare-product-copy.service';
 import { MaterialsService } from './materials.service';
 
 @Controller('materials')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class MaterialsController {
-  constructor(private readonly materialsService: MaterialsService) {}
+  constructor(
+    private readonly materialsService: MaterialsService,
+    private readonly copyService: HealthcareProductCopyService,
+  ) {}
+
+  @Get('admin/healthcare-copy-preview')
+  @Roles('admin')
+  healthcareCopyPreview(@Query('sourceWarehouseId') source?: string, @Query('targetWarehouseId') target?: string) {
+    return this.copyService.preview(source, target);
+  }
+
+  @Post('admin/copy-healthcare-to-calgary')
+  @Roles('admin')
+  copyHealthcareToCalgary(@Body() body: { sourceWarehouseId?: string; targetWarehouseId?: string }) {
+    return this.copyService.execute(body.sourceWarehouseId, body.targetWarehouseId);
+  }
 
   @Post()
   @Roles('admin', 'manager')

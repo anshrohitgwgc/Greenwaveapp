@@ -35,8 +35,8 @@
     /* `purchaseorders` / `poeditor` are admin-only, matching @Roles('admin')
        on PurchaseOrdersController. Leaving them off the manager row is the
        point: managers may work invoices but not purchase orders. */
-    admin:   { label: 'Administrator', sees: ['dashboard','inventory','photos','timeclock','chat','invoices','editor','payments','araging','purchaseorders','poeditor','banking','reconciliation','payables','chartofaccounts','generalledger','profitloss','balancesheet','employees','attendance','leaverequests','customers','products','staff','history','settings'] },
-    manager: { label: 'Manager',       sees: ['dashboard','inventory','photos','timeclock','chat','invoices','editor','payments','araging','banking','reconciliation','payables','chartofaccounts','generalledger','profitloss','balancesheet','employees','attendance','leaverequests','customers','products','history','settings'] },
+    admin:   { label: 'Administrator', sees: ['dashboard','inventory','photos','timeclock','chat','proformas','proformaeditor','invoices','editor','payments','araging','purchaseorders','poeditor','banking','reconciliation','payables','chartofaccounts','generalledger','profitloss','balancesheet','employees','attendance','leaverequests','customers','products','staff','history','settings'] },
+    manager: { label: 'Manager',       sees: ['dashboard','inventory','photos','timeclock','chat','proformas','proformaeditor','invoices','editor','payments','araging','banking','reconciliation','payables','chartofaccounts','generalledger','profitloss','balancesheet','employees','attendance','leaverequests','customers','products','history','settings'] },
     staff:   { label: 'Staff',         sees: ['dashboard','inventory','photos','timeclock','chat','attendance','leaverequests','settings'] },
     driver:  { label: 'Driver',        sees: ['dashboard','inventory','photos','timeclock','chat','attendance','leaverequests','settings'] }
   };
@@ -511,6 +511,9 @@
   }
 
   function syncChrome() {
+    if (global.Api && global.Api.setDivision) {
+      global.Api.setDivision(apiDivisionKey(entity));
+    }
     document.documentElement.setAttribute('data-entity', entity);
     syncDivisionChrome();
     $$('.entsw button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.entity === entity)); });
@@ -670,11 +673,15 @@
 
   function show(next) {
     if (next === 'invoices' && !isRecycling()) next = 'inventory';
+    if (next === 'proformas' && !isRecycling()) next = 'inventory';
     if (next === 'payments' && !isRecycling()) next = 'inventory';
     if (next === 'araging' && !isRecycling()) next = 'inventory';
     if (next === 'purchaseorders' && !isRecycling()) next = 'inventory';
-    if (!can(next) && next !== 'editor') next = 'dashboard';
+    if (!can(next) && next !== 'editor' && next !== 'proformaeditor') next = 'dashboard';
     if (next === 'editor' && !can('invoices')) next = 'inventory';
+    if (next === 'proformaeditor' && !(can('proformas') && isRecycling())) {
+      next = can('proformas') ? 'proformas' : 'inventory';
+    }
     // The PO editor is reachable only by someone who may see purchase orders
     // at all, so a non-admin deep-linking to it lands somewhere they can use.
     if (next === 'poeditor' && !(can('purchaseorders') && isRecycling())) {
@@ -700,7 +707,8 @@
     $$('.navitem').forEach(function (b) {
       var on = b.dataset.view === view ||
         (view === 'editor' && b.dataset.view === 'invoices') ||
-        (view === 'poeditor' && b.dataset.view === 'purchaseorders');
+        (view === 'poeditor' && b.dataset.view === 'purchaseorders') ||
+        (view === 'proformaeditor' && b.dataset.view === 'proformas');
       if (on) b.classList.add('active'); else b.classList.remove('active');
     });
     var app = $('#app');
@@ -1135,15 +1143,28 @@
 
   function openTransactionDetailModal(txId) {
     Api.getInventoryTransaction(txId).then(function (tx) {
+      var photoCount = (tx.photos && tx.photos.length) || 0;
+      var canAddPhotos = photoCount < 15;
+      var addPhotoBtnHtml = canAddPhotos
+        ? '<label class="btn ghost btn-sm" style="cursor:pointer;margin:0;display:inline-flex;align-items:center;gap:4px">' +
+            '<svg style="width:13px;height:13px"><use href="#i-plus"></use></svg> Add Photos' +
+            '<input type="file" id="txAddPhotoInput" accept="image/*" multiple style="display:none">' +
+          '</label>'
+        : '<span style="font-size:12px;color:var(--muted)">Max photos reached (15/15)</span>';
+
       var photoHtml = '';
-      if (tx.photos && tx.photos.length > 0) {
+      if (photoCount > 0) {
         photoHtml = '<div class="tx-photos-section" style="margin-top:16px">' +
-          '<span class="tx-detail-label">Associated Photos (' + tx.photos.length + ') — Click thumbnail to open lightbox</span>' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
+            '<span class="tx-detail-label">Associated Photos (' + photoCount + ' / 15)</span>' +
+            addPhotoBtnHtml +
+          '</div>' +
           '<div class="tx-photos-grid">' +
           tx.photos.map(function (p, idx) {
             var fileName = p.originalFilename || p.filename || ('Photo #' + (idx + 1));
             var thumbUrl = (p.id ? Api.photoThumbnailUrl(p.id) : (p.thumbnailUrl ? Api.photoThumbnailUrl(p.thumbnailUrl) : (p.url || '')));
-            return '<div class="tx-photo-card" data-idx="' + idx + '" style="cursor:pointer">' +
+            return '<div class="tx-photo-card" data-idx="' + idx + '" style="cursor:pointer;position:relative">' +
+              '<button type="button" class="tx-photo-del-btn" data-photo-id="' + esc(p.id) + '" title="Remove photo" style="position:absolute;top:4px;right:4px;background:rgba(220,38,38,0.85);color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;z-index:2">✕</button>' +
               '<div class="photo-thumb-wrap" style="height:110px">' +
                 '<img src="' + esc(thumbUrl) + '" alt="' + esc(fileName) + '" class="tx-photo-img" loading="lazy" onerror="this.style.display=\'none\';if(this.nextElementSibling)this.nextElementSibling.style.display=\'flex\';">' +
                 '<div class="photo-error-placeholder" style="display:none">' +
@@ -1155,7 +1176,13 @@
           }).join('') +
           '</div></div>';
       } else {
-        photoHtml = '<div class="tx-detail-item" style="grid-column: 1 / -1;margin-top:8px"><span class="tx-detail-label">Associated Photos</span><span class="tx-detail-val" style="color:var(--muted)">— None attached</span></div>';
+        photoHtml = '<div class="tx-photos-section" style="margin-top:16px">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
+            '<span class="tx-detail-label">Associated Photos (0 / 15)</span>' +
+            addPhotoBtnHtml +
+          '</div>' +
+          '<div class="tx-detail-val" style="color:var(--muted)">— None attached</div>' +
+        '</div>';
       }
 
       var txIsRec = (tx.division === 'recycling' || tx.unitType === 'pallet' || (!tx.division && !tx.unitType && (tx.weightValue != null && Number(tx.weightValue) > 0)));
@@ -1219,8 +1246,49 @@
       var okBtn = $('#modalOk'); if (okBtn) okBtn.hidden = true;
       var cancelBtn = $('#modalCancel'); if (cancelBtn) cancelBtn.textContent = 'Close';
 
+      var fileInput = $('#txAddPhotoInput');
+      if (fileInput) {
+        fileInput.addEventListener('change', function () {
+          var files = Array.prototype.slice.call(fileInput.files || []);
+          if (!files.length) return;
+          var curCount = (tx.photos && tx.photos.length) || 0;
+          if (curCount + files.length > 15) {
+            toast('Cannot add ' + files.length + ' photos. Maximum is 15 (currently ' + curCount + ').');
+            return;
+          }
+          toast('Uploading ' + files.length + ' photo(s)...', 'info');
+          Api.uploadPhotosBatch(files, { transactionId: tx.id, warehouseId: tx.warehouseId }).then(function (res) {
+            var uploaded = res.photos || (Array.isArray(res) ? res : [res]);
+            var ids = uploaded.map(function (p) { return p.id; }).filter(Boolean);
+            if (!ids.length) throw new Error('No photo IDs returned from upload');
+            return Api.attachTransactionPhotos(tx.id, ids);
+          }).then(function () {
+            toast('Photos attached successfully');
+            openTransactionDetailModal(txId);
+          }).catch(function (err) {
+            toast('Failed to attach photos: ' + (err.message || err));
+          });
+        });
+      }
+
+      $$('.tx-photo-del-btn').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var photoId = btn.dataset.photoId;
+          if (!photoId) return;
+          if (!confirm('Remove this photo from the transaction?')) return;
+          Api.detachTransactionPhoto(tx.id, photoId).then(function () {
+            toast('Photo removed');
+            openTransactionDetailModal(txId);
+          }).catch(function (err) {
+            toast('Failed to remove photo: ' + (err.message || err));
+          });
+        });
+      });
+
       $$('.tx-photo-card').forEach(function (card) {
-        card.addEventListener('click', function () {
+        card.addEventListener('click', function (e) {
+          if (e.target.closest('.tx-photo-del-btn')) return;
           var idx = Number(card.dataset.idx);
           openLightbox(idx, tx.photos);
         });
@@ -4881,6 +4949,636 @@
     return err.message || 'Could not save the purchase order.';
   }
 
+  /* ==========================================================================
+     PROFORMA INVOICES (GREENWAVE RECYCLING DIVISION ONLY)
+
+     Non-accounting quotations & preliminary sales estimates.
+     - Dedicated numbering sequence: PF-0001, PF-0002...
+     - Complete isolation: 0 payments, 0 journal entries, 0 AR postings.
+     - Transactional conversion to final real invoice with audit tracking.
+     - Responsive list view & editor with Incoterms and weights.
+     ========================================================================== */
+
+  var proformaDraft = null;
+  var proformaFilter = 'all';
+  var proformaSearchQuery = '';
+  var proformaListCache = [];
+
+  var INCOTERM_OPTIONS = [
+    'FOB', 'CIF', 'CFR', 'EXW', 'DAP', 'DDP', 'FCA', 'CPT', 'CIP'
+  ];
+
+  function blankProformaLine() {
+    return {
+      description: '',
+      quantity: 1,
+      unit: 'kg',
+      unitPrice: 0,
+      discount: 0,
+      taxRate: 5,
+      weight: 0
+    };
+  }
+
+  function proformaToDraft(p) {
+    if (!p) return null;
+    return {
+      id: p.id,
+      proformaNumber: p.proformaNumber,
+      customerId: p.customerId || '',
+      customerName: p.customerName || '',
+      warehouseId: p.warehouseId || '',
+      issueDate: p.issueDate || new Date().toISOString().split('T')[0],
+      validityDate: p.validityDate || '',
+      currency: p.currency || 'CAD',
+      poReference: p.poReference || '',
+      billTo: p.billTo || '',
+      shipTo: p.shipTo || '',
+      origin: p.origin || '',
+      destination: p.destination || '',
+      incoterm: p.incoterm || 'FOB',
+      incotermLocation: p.incotermLocation || '',
+      shippingTerms: p.shippingTerms || '',
+      notes: p.notes || '',
+      commercialTerms: p.commercialTerms || 'Commercial proforma estimate. This is not a tax invoice or demand for payment.',
+      status: p.status || 'draft',
+      convertedInvoiceId: p.convertedInvoiceId || null,
+      convertedAt: p.convertedAt || null,
+      subtotal: p.subtotal != null ? Number(p.subtotal) : 0,
+      taxTotal: p.taxTotal != null ? Number(p.taxTotal) : 0,
+      total: p.total != null ? Number(p.total) : 0,
+      totalWeight: p.totalWeight != null ? Number(p.totalWeight) : 0,
+      weightUnit: p.weightUnit || 'kg',
+      items: (p.items && p.items.length) ? p.items.map(function (it) {
+        return {
+          id: it.id,
+          materialId: it.materialId || null,
+          description: it.description || '',
+          quantity: Number(it.quantity) || 0,
+          unit: it.unit || 'kg',
+          unitPrice: Number(it.unitPrice) || 0,
+          discount: Number(it.discount) || 0,
+          taxRate: Number(it.taxRate) || 0,
+          total: Number(it.total) || 0,
+          weight: it.weight != null ? Number(it.weight) : null
+        };
+      }) : [blankProformaLine()]
+    };
+  }
+
+  function setupProformaFilters() {
+    $$('#proformaFilterTabs [data-pf-filter]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        $$('#proformaFilterTabs [data-pf-filter]').forEach(function (b) {
+          b.classList.remove('active');
+          b.setAttribute('aria-selected', 'false');
+        });
+        btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
+        proformaFilter = btn.dataset.pfFilter;
+        renderProformaList();
+      });
+    });
+
+    var s = $('#proformaSearch');
+    if (s) {
+      s.addEventListener('input', function () {
+        proformaSearchQuery = s.value.trim().toLowerCase();
+        renderProformaList();
+      });
+    }
+
+    var newBtn = $('#newProforma');
+    if (newBtn) {
+      newBtn.onclick = function () {
+        proformaDraft = {
+          customerId: '',
+          customerName: '',
+          warehouseId: warehouseId || '',
+          issueDate: new Date().toISOString().split('T')[0],
+          validityDate: '',
+          currency: 'CAD',
+          poReference: '',
+          billTo: '',
+          shipTo: '',
+          origin: '',
+          destination: '',
+          incoterm: 'FOB',
+          incotermLocation: '',
+          shippingTerms: '',
+          notes: '',
+          commercialTerms: 'Commercial proforma estimate. This is not a tax invoice or demand for payment.',
+          status: 'draft',
+          items: [blankProformaLine()]
+        };
+        show('proformaeditor');
+      };
+    }
+  }
+
+  function renderProformaList() {
+    loadingState('#proformaList');
+    setupProformaFilters();
+
+    Api.listProformas().then(function (list) {
+      proformaListCache = list || [];
+      var rows = proformaListCache.slice();
+
+      if (proformaFilter && proformaFilter !== 'all') {
+        rows = rows.filter(function (p) {
+          return (p.status || '').toLowerCase() === proformaFilter.toLowerCase();
+        });
+      }
+
+      if (proformaSearchQuery) {
+        var q = proformaSearchQuery;
+        rows = rows.filter(function (p) {
+          var num = (p.proformaNumber || '').toLowerCase();
+          var cust = (p.customerName || '').toLowerCase();
+          var po = (p.poReference || '').toLowerCase();
+          var inco = (p.incoterm || '').toLowerCase();
+          var dest = (p.destination || '').toLowerCase();
+          return num.indexOf(q) >= 0 || cust.indexOf(q) >= 0 || po.indexOf(q) >= 0 || inco.indexOf(q) >= 0 || dest.indexOf(q) >= 0;
+        });
+      }
+
+      var cList = $('#proformaList');
+      if (!cList) return;
+
+      if (!rows.length) {
+        cList.innerHTML = emptyState('doc', 'No proforma invoices found',
+          'Create preliminary commercial quotes with custom Incoterms and weights.',
+          'New proforma', 'newProformaEmpty');
+        var emptyBtn = $('#newProformaEmpty');
+        if (emptyBtn) {
+          emptyBtn.onclick = function () {
+            var newBtn = $('#newProforma');
+            if (newBtn) newBtn.click();
+          };
+        }
+        return;
+      }
+
+      var html = '<div class="card"><div class="tablewrap" tabindex="0" role="region" aria-label="Proforma Invoices"><table class="table"><thead><tr>' +
+        '<th>Proforma #</th><th>Date</th><th>Customer</th><th>Incoterm / Terms</th><th>Total Weight</th><th>Amount</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
+
+      html += rows.map(function (pf) {
+        var statusBadgeClass = 'badge-secondary';
+        var st = (pf.status || 'draft').toLowerCase();
+        if (st === 'draft') statusBadgeClass = 'badge-warning';
+        else if (st === 'sent') statusBadgeClass = 'badge-info';
+        else if (st === 'accepted') statusBadgeClass = 'badge-success';
+        else if (st === 'converted') statusBadgeClass = 'badge-success';
+        else if (st === 'cancelled') statusBadgeClass = 'badge-danger';
+
+        var weightStr = pf.totalWeight ? (Number(pf.totalWeight).toLocaleString() + ' ' + (pf.weightUnit || 'kg')) : '—';
+        var incoStr = pf.incoterm ? (pf.incoterm + (pf.incotermLocation ? ' (' + pf.incotermLocation + ')' : '')) : '—';
+
+        var canEdit = st !== 'converted' && st !== 'cancelled';
+        var canConvert = st !== 'converted' && st !== 'cancelled' && (isAdmin() || isManager());
+
+        var actions = '<div class="btn-group" style="justify-content:flex-end;gap:4px">' +
+          '<button type="button" class="btn ghost btn-sm pf-btn-view" data-pf-id="' + esc(pf.id) + '" title="View / Edit"><svg style="width:13px;height:13px"><use href="#i-edit"></use></svg></button>' +
+          '<button type="button" class="btn ghost btn-sm pf-btn-pdf" data-pf-id="' + esc(pf.id) + '" title="Download PDF"><svg style="width:13px;height:13px"><use href="#i-download"></use></svg></button>' +
+          '<button type="button" class="btn ghost btn-sm pf-btn-send" data-pf-id="' + esc(pf.id) + '" title="Send Email"><svg style="width:13px;height:13px"><use href="#i-send"></use></svg></button>';
+
+        if (canConvert) {
+          actions += '<button type="button" class="btn btn-sm btn-primary pf-btn-convert" data-pf-id="' + esc(pf.id) + '" data-pf-num="' + esc(pf.proformaNumber) + '" title="Convert to Real Invoice"><svg style="width:12px;height:12px;margin-right:2px"><use href="#i-check"></use></svg>Convert</button>';
+        }
+
+        actions += '</div>';
+
+        return '<tr>' +
+          '<td><strong class="mono" style="font-size:14px">' + esc(pf.proformaNumber) + '</strong>' +
+            (pf.convertedInvoiceId ? '<div style="font-size:11px;color:var(--text-success)">Converted to Invoice</div>' : '') + '</td>' +
+          '<td class="mono" style="font-size:13px">' + esc(pf.issueDate || '—') + '</td>' +
+          '<td><strong>' + esc(pf.customerName || '—') + '</strong>' + (pf.poReference ? '<div style="font-size:11px;color:var(--muted)">PO: ' + esc(pf.poReference) + '</div>' : '') + '</td>' +
+          '<td>' + esc(incoStr) + '</td>' +
+          '<td class="mono">' + esc(weightStr) + '</td>' +
+          '<td class="mono" style="font-size:14px;font-weight:600">' + (pf.currency || 'CAD') + ' ' + (Number(pf.total || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) + '</td>' +
+          '<td><span class="badge ' + statusBadgeClass + '">' + esc((pf.status || 'draft').toUpperCase()) + '</span></td>' +
+          '<td style="text-align:right">' + actions + '</td>' +
+        '</tr>';
+      }).join('');
+
+      html += '</tbody></table></div></div>';
+      cList.innerHTML = html;
+
+      // Event Listeners on buttons
+      $$('.pf-btn-view').forEach(function (b) {
+        b.addEventListener('click', function () {
+          Api.getProforma(b.dataset.pfId).then(function (pf) {
+            proformaDraft = proformaToDraft(pf);
+            show('proformaeditor');
+          }).catch(function (err) {
+            toast('Failed to load proforma: ' + (err.message || err));
+          });
+        });
+      });
+
+      $$('.pf-btn-pdf').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var id = b.dataset.pfId;
+          toast('Generating proforma PDF...', 'info');
+          Api.downloadProformaPdf(id).then(function (blob) {
+            var url = window.URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = 'proforma-' + id.slice(0, 8) + '.pdf';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+          }).catch(function (err) {
+            toast('Failed to download PDF: ' + (err.message || err));
+          });
+        });
+      });
+
+      $$('.pf-btn-send').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var id = b.dataset.pfId;
+          var pf = proformaListCache.filter(function (x) { return x.id === id; })[0];
+          var defaultEmail = (pf && pf.customer && pf.customer.email) || '';
+          openModal('Send Proforma Invoice',
+            field('email', 'Recipient Email Address', { type: 'email', required: true, value: defaultEmail, placeholder: 'billing@client.com' }) +
+            field('message', 'Optional Message', { type: 'textarea', placeholder: 'Please find attached the proforma invoice quotation...' }),
+            function (fd) {
+              return Api.sendProforma(id, { email: fd.email, message: fd.message }).then(function () {
+                toast('Proforma email dispatched successfully');
+                renderProformaList();
+              });
+            },
+            { okLabel: 'Send Proforma', savingLabel: 'Sending...' }
+          );
+        });
+      });
+
+      $$('.pf-btn-convert').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var id = b.dataset.pfId;
+          var num = b.dataset.pfNum;
+          confirmConvertProforma(id, num);
+        });
+      });
+
+    }).catch(function (err) {
+      apiErrorState('#proformaList', err);
+    });
+  }
+
+  function confirmConvertProforma(id, num) {
+    var bodyHtml =
+      '<div class="delete-confirm">' +
+        '<p class="delete-confirm-lead">Convert <strong>' + esc(num) + '</strong> into a final real invoice?</p>' +
+        '<p style="font-size:13px;color:var(--text);margin-top:8px">' +
+          'This action will:' +
+        '</p>' +
+        '<ul style="font-size:13px;color:var(--text);margin-left:20px;list-style:disc">' +
+          '<li>Allocate a formal real invoice number from the standard sequence.</li>' +
+          '<li>Post formal accounts receivable entries to the General Ledger.</li>' +
+          '<li>Mark this proforma as converted with an immutable link to the new invoice.</li>' +
+        '</ul>' +
+      '</div>';
+
+    openModal('Convert Proforma to Invoice', bodyHtml, function () {
+      return Api.convertProforma(id).then(function (res) {
+        toast('Proforma converted to Invoice #' + (res.invoice ? res.invoice.invoiceNumber : 'created'));
+        show('invoices');
+      });
+    }, { okLabel: 'Convert to Invoice', okClass: 'primary', savingLabel: 'Converting...' });
+  }
+
+  function renderProformaEditor() {
+    var body = $('#proformaEditorBody');
+    if (!body) return;
+
+    if (!proformaDraft) {
+      proformaDraft = {
+        customerId: '',
+        customerName: '',
+        warehouseId: warehouseId || '',
+        issueDate: new Date().toISOString().split('T')[0],
+        validityDate: '',
+        currency: 'CAD',
+        poReference: '',
+        billTo: '',
+        shipTo: '',
+        origin: '',
+        destination: '',
+        incoterm: 'FOB',
+        incotermLocation: '',
+        shippingTerms: '',
+        notes: '',
+        commercialTerms: 'Commercial proforma estimate. This is not a tax invoice or demand for payment.',
+        status: 'draft',
+        items: [blankProformaLine()]
+      };
+    }
+
+    var d = proformaDraft;
+    var isConverted = d.status === 'converted';
+
+    // Top action buttons
+    var titleEl = $('#pfEdTitle');
+    if (titleEl) {
+      titleEl.textContent = d.proformaNumber ? ('Proforma Invoice ' + d.proformaNumber) : 'New proforma invoice';
+    }
+
+    var saveBtn = $('#pfEdSave');
+    if (saveBtn) {
+      saveBtn.disabled = isConverted;
+      saveBtn.innerHTML = '<svg><use href="#i-check"></use></svg>' + (d.id ? 'Save changes' : 'Create proforma');
+      saveBtn.onclick = function () { doSaveProforma(); };
+    }
+
+    var pdfBtn = $('#pfEdPdf');
+    if (pdfBtn) {
+      pdfBtn.hidden = !d.id;
+      pdfBtn.onclick = function () {
+        toast('Generating proforma PDF...', 'info');
+        Api.downloadProformaPdf(d.id).then(function (blob) {
+          var url = window.URL.createObjectURL(blob);
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = (d.proformaNumber || 'proforma') + '.pdf';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(url);
+        }).catch(function (err) {
+          toast('Failed to download PDF: ' + (err.message || err));
+        });
+      };
+    }
+
+    var sendBtn = $('#pfEdSend');
+    if (sendBtn) {
+      sendBtn.hidden = !d.id;
+      sendBtn.onclick = function () {
+        openModal('Send Proforma Invoice',
+          field('email', 'Recipient Email', { type: 'email', required: true, value: d.customerEmail || '', placeholder: 'client@example.com' }) +
+          field('message', 'Message (Optional)', { type: 'textarea' }),
+          function (fd) {
+            return Api.sendProforma(d.id, { email: fd.email, message: fd.message }).then(function () {
+              toast('Proforma sent to ' + fd.email);
+            });
+          },
+          { okLabel: 'Send', savingLabel: 'Sending...' }
+        );
+      };
+    }
+
+    var convertBtn = $('#pfEdConvert');
+    if (convertBtn) {
+      convertBtn.hidden = !d.id || isConverted;
+      convertBtn.onclick = function () {
+        confirmConvertProforma(d.id, d.proformaNumber);
+      };
+    }
+
+    // Render form content
+    var incotermSelect = '<select id="pfIncoterm" class="input"' + (isConverted ? ' disabled' : '') + '>' +
+      INCOTERM_OPTIONS.map(function (opt) {
+        return '<option value="' + esc(opt) + '"' + (d.incoterm === opt ? ' selected' : '') + '>' + esc(opt) + '</option>';
+      }).join('') +
+      '</select>';
+
+    var linesHtml = d.items.map(function (it, idx) {
+      var lineTot = (Number(it.quantity) * Number(it.unitPrice)) - Number(it.discount || 0);
+      if (it.taxRate) lineTot += lineTot * (Number(it.taxRate) / 100);
+
+      return '<tr data-pf-line="' + idx + '">' +
+        '<td><input type="text" class="input pf-f-desc" value="' + esc(it.description) + '" placeholder="Item / material description"' + (isConverted ? ' disabled' : '') + '></td>' +
+        '<td><input type="number" step="any" class="input pf-f-qty mono" value="' + esc(it.quantity) + '" style="width:90px"' + (isConverted ? ' disabled' : '') + '></td>' +
+        '<td><input type="text" class="input pf-f-unit" value="' + esc(it.unit || 'kg') + '" style="width:70px"' + (isConverted ? ' disabled' : '') + '></td>' +
+        '<td><input type="number" step="0.0001" class="input pf-f-price mono" value="' + esc(it.unitPrice) + '" style="width:95px"' + (isConverted ? ' disabled' : '') + '></td>' +
+        '<td><input type="number" step="0.01" class="input pf-f-disc mono" value="' + esc(it.discount || 0) + '" style="width:80px"' + (isConverted ? ' disabled' : '') + '></td>' +
+        '<td><input type="number" step="0.1" class="input pf-f-tax mono" value="' + esc(it.taxRate || 5) + '" style="width:65px"' + (isConverted ? ' disabled' : '') + '></td>' +
+        '<td><input type="number" step="any" class="input pf-f-weight mono" value="' + esc(it.weight != null ? it.weight : '') + '" placeholder="kg" style="width:90px"' + (isConverted ? ' disabled' : '') + '></td>' +
+        '<td class="mono pf-line-total" style="font-weight:600;text-align:right">$' + lineTot.toFixed(2) + '</td>' +
+        '<td>' + (isConverted ? '' : '<button type="button" class="btn ghost btn-sm pf-line-del" title="Remove line"><svg style="width:13px;height:13px"><use href="#i-trash"></use></svg></button>') + '</td>' +
+      '</tr>';
+    }).join('');
+
+    var html =
+      '<div class="form-grid" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:16px;margin-bottom:20px">' +
+        '<div class="card">' +
+          '<h3 style="margin-top:0;font-size:15px;margin-bottom:12px">Customer &amp; Logistics</h3>' +
+          '<div class="field"><label for="pfCustomerName">Customer / Consignee</label><input type="text" id="pfCustomerName" class="input" value="' + esc(d.customerName) + '" placeholder="Customer company name"' + (isConverted ? ' disabled' : '') + '></div>' +
+          '<div class="field"><label for="pfPoRef">Customer PO Reference</label><input type="text" id="pfPoRef" class="input" value="' + esc(d.poReference) + '" placeholder="e.g. PO-2026-XYZ"' + (isConverted ? ' disabled' : '') + '></div>' +
+          '<div class="field-row" style="display:flex;gap:10px">' +
+            '<div class="field" style="flex:1"><label for="pfIncoterm">Incoterm</label>' + incotermSelect + '</div>' +
+            '<div class="field" style="flex:2"><label for="pfIncotermLoc">Named Port / Place</label><input type="text" id="pfIncotermLoc" class="input" value="' + esc(d.incotermLocation) + '" placeholder="e.g. Port of Vancouver"' + (isConverted ? ' disabled' : '') + '></div>' +
+          '</div>' +
+          '<div class="field-row" style="display:flex;gap:10px">' +
+            '<div class="field" style="flex:1"><label for="pfOrigin">Origin</label><input type="text" id="pfOrigin" class="input" value="' + esc(d.origin) + '" placeholder="e.g. Calgary, AB"' + (isConverted ? ' disabled' : '') + '></div>' +
+            '<div class="field" style="flex:1"><label for="pfDestination">Destination</label><input type="text" id="pfDestination" class="input" value="' + esc(d.destination) + '" placeholder="e.g. Tokyo, Japan"' + (isConverted ? ' disabled' : '') + '></div>' +
+          '</div>' +
+          '<div class="field"><label for="pfShippingTerms">Shipping Terms / Instructions</label><input type="text" id="pfShippingTerms" class="input" value="' + esc(d.shippingTerms) + '" placeholder="e.g. Ocean freight prepaid; 40ft HC container"' + (isConverted ? ' disabled' : '') + '></div>' +
+        '</div>' +
+
+        '<div class="card">' +
+          '<h3 style="margin-top:0;font-size:15px;margin-bottom:12px">Document Details &amp; Addresses</h3>' +
+          '<div class="field-row" style="display:flex;gap:10px">' +
+            '<div class="field" style="flex:1"><label for="pfIssueDate">Issue Date</label><input type="date" id="pfIssueDate" class="input" value="' + esc(d.issueDate) + '"' + (isConverted ? ' disabled' : '') + '></div>' +
+            '<div class="field" style="flex:1"><label for="pfValidityDate">Valid Until</label><input type="date" id="pfValidityDate" class="input" value="' + esc(d.validityDate) + '"' + (isConverted ? ' disabled' : '') + '></div>' +
+            '<div class="field" style="flex:1"><label for="pfCurrency">Currency</label><select id="pfCurrency" class="input"' + (isConverted ? ' disabled' : '') + '><option value="CAD"' + (d.currency === 'CAD' ? ' selected' : '') + '>CAD</option><option value="USD"' + (d.currency === 'USD' ? ' selected' : '') + '>USD</option></select></div>' +
+          '</div>' +
+          '<div class="field"><label for="pfBillTo">Billing Address (Bill To)</label><textarea id="pfBillTo" class="input" rows="2"' + (isConverted ? ' disabled' : '') + '>' + esc(d.billTo) + '</textarea></div>' +
+          '<div class="field"><label for="pfShipTo">Shipping Address (Ship To)</label><textarea id="pfShipTo" class="input" rows="2"' + (isConverted ? ' disabled' : '') + '>' + esc(d.shipTo) + '</textarea></div>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="card" style="margin-bottom:20px">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">' +
+          '<h3 style="margin:0;font-size:15px">Quoted Items &amp; Weights</h3>' +
+          (isConverted ? '' : '<button type="button" class="btn ghost btn-sm" id="pfAddLine"><svg style="width:13px;height:13px"><use href="#i-plus"></use></svg>Add item</button>') +
+        '</div>' +
+        '<div class="tablewrap" tabindex="0" role="region" aria-label="Items Table">' +
+          '<table class="table" style="width:100%">' +
+            '<thead><tr>' +
+              '<th>Description</th><th style="width:90px">Qty</th><th style="width:70px">Unit</th><th style="width:95px">Price</th><th style="width:80px">Disc ($)</th><th style="width:65px">Tax (%)</th><th style="width:90px">Weight</th><th style="text-align:right">Total</th><th></th>' +
+            '</tr></thead>' +
+            '<tbody id="pfItemsWrap">' + linesHtml + '</tbody>' +
+          '</table>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="form-grid" style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:20px">' +
+        '<div class="card">' +
+          '<div class="field"><label for="pfCommercialTerms">Commercial Terms &amp; Conditions</label><textarea id="pfCommercialTerms" class="input" rows="3"' + (isConverted ? ' disabled' : '') + '>' + esc(d.commercialTerms) + '</textarea></div>' +
+          '<div class="field"><label for="pfNotes">Public Notes (Visible to Customer)</label><textarea id="pfNotes" class="input" rows="2"' + (isConverted ? ' disabled' : '') + '>' + esc(d.notes) + '</textarea></div>' +
+        '</div>' +
+        '<div class="card" style="background:var(--card-bg);border:1px solid var(--border)">' +
+          '<h3 style="margin-top:0;font-size:15px;margin-bottom:12px">Estimate Summary</h3>' +
+          '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span>Total Weight</span><strong class="mono" id="pfSumWeight">0 kg</strong></div>' +
+          '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span>Subtotal</span><strong class="mono" id="pfSumSubtotal">$0.00</strong></div>' +
+          '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span>Estimated Tax</span><strong class="mono" id="pfSumTax">$0.00</strong></div>' +
+          '<div style="display:flex;justify-content:space-between;padding:10px 0 4px 0;font-size:17px"><span>ESTIMATED TOTAL</span><strong class="mono text-success" id="pfSumTotal">$0.00</strong></div>' +
+          '<p style="font-size:11px;color:var(--muted);margin-top:10px;margin-bottom:0">Non-accounting estimate. No AR or Ledger entries are created until formal conversion.</p>' +
+        '</div>' +
+      '</div>';
+
+    body.innerHTML = html;
+
+    // Recalculate summary totals live
+    function syncAndCalc() {
+      var rows = $$('#pfItemsWrap tr');
+      var subtotal = 0;
+      var taxTotal = 0;
+      var totalWeight = 0;
+
+      d.items = rows.map(function (tr) {
+        var descEl = tr.querySelector('.pf-f-desc');
+        var qtyEl = tr.querySelector('.pf-f-qty');
+        var unitEl = tr.querySelector('.pf-f-unit');
+        var priceEl = tr.querySelector('.pf-f-price');
+        var discEl = tr.querySelector('.pf-f-disc');
+        var taxREl = tr.querySelector('.pf-f-tax');
+        var wValEl = tr.querySelector('.pf-f-weight');
+
+        var desc = descEl ? descEl.value : '';
+        var qty = qtyEl ? (Number(qtyEl.value) || 0) : 0;
+        var unit = unitEl ? (unitEl.value || 'kg') : 'kg';
+        var price = priceEl ? (Number(priceEl.value) || 0) : 0;
+        var disc = discEl ? (Number(discEl.value) || 0) : 0;
+        var taxR = taxREl ? (Number(taxREl.value) || 0) : 0;
+        var wVal = wValEl ? wValEl.value : '';
+        var weight = wVal !== '' ? Number(wVal) : null;
+
+        var lineSub = (qty * price) - disc;
+        var lineTax = lineSub > 0 ? (lineSub * (taxR / 100)) : 0;
+        var lineTot = lineSub + lineTax;
+
+        subtotal += lineSub;
+        taxTotal += lineTax;
+        if (weight != null) totalWeight += weight;
+
+        var totEl = tr.querySelector('.pf-line-total');
+        if (totEl) totEl.textContent = '$' + lineTot.toFixed(2);
+
+        return {
+          description: desc,
+          quantity: qty,
+          unit: unit,
+          unitPrice: price,
+          discount: disc,
+          taxRate: taxR,
+          weight: weight
+        };
+      });
+
+      var total = subtotal + taxTotal;
+      var cur = $('#pfCurrency') ? $('#pfCurrency').value : 'CAD';
+
+      var wEl = $('#pfSumWeight'); if (wEl) wEl.textContent = totalWeight.toLocaleString() + ' kg';
+      var sEl = $('#pfSumSubtotal'); if (sEl) sEl.textContent = cur + ' $' + subtotal.toFixed(2);
+      var tEl = $('#pfSumTax'); if (tEl) tEl.textContent = cur + ' $' + taxTotal.toFixed(2);
+      var totEl = $('#pfSumTotal'); if (totEl) totEl.textContent = cur + ' $' + total.toFixed(2);
+    }
+
+    syncAndCalc();
+
+    // Event listeners on form inputs
+    body.querySelectorAll('input, select, textarea').forEach(function (inp) {
+      inp.addEventListener('input', syncAndCalc);
+    });
+
+    var addLineBtn = $('#pfAddLine');
+    if (addLineBtn) {
+      addLineBtn.addEventListener('click', function () {
+        syncAndCalc();
+        d.items.push(blankProformaLine());
+        renderProformaEditor();
+      });
+    }
+
+    $$('.pf-line-del').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var tr = btn.closest('tr');
+        var idx = tr ? Number(tr.dataset.pfLine) : -1;
+        if (idx >= 0) {
+          syncAndCalc();
+          d.items.splice(idx, 1);
+          if (!d.items.length) d.items.push(blankProformaLine());
+          renderProformaEditor();
+        }
+      });
+    });
+
+    function doSaveProforma() {
+      syncAndCalc();
+      var customerName = $('#pfCustomerName') ? $('#pfCustomerName').value.trim() : '';
+      var poRef = $('#pfPoRef') ? $('#pfPoRef').value.trim() : '';
+      var incoterm = $('#pfIncoterm') ? $('#pfIncoterm').value : 'FOB';
+      var incotermLoc = $('#pfIncotermLoc') ? $('#pfIncotermLoc').value.trim() : '';
+      var origin = $('#pfOrigin') ? $('#pfOrigin').value.trim() : '';
+      var destination = $('#pfDestination') ? $('#pfDestination').value.trim() : '';
+      var shippingTerms = $('#pfShippingTerms') ? $('#pfShippingTerms').value.trim() : '';
+      var issueDate = $('#pfIssueDate') ? $('#pfIssueDate').value : new Date().toISOString().split('T')[0];
+      var validityDate = $('#pfValidityDate') ? $('#pfValidityDate').value : '';
+      var currency = $('#pfCurrency') ? $('#pfCurrency').value : 'CAD';
+      var billTo = $('#pfBillTo') ? $('#pfBillTo').value.trim() : '';
+      var shipTo = $('#pfShipTo') ? $('#pfShipTo').value.trim() : '';
+      var commercialTerms = $('#pfCommercialTerms') ? $('#pfCommercialTerms').value.trim() : '';
+      var notes = $('#pfNotes') ? $('#pfNotes').value.trim() : '';
+
+      if (!d.items.length || !d.items[0].description) {
+        toast('Please specify at least one line item description.');
+        return;
+      }
+
+      var payload = {
+        customerName: customerName || undefined,
+        warehouseId: d.warehouseId || warehouseId || undefined,
+        division: 'recycling',
+        issueDate: issueDate,
+        validityDate: validityDate || undefined,
+        currency: currency,
+        poReference: poRef || undefined,
+        billTo: billTo || undefined,
+        shipTo: shipTo || undefined,
+        origin: origin || undefined,
+        destination: destination || undefined,
+        incoterm: incoterm || undefined,
+        incotermLocation: incotermLoc || undefined,
+        shippingTerms: shippingTerms || undefined,
+        notes: notes || undefined,
+        commercialTerms: commercialTerms || undefined,
+        items: d.items.map(function (it) {
+          return {
+            description: it.description,
+            quantity: Number(it.quantity),
+            unit: it.unit || 'kg',
+            unitPrice: Number(it.unitPrice),
+            discount: Number(it.discount || 0),
+            taxRate: Number(it.taxRate || 0),
+            weight: it.weight != null ? Number(it.weight) : undefined
+          };
+        })
+      };
+
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+      }
+
+      var req = d.id ? Api.updateProforma(d.id, payload) : Api.createProforma(payload);
+      req.then(function (res) {
+        toast('Proforma invoice ' + res.proformaNumber + ' saved successfully.');
+        proformaDraft = proformaToDraft(res);
+        renderProformaEditor();
+      }).catch(function (err) {
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = '<svg><use href="#i-check"></use></svg>Save proforma';
+        }
+        toast('Failed to save proforma: ' + (err.message || err));
+      });
+    }
+  }
+
   function renderCustomers() {
     loadingState('#customerBody');
     Api.listCustomers(warehouseId).then(function (list) {
@@ -5635,15 +6333,25 @@
     if (el) el.hidden = true;
   }
 
+  var RECYCLING_ONLY_FINANCIAL_VIEWS = [
+    'invoices', 'editor', 'payments', 'araging', 'purchaseorders', 'poeditor',
+    'banking', 'reconciliation', 'payables',
+    'chartofaccounts', 'generalledger', 'profitloss', 'balancesheet',
+    'proformas', 'proformaeditor'
+  ];
+
   function render() {
     syncChrome();
 
+    if (isHealthcare() && RECYCLING_ONLY_FINANCIAL_VIEWS.indexOf(view) >= 0) {
+      view = 'inventory';
+    }
+
     // Guard every division-scoped view behind an actual grant. Settings, Staff,
-    // Banking, Accounting, and HR are company-wide and not division-scoped, so they stay usable.
+    // and HR are company-wide and not division-scoped, so they stay usable.
+    // Financial views are strictly GreenWave Recycling.
     var nonDivisionViews = [
-      'settings', 'staff', 'banking', 'reconciliation', 'payables',
-      'chartofaccounts', 'generalledger', 'profitloss', 'balancesheet',
-      'employees', 'attendance', 'leaverequests'
+      'settings', 'staff', 'employees', 'attendance', 'leaverequests'
     ];
     if (!hasAnyDivision() && nonDivisionViews.indexOf(view) < 0) {
       renderNoDivisionState();
@@ -5657,6 +6365,8 @@
     else if (view === 'intake') renderIntake();
     else if (view === 'photos') renderPhotos();
     else if (view === 'timeclock') renderTimeclock();
+    else if (view === 'proformas') renderProformaList();
+    else if (view === 'proformaeditor') renderProformaEditor();
     else if (view === 'invoices') renderInvoiceList();
     else if (view === 'editor') renderEditor();
     else if (view === 'payments') renderPaymentsList();
@@ -5780,7 +6490,7 @@
         entity = newEntity;
         db.entity = entity;
         S.save(db);
-        if (view === 'invoices' && isHealthcare()) view = 'inventory';
+        if (isHealthcare() && RECYCLING_ONLY_FINANCIAL_VIEWS.indexOf(view) >= 0) view = 'inventory';
         // Close any open form so a product/material selected under the
         // previous division can't linger after switching divisions.
         var modalWrap = $('#modalWrap');

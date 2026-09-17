@@ -161,19 +161,20 @@
       <button type="button" class="navitem" data-view="chat"><svg><use href="#i-chat"></use></svg>Global Chat <span class="navchip" id="chatNavBadge" hidden>0</span></button>
 
       <span class="navlabel" data-only="recycling" data-role="admin,manager">Sales &amp; Receivables</span>
+      <button type="button" class="navitem" data-view="proformas" data-only="recycling" data-role="admin,manager"><svg><use href="#i-doc"></use></svg>Proforma Invoices</button>
       <button type="button" class="navitem" data-view="invoices" data-only="recycling" data-role="admin,manager"><svg><use href="#i-doc"></use></svg>Invoices</button>
       <button type="button" class="navitem" data-view="payments" data-only="recycling" data-role="admin,manager"><svg><use href="#i-creditcard"></use></svg>Payments</button>
       <button type="button" class="navitem" data-view="araging" data-only="recycling" data-role="admin,manager"><svg><use href="#i-clock"></use></svg>AR Aging</button>
       <button type="button" class="navitem" data-view="purchaseorders" data-only="recycling" data-role="admin"><svg><use href="#i-po"></use></svg>Purchase Orders</button>
 
-      <span class="navlabel" data-role="admin,manager">Finance &amp; Banking</span>
-      <button type="button" class="navitem" data-view="banking" data-role="admin,manager"><svg><use href="#i-bank"></use></svg>Bank &amp; Cards</button>
-      <button type="button" class="navitem" data-view="reconciliation" data-role="admin,manager"><svg><use href="#i-check"></use></svg>Reconciliation</button>
-      <button type="button" class="navitem" data-view="payables" data-role="admin,manager"><svg><use href="#i-po"></use></svg>Bills &amp; Payables</button>
-      <button type="button" class="navitem" data-view="chartofaccounts" data-role="admin,manager"><svg><use href="#i-ledger"></use></svg>Chart of Accounts</button>
-      <button type="button" class="navitem" data-view="generalledger" data-role="admin,manager"><svg><use href="#i-doc"></use></svg>General Ledger</button>
-      <button type="button" class="navitem" data-view="profitloss" data-role="admin,manager"><svg><use href="#i-chart"></use></svg>Profit &amp; Loss</button>
-      <button type="button" class="navitem" data-view="balancesheet" data-role="admin,manager"><svg><use href="#i-pie"></use></svg>Balance Sheet</button>
+      <span class="navlabel" data-only="recycling" data-role="admin,manager">Finance &amp; Banking</span>
+      <button type="button" class="navitem" data-view="banking" data-only="recycling" data-role="admin,manager"><svg><use href="#i-bank"></use></svg>Bank &amp; Cards</button>
+      <button type="button" class="navitem" data-view="reconciliation" data-only="recycling" data-role="admin,manager"><svg><use href="#i-check"></use></svg>Reconciliation</button>
+      <button type="button" class="navitem" data-view="payables" data-only="recycling" data-role="admin,manager"><svg><use href="#i-po"></use></svg>Bills &amp; Payables</button>
+      <button type="button" class="navitem" data-view="chartofaccounts" data-only="recycling" data-role="admin,manager"><svg><use href="#i-ledger"></use></svg>Chart of Accounts</button>
+      <button type="button" class="navitem" data-view="generalledger" data-only="recycling" data-role="admin,manager"><svg><use href="#i-doc"></use></svg>General Ledger</button>
+      <button type="button" class="navitem" data-view="profitloss" data-only="recycling" data-role="admin,manager"><svg><use href="#i-chart"></use></svg>Profit &amp; Loss</button>
+      <button type="button" class="navitem" data-view="balancesheet" data-only="recycling" data-role="admin,manager"><svg><use href="#i-pie"></use></svg>Balance Sheet</button>
 
       <span class="navlabel">People &amp; Operations</span>
       <button type="button" class="navitem" data-view="employees" data-role="admin,manager"><svg><use href="#i-users"></use></svg>Employees</button>
@@ -480,6 +481,54 @@
           </div>
         </div>
         <div id="editorBody"></div>
+      </section>
+
+      <!-- ============ PROFORMA INVOICES VIEW ============ -->
+      <section class="view" id="v-proformas">
+        <div class="vhead">
+          <div>
+            <h1>Proforma Invoices</h1>
+            <p>Preliminary sales estimates &amp; commercial quotations. Non-accounting documents with independent numbering sequence (PF-XXXX).</p>
+          </div>
+          <div class="vactions">
+            <button type="button" class="btn btn-primary" id="newProforma"><svg><use href="#i-plus"></use></svg>New proforma</button>
+          </div>
+        </div>
+
+        <!-- Proforma Toolbar & Filter Tabs -->
+        <div class="inven-toolbar" style="margin-bottom:14px">
+          <div class="inven-tabs" id="proformaFilterTabs" role="tablist">
+            <button type="button" class="inven-tab active" data-pf-filter="all" role="tab" aria-selected="true">All</button>
+            <button type="button" class="inven-tab" data-pf-filter="draft" role="tab" aria-selected="false">Draft</button>
+            <button type="button" class="inven-tab" data-pf-filter="sent" role="tab" aria-selected="false">Sent</button>
+            <button type="button" class="inven-tab" data-pf-filter="accepted" role="tab" aria-selected="false">Accepted</button>
+            <button type="button" class="inven-tab" data-pf-filter="converted" role="tab" aria-selected="false">Converted</button>
+            <button type="button" class="inven-tab" data-pf-filter="cancelled" role="tab" aria-selected="false">Cancelled</button>
+          </div>
+          <div class="inven-filters">
+            <div class="search-wrap">
+              <svg class="search-ico"><use href="#i-search"></use></svg>
+              <input type="search" id="proformaSearch" placeholder="Search proforma #, customer, Incoterm, PO ref...">
+            </div>
+          </div>
+        </div>
+
+        <div id="proformaList"></div>
+      </section>
+
+      <!-- ============ PROFORMA EDITOR VIEW ============ -->
+      <section class="view" id="v-proformaeditor">
+        <div class="vhead noprint">
+          <div><button type="button" class="linkback" data-goto="proformas"><svg><use href="#i-back"></use></svg>All proformas</button>
+            <h1 id="pfEdTitle">New proforma invoice</h1></div>
+          <div class="vactions">
+            <button type="button" class="btn ghost btn-sm" id="pfEdSend" hidden><svg><use href="#i-send"></use></svg>Send Email</button>
+            <button type="button" class="btn ghost btn-sm" id="pfEdConvert" hidden><svg><use href="#i-check"></use></svg>Convert to Final Invoice</button>
+            <button type="button" class="btn ghost btn-sm" id="pfEdPdf" hidden><svg><use href="#i-download"></use></svg>Download PDF</button>
+            <button type="button" class="btn" id="pfEdSave"><svg><use href="#i-check"></use></svg>Save proforma</button>
+          </div>
+        </div>
+        <div id="proformaEditorBody"></div>
       </section>
 
       <!-- ============ PURCHASE ORDERS VIEW (ADMIN ONLY) ============ -->

@@ -61,8 +61,17 @@
     throw err;
   }
 
+  var currentDivision = 'recycling';
+  function setDivision(d) {
+    if (d) currentDivision = d;
+  }
+  function getDivision() {
+    return currentDivision;
+  }
+
   function request(method, path, body, customHeaders) {
     var headers = { 'Content-Type': 'application/json' };
+    if (currentDivision) headers['X-Division'] = currentDivision;
     var token = getToken();
     if (token) headers.Authorization = 'Bearer ' + token;
 
@@ -89,6 +98,7 @@
 
   function upload(path, formData) {
     var headers = {};
+    if (currentDivision) headers['X-Division'] = currentDivision;
     var token = getToken();
     if (token) headers.Authorization = 'Bearer ' + token;
 
@@ -105,6 +115,7 @@
 
   function requestBlob(method, path, body) {
     var headers = { 'Content-Type': 'application/json' };
+    if (currentDivision) headers['X-Division'] = currentDivision;
     var token = getToken();
     if (token) headers.Authorization = 'Bearer ' + token;
 
@@ -123,8 +134,9 @@
         return res.text().then(function (text) {
           var data = null;
           try { data = text ? JSON.parse(text) : null; } catch (e) {}
-          var err = new Error((data && data.message) || ('PDF request failed (' + res.status + ')'));
+          var err = new Error((data && data.message) || ('Request failed (' + res.status + ')'));
           err.status = res.status;
+          err.body = data;
           throw err;
         });
       }
@@ -140,6 +152,8 @@
     },
     getToken: getToken,
     getBaseUrl: baseUrl,
+    setDivision: setDivision,
+    getDivision: getDivision,
 
     // Authentication
     login: function (email, password) {
@@ -422,6 +436,25 @@
     deletePurchaseOrder: function (id) { return request('DELETE', '/api/purchase-orders/' + id); },
     nextPurchaseOrderNumber: function () { return request('GET', '/api/purchase-orders/next-number'); },
     renderPurchaseOrderPdf: function (data) { return requestBlob('POST', '/api/purchase-orders/render-pdf', data); },
+
+    // Proforma Invoices (GreenWave Recycling division only - non-accounting)
+    listProformas: function (params) { return request('GET', '/api/proformas' + qs(params)); },
+    getProforma: function (id) { return request('GET', '/api/proformas/' + id); },
+    createProforma: function (data) { return request('POST', '/api/proformas', data); },
+    updateProforma: function (id, data) { return request('PATCH', '/api/proformas/' + id, data); },
+    deleteProforma: function (id) { return request('DELETE', '/api/proformas/' + id); },
+    peekProformaNumber: function () { return request('GET', '/api/proformas/peek-number'); },
+    convertProforma: function (id) { return request('POST', '/api/proformas/' + id + '/convert'); },
+    sendProforma: function (id, data) { return request('POST', '/api/proformas/' + id + '/send', data); },
+    downloadProformaPdf: function (id) { return requestBlob('GET', '/api/proformas/' + id + '/pdf'); },
+
+    // Inventory Transaction Photo Relations (explicit relational join table)
+    attachTransactionPhotos: function (transactionId, photoIds) {
+      return request('POST', '/api/inventory/transactions/' + transactionId + '/photos', { photoIds: photoIds });
+    },
+    detachTransactionPhoto: function (transactionId, photoId) {
+      return request('DELETE', '/api/inventory/transactions/' + transactionId + '/photos/' + photoId);
+    },
 
     // History / Audit
     listAudit: function (params) { return request('GET', '/api/audit' + qs(params)); }
