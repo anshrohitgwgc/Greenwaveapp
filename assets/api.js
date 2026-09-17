@@ -376,6 +376,20 @@
       });
       return upload('/api/photos', fd);
     },
+    /* Batch upload for the inventory picker. Every selected file is appended
+       under the same `files` field — the mistake this replaces was keeping
+       only files[0], so photos 2-15 never left the browser. The server caps
+       the count at 15 regardless of what is sent here. */
+    uploadPhotos: function (files, meta) {
+      var fd = new FormData();
+      Array.prototype.slice.call(files || []).forEach(function (f, i) {
+        fd.append('files', f, f.name || ('photo-' + (i + 1) + '.jpg'));
+      });
+      Object.keys(meta || {}).forEach(function (k) {
+        if (meta[k] !== undefined && meta[k] !== null && meta[k] !== '') fd.append(k, meta[k]);
+      });
+      return upload('/api/photos/batch', fd);
+    },
     deletePhoto: function (id) { return request('DELETE', '/api/photos/' + id); },
     photoUrl: function (id, variant) {
       if (!id) return '';
@@ -391,6 +405,23 @@
     photoDownloadUrl: function (id) {
       return this.photoUrl(id, 'download');
     },
+
+    // Purchase Orders (administrator-only server-side; see
+    // purchase-orders.controller.ts). The client hiding the navigation is a
+    // convenience -- every one of these 403s for a non-admin.
+    //
+    // These paths carry the /api prefix like every other call in this file.
+    // The block that existed before was written against bare /purchase-orders,
+    // which only resolves when talking to the API process directly: in
+    // production nginx routes /api/* to the API and everything else to the
+    // static site, so those calls were served index.html and failed to parse.
+    listPurchaseOrders: function (params) { return request('GET', '/api/purchase-orders' + qs(params)); },
+    getPurchaseOrder: function (id) { return request('GET', '/api/purchase-orders/' + id); },
+    createPurchaseOrder: function (data) { return request('POST', '/api/purchase-orders', data); },
+    updatePurchaseOrder: function (id, data) { return request('PATCH', '/api/purchase-orders/' + id, data); },
+    deletePurchaseOrder: function (id) { return request('DELETE', '/api/purchase-orders/' + id); },
+    nextPurchaseOrderNumber: function () { return request('GET', '/api/purchase-orders/next-number'); },
+    renderPurchaseOrderPdf: function (data) { return requestBlob('POST', '/api/purchase-orders/render-pdf', data); },
 
     // History / Audit
     listAudit: function (params) { return request('GET', '/api/audit' + qs(params)); }

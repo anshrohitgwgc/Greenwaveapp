@@ -19,7 +19,15 @@
   var MAX_EDGE = 1600;
   var QUALITY = 0.82;
 
+  /* Mirrors MAX_INVENTORY_PHOTOS in backend/app/api/src/common/photo-limits.ts.
+     The browser copy exists so the picker can show "4 / 15" and refuse a 16th
+     file before any bytes are uploaded; the server enforces the same ceiling
+     independently and is the one that actually counts. */
+  var MAX_PHOTOS = 15;
+
   global.Photos = {
+    MAX_PHOTOS: MAX_PHOTOS,
+
     /* Resolves { file, width, height } — file is a re-encoded JPEG File,
        ready to hand to Api.uploadPhoto(). */
     prepare: function (file) {
@@ -55,6 +63,25 @@
           reject(err);
         }
       });
+    },
+
+    /* Downscale a list of files one at a time, resolving an array of prepared
+       results in the same order.
+
+       Sequential rather than Promise.all on purpose: each prepare() holds a
+       full-resolution bitmap plus a canvas of the same image, and decoding
+       fifteen 12-megapixel photos at once is what makes a mid-range phone
+       kill the tab. One at a time keeps peak memory to a single image. */
+    prepareAll: function (files) {
+      var list = Array.prototype.slice.call(files || []);
+      var out = [];
+      return list.reduce(function (chain, file) {
+        return chain.then(function () {
+          return global.Photos.prepare(file).then(function (prepared) {
+            out.push(prepared);
+          });
+        });
+      }, Promise.resolve()).then(function () { return out; });
     }
   };
 })(window);

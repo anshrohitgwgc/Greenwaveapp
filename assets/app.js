@@ -650,9 +650,13 @@
     var chip = $('#shiftChip');
     if (!chip) return;
     var open = currentShiftCache;
-    chip.hidden = !open;
-    if (open) {
-      chip.innerHTML = '<span class="dot"></span>On shift · ' + hm(Date.now() - new Date(open.clockIn).getTime());
+    /* A shift without a usable clockIn renders as "NaNh NaNm"; treat it as
+       no open shift rather than showing that. */
+    var startedAt = open && open.clockIn ? new Date(open.clockIn).getTime() : NaN;
+    var valid = !isNaN(startedAt);
+    chip.hidden = !valid;
+    if (valid) {
+      chip.innerHTML = '<span class="dot"></span>On shift · ' + hm(Date.now() - startedAt);
     }
   }
 
@@ -1303,6 +1307,232 @@
     }
   }
 
+  /* ==========================================================================
+     Inventory photo picker (up to Photos.MAX_PHOTOS per entry).
+
+     Replaces a single-file control that kept only `input.files[0]`, so every
+     photo after the first was discarded before it ever reached FormData.
+
+     Two separate file inputs on purpose. `capture="environment"` is a strong
+     hint on mobile: an input carrying it opens the camera directly and gives
+     no way to reach the camera roll. The old markup pointed both the "Take
+     Photo" and "Upload Photo" buttons at one capture input, so on a phone
+     "Upload" also opened the camera and existing photos were unreachable.
+     The library input deliberately omits `capture`.
+     ========================================================================== */
+  /* ==========================================================================
+     Responsive data tables.
+
+     GreenWave renders 27 operational tables as HTML strings across this file.
+     Three of them opted into the `.stack-mobile` card layout by hand-writing a
+     `data-label` on every cell; the other 24 fell through to
+     `.tablewrap { overflow-x: auto }`, which on a 390px phone means an eight
+     column table is read two columns at a time by swiping sideways -- the
+     single worst thing about the operational screens on a phone.
+
+     Rather than hand-edit two dozen renderers (and every future one), the
+     labels are derived at runtime from the header row the table already has.
+     A table is left alone when it has no <thead> -- the P&L and balance sheet
+     are laid out as label/amount pairs and already read correctly narrow --
+     or when it is marked `.no-stack`, or when its column count is low enough
+     to fit a phone unaided.
+     ========================================================================== */
+  var MOBILE_STACK_MIN_COLUMNS = 4;
+
+  function enhanceTablesForMobile(root) {
+    $$('table.table', root || document).forEach(function (table) {
+      if (table.dataset.mobileEnhanced === '1') return;
+      if (table.classList.contains('no-stack')) return;
+      if (table.closest('.no-stack')) return;
+
+      var heads = $$('thead th', table);
+      if (heads.length < MOBILE_STACK_MIN_COLUMNS) return;
+
+      var labels = heads.map(function (th) {
+        return (th.textContent || '').replace(/\s+/g, ' ').trim();
+      });
+
+      $$('tbody tr', table).forEach(function (tr) {
+        var cells = Array.prototype.slice.call(tr.children);
+        /* Empty-state and group rows span the table; they read fine as-is and
+           must not be given a column label. */
+        if (cells.length === 1 && cells[0].colSpan > 1) return;
+        cells.forEach(function (td, i) {
+          if (td.hasAttribute('data-label')) return;
+          if (labels[i]) td.setAttribute('data-label', labels[i]);
+        });
+      });
+
+      table.classList.add('stack-mobile');
+      table.dataset.mobileEnhanced = '1';
+    });
+  }
+
+  /* Views here re-render by assigning innerHTML at many call sites, including
+     asynchronously once an API call resolves. Observing the document is more
+     reliable than trying to call the enhancer at the end of each of them, and
+     it also covers tables rendered inside modals. */
+  function watchTablesForMobile() {
+    enhanceTablesForMobile(document);
+    if (typeof MutationObserver !== 'function') return;
+
+    var pending = false;
+    var observer = new MutationObserver(function () {
+      if (pending) return;
+      pending = true;
+      /* Coalesce a burst of DOM writes into one pass. */
+      requestAnimationFrame(function () {
+        pending = false;
+        enhanceTablesForMobile(document);
+      });
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function inventoryPhotoMax() {
+    return (window.Photos && Photos.MAX_PHOTOS) || 15;
+  }
+
+  function inventoryPhotoFieldHtml() {
+    var max = inventoryPhotoMax();
+    return '<div class="field photo-picker-field">' +
+      '<div class="photo-picker-head">' +
+        '<label id="inboundPhotoLabel">Photos (optional)</label>' +
+        '<span class="photo-counter" id="inboundPhotoCount" aria-live="polite">0 / ' + max + '</span>' +
+      '</div>' +
+      '<div class="inbound-photo-zone">' +
+        '<div class="inbound-photo-btns">' +
+          '<input type="file" id="inboundPhotoCamera" accept="image/*" capture="environment" multiple hidden>' +
+          '<input type="file" id="inboundPhotoLibrary" accept="image/*" multiple hidden>' +
+          '<button type="button" class="btn ghost photo-add-btn" id="btnInboundTakePhoto">' +
+            '<svg><use href="#i-cam"></use></svg> Take photo</button>' +
+          '<button type="button" class="btn ghost photo-add-btn" id="btnInboundUploadPhoto">' +
+            '<svg><use href="#i-plus"></use></svg> Add photos</button>' +
+        '</div>' +
+        '<div class="photo-picker-grid" id="inboundPhotoGrid" hidden></div>' +
+        '<p class="photo-picker-hint" id="inboundPhotoHint">Up to ' + max + ' photos. Add more at any time before saving.</p>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /* Wires the markup above and owns the selection. Returns an accessor the
+     submit handler uses to read the final list. */
+  function initInventoryPhotoPicker() {
+    var MAX = inventoryPhotoMax();
+    var selected = [];   /* { file, url, key } */
+
+    var grid = $('#inboundPhotoGrid');
+    var countEl = $('#inboundPhotoCount');
+    var hintEl = $('#inboundPhotoHint');
+    var camInput = $('#inboundPhotoCamera');
+    var libInput = $('#inboundPhotoLibrary');
+
+    function keyOf(f) {
+      return [f.name, f.size, f.lastModified].join('|');
+    }
+
+    function render() {
+      if (countEl) {
+        countEl.textContent = selected.length + ' / ' + MAX;
+        countEl.classList.toggle('is-full', selected.length >= MAX);
+      }
+      if (!grid) return;
+      grid.hidden = selected.length === 0;
+      grid.innerHTML = selected.map(function (item, i) {
+        return '<div class="photo-chip">' +
+          '<img src="' + esc(item.url) + '" alt="' + esc(item.file.name) + '" loading="lazy">' +
+          '<button type="button" class="photo-chip-x" data-remove="' + i + '" ' +
+            'aria-label="Remove ' + esc(item.file.name) + '">&times;</button>' +
+          '</div>';
+      }).join('');
+      $$('#inboundPhotoGrid [data-remove]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          removeAt(Number(btn.dataset.remove));
+        });
+      });
+      if (hintEl) {
+        hintEl.textContent = selected.length >= MAX
+          ? 'Maximum of ' + MAX + ' photos reached. Remove one to add another.'
+          : 'Up to ' + MAX + ' photos. Add more at any time before saving.';
+      }
+    }
+
+    function removeAt(i) {
+      var item = selected[i];
+      if (!item) return;
+      try { URL.revokeObjectURL(item.url); } catch (e) { /* already revoked */ }
+      selected.splice(i, 1);
+      render();
+    }
+
+    /* Additive: a second pick appends to what is already chosen rather than
+       replacing it, which is what "add photos until 15" requires. */
+    function addFiles(fileList) {
+      var incoming = Array.prototype.slice.call(fileList || []);
+      if (!incoming.length) return;
+
+      var room = MAX - selected.length;
+      var added = 0, dupes = 0, rejected = 0;
+
+      incoming.forEach(function (f) {
+        if (f.type && f.type.indexOf('image/') !== 0) { rejected++; return; }
+        if (selected.some(function (x) { return x.key === keyOf(f); })) { dupes++; return; }
+        if (added >= room) return;
+        selected.push({ file: f, key: keyOf(f), url: URL.createObjectURL(f) });
+        added++;
+      });
+
+      var overflow = incoming.length - added - dupes - rejected;
+      render();
+
+      if (rejected > 0) {
+        toast(rejected === 1
+          ? 'One file was skipped because it is not an image.'
+          : rejected + ' files were skipped because they are not images.');
+      }
+      if (dupes > 0) {
+        toast(dupes === 1
+          ? 'That photo was already added.'
+          : dupes + ' photos were already added.');
+      }
+      if (overflow > 0) {
+        toast('You can attach a maximum of ' + MAX + ' photos. ' +
+          added + ' added, ' + overflow + ' not added.');
+      }
+    }
+
+    function bindPick(btn, input) {
+      if (!btn || !input) return;
+      btn.addEventListener('click', function () {
+        if (selected.length >= MAX) {
+          toast('Maximum of ' + MAX + ' photos reached. Remove one to add another.');
+          return;
+        }
+        input.click();
+      });
+      input.addEventListener('change', function (e) {
+        addFiles(e.target.files);
+        /* Clear so picking the same file again still fires `change`. */
+        e.target.value = '';
+      });
+    }
+
+    bindPick($('#btnInboundTakePhoto'), camInput);
+    bindPick($('#btnInboundUploadPhoto'), libInput);
+    render();
+
+    return {
+      files: function () { return selected.map(function (x) { return x.file; }); },
+      count: function () { return selected.length; },
+      dispose: function () {
+        selected.forEach(function (x) {
+          try { URL.revokeObjectURL(x.url); } catch (e) { /* ignore */ }
+        });
+        selected = [];
+      }
+    };
+  }
+
   function openReceiveModal() {
     var w = warehouse();
     if (!w) { toast('Please select a warehouse first.'); return; }
@@ -1348,23 +1578,7 @@
             '<span class="total-preview-label">Total Pallets:</span>' +
             '<span class="total-preview-val" id="modalAutoTotal">0 PALLETS</span>' +
           '</div>' +
-          '<div class="field">' +
-            '<label>Inbound Photo Capture (Optional)</label>' +
-            '<div class="inbound-photo-zone">' +
-              '<div class="inbound-photo-btns">' +
-                '<input type="file" id="inboundPhotoInput" accept="image/*" capture="environment" style="display:none">' +
-                '<button type="button" class="btn ghost btn-sm" id="btnInboundTakePhoto"><svg><use href="#i-cam"></use></svg> Take Photo</button>' +
-                '<button type="button" class="btn ghost btn-sm" id="btnInboundUploadPhoto"><svg><use href="#i-download"></use></svg> Upload Photo</button>' +
-              '</div>' +
-              '<div id="inboundPhotoPreviewWrap" hidden>' +
-                '<div class="inbound-photo-preview">' +
-                  '<img id="inboundPhotoThumb" src="" alt="Thumbnail">' +
-                  '<span id="inboundPhotoName" style="font-size:12px;color:var(--ink-2);flex:1"></span>' +
-                  '<button type="button" class="btn ghost btn-sm text-crit" id="btnInboundRemovePhoto" style="padding:2px 8px">Remove</button>' +
-                '</div>' +
-              '</div>' +
-            '</div>' +
-          '</div>' +
+          inventoryPhotoFieldHtml() +
           '<div class="field"><label>Notes / Comments (optional)</label><input type="text" name="notes" placeholder="e.g. SI SENT, cross dock"></div>';
       } else {
         // HEALTHCARE: BOX-BASED INVENTORY ONLY (NO WEIGHT)
@@ -1395,27 +1609,11 @@
             '<span class="total-preview-label">Total Boxes (XL + L + M + S):</span>' +
             '<span class="total-preview-val" id="modalAutoTotal">0 BOXES</span>' +
           '</div>' +
-          '<div class="field">' +
-            '<label>Inbound Photo Capture (Optional)</label>' +
-            '<div class="inbound-photo-zone">' +
-              '<div class="inbound-photo-btns">' +
-                '<input type="file" id="inboundPhotoInput" accept="image/*" capture="environment" style="display:none">' +
-                '<button type="button" class="btn ghost btn-sm" id="btnInboundTakePhoto"><svg><use href="#i-cam"></use></svg> Take Photo</button>' +
-                '<button type="button" class="btn ghost btn-sm" id="btnInboundUploadPhoto"><svg><use href="#i-download"></use></svg> Upload Photo</button>' +
-              '</div>' +
-              '<div id="inboundPhotoPreviewWrap" hidden>' +
-                '<div class="inbound-photo-preview">' +
-                  '<img id="inboundPhotoThumb" src="" alt="Thumbnail">' +
-                  '<span id="inboundPhotoName" style="font-size:12px;color:var(--ink-2);flex:1"></span>' +
-                  '<button type="button" class="btn ghost btn-sm text-crit" id="btnInboundRemovePhoto" style="padding:2px 8px">Remove</button>' +
-                '</div>' +
-              '</div>' +
-            '</div>' +
-          '</div>' +
+          inventoryPhotoFieldHtml() +
           '<div class="field"><label>Notes / Comments (optional)</label><input type="text" name="notes" placeholder="e.g. SI SENT, cross dock"></div>';
       }
 
-      var selectedPhotoFile = null;
+      var photoPicker = null;
 
       openModal('Receive Inbound (' + (isRec ? 'PALLETS' : 'BOXES') + ')', formHtml, function (fd) {
         var parseWhole = function (val) {
@@ -1464,7 +1662,7 @@
           weightUnit = undefined;
         }
 
-        var doSubmit = function (photoId) {
+        var doSubmit = function (photoIds) {
           var payload = {
             warehouseId: w.id,
             materialId: fd.materialId,
@@ -1474,7 +1672,8 @@
             date: fd.date || undefined,
             weightValue: weightVal,
             weightUnit: weightUnit,
-            photoId: photoId || undefined,
+            photoId: (photoIds && photoIds[0]) || undefined,
+            photoIds: (photoIds && photoIds.length) ? photoIds : undefined,
             orderNumber: fd.orderNumber,
             reference: fd.orderNumber,
             containerNumber: fd.containerNumber || undefined,
@@ -1489,64 +1688,31 @@
           });
         };
 
-        if (selectedPhotoFile) {
-          return Photos.prepare(selectedPhotoFile).then(function (prepared) {
-            return Api.uploadPhoto(prepared.file, {
-              warehouseId: w.id,
-              photoType: 'inventory_inbound',
-              jobReference: fd.orderNumber
-            });
-          }).then(function (res) {
-            return doSubmit(res && res.id);
-          }).catch(function (err) {
-            toast('Photo upload failed: ' + (err.message || err));
-            return doSubmit(undefined);
+        var chosen = photoPicker ? photoPicker.files() : [];
+        if (!chosen.length) return doSubmit([]);
+
+        /* Downscale then upload the whole set in one request. If the upload
+           fails the entry is still saved without photos -- losing a shipment
+           record because a photo did not transfer would be the worse
+           outcome -- but the operator is told explicitly, rather than the
+           silent drop this flow used to do. */
+        toast('Uploading ' + chosen.length + (chosen.length === 1 ? ' photo…' : ' photos…'));
+        return Photos.prepareAll(chosen).then(function (prepared) {
+          return Api.uploadPhotos(prepared.map(function (p) { return p.file; }), {
+            warehouseId: w.id,
+            photoType: 'inventory_inbound',
+            jobReference: fd.orderNumber
           });
-        } else {
-          return doSubmit(undefined);
-        }
+        }).then(function (res) {
+          var ids = (res || []).map(function (p) { return p.id; }).filter(Boolean);
+          return doSubmit(ids);
+        }).catch(function (err) {
+          toast('Photo upload failed (' + (err.message || err) + '). Saving the entry without photos.');
+          return doSubmit([]);
+        });
       });
 
-      var pInput = $('#inboundPhotoInput');
-      var pWrap = $('#inboundPhotoPreviewWrap');
-      var pThumb = $('#inboundPhotoThumb');
-      var pName = $('#inboundPhotoName');
-
-      var btnTake = $('#btnInboundTakePhoto');
-      if (btnTake) {
-        btnTake.addEventListener('click', function () {
-          if (pInput) pInput.click();
-        });
-      }
-      var btnUp = $('#btnInboundUploadPhoto');
-      if (btnUp) {
-        btnUp.addEventListener('click', function () {
-          if (pInput) pInput.click();
-        });
-      }
-      var btnRem = $('#btnInboundRemovePhoto');
-      if (btnRem) {
-        btnRem.addEventListener('click', function () {
-          selectedPhotoFile = null;
-          if (pInput) pInput.value = '';
-          if (pWrap) pWrap.hidden = true;
-        });
-      }
-      if (pInput) {
-        pInput.addEventListener('change', function (e) {
-          var f = e.target.files && e.target.files[0];
-          if (f) {
-            selectedPhotoFile = f;
-            if (pName) pName.textContent = f.name + ' (' + Math.round(f.size / 1024) + ' KB)';
-            var reader = new FileReader();
-            reader.onload = function (ev) {
-              if (pThumb) pThumb.src = ev.target.result;
-              if (pWrap) pWrap.hidden = false;
-            };
-            reader.readAsDataURL(f);
-          }
-        });
-      }
+      photoPicker = initInventoryPhotoPicker();
 
       if (isRec) {
         var palInp = $('.pallet-input');
@@ -2462,18 +2628,31 @@
   function addPhotos(files) {
     if (!files || !files.length) return;
     var w = warehouse();
-    var jobs = Array.prototype.slice.call(files).map(function (f) {
-      return Photos.prepare(f).then(function (r) {
-        return Api.uploadPhoto(r.file, { warehouseId: w ? w.id : undefined });
-      });
-    });
-    toast('Uploading ' + files.length + ' photo(s)…');
+    var MAX = inventoryPhotoMax();
 
-    Promise.all(jobs).then(function () {
-      toast('Photos uploaded.');
+    var chosen = Array.prototype.slice.call(files);
+    var overflow = 0;
+    if (chosen.length > MAX) {
+      overflow = chosen.length - MAX;
+      chosen = chosen.slice(0, MAX);
+    }
+
+    toast('Uploading ' + chosen.length + (chosen.length === 1 ? ' photo…' : ' photos…'));
+
+    /* prepareAll decodes one image at a time; the previous Promise.all over
+       every file held a full-resolution bitmap per photo simultaneously,
+       which is what made a large multi-select fail on a phone. */
+    Photos.prepareAll(chosen).then(function (prepared) {
+      return Api.uploadPhotos(prepared.map(function (r) { return r.file; }), {
+        warehouseId: w ? w.id : undefined
+      });
+    }).then(function (res) {
+      var n = (res || []).length;
+      toast(n + (n === 1 ? ' photo uploaded.' : ' photos uploaded.') +
+        (overflow > 0 ? ' ' + overflow + ' not uploaded — the limit is ' + MAX + ' at a time.' : ''));
       renderPhotos();
     }).catch(function (err) {
-      toast('Upload completed with some errors.');
+      toast('Upload failed: ' + (err.message || err));
       renderPhotos();
     });
   }
@@ -7805,6 +7984,7 @@
 
   document.addEventListener('DOMContentLoaded', function () {
     attachEvents();
+    watchTablesForMobile();
     if (checkPublicPaymentRoute()) {
       return;
     }

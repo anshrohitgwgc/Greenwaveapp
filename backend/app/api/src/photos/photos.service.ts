@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -9,6 +10,7 @@ import { Repository } from 'typeorm';
 
 import { AuditService } from '../audit/audit.service';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import { MAX_INVENTORY_PHOTOS } from '../common/photo-limits';
 import { StorageService } from '../storage/storage.service';
 import { WarehousesService } from '../warehouses/warehouses.service';
 import { UploadPhotoMetadataDto } from './dto/upload-photo-metadata.dto';
@@ -84,6 +86,58 @@ export class PhotosService {
     });
 
     return this.toDto(saved);
+  }
+
+  /**
+   * Upload a set of images as one logical batch (inventory photo picker).
+   *
+   * Uploads run sequentially rather than via Promise.all: a phone on warehouse
+   * wifi pushing 15 images concurrently is how you get MinIO socket timeouts
+   * and a half-written set. If any image fails, the ones already stored are
+   * removed again so the caller never ends up with a silently partial set —
+   * the inventory flow treats photos as all-or-nothing.
+   */
+  async uploadMany(
+    files: Array<{
+      originalname: string;
+      mimetype: string;
+      size: number;
+      buffer: Buffer;
+    }>,
+    meta: UploadPhotoMetadataDto,
+    actor: AuthenticatedUser,
+  ) {
+    if (files.length > MAX_INVENTORY_PHOTOS) {
+      throw new BadRequestException(
+        `A maximum of ${MAX_INVENTORY_PHOTOS} photos can be uploaded at once`,
+      );
+    }
+
+    // Authorize once up front rather than per file.
+    if (meta.warehouseId) {
+      await this.warehousesService.assertWarehouseAccess(
+        actor,
+        meta.warehouseId,
+      );
+    }
+
+    const uploaded: Array<ReturnType<PhotosService['toDto']>> = [];
+    try {
+      for (const file of files) {
+        uploaded.push(await this.upload(file, meta, actor));
+      }
+    } catch (err) {
+      await Promise.all(
+        uploaded.map((p) =>
+          this.remove(p.id, actor).catch(() => {
+            /* best-effort rollback; the original error is what matters */
+          }),
+        ),
+      );
+      throw err;
+    }
+
+    return uploaded;
   }
 
   async list(

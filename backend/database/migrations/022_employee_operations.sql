@@ -173,8 +173,12 @@ SELECT
     gen_random_uuid(),
     'EMP-' || LPAD(u.id::text, 4, '0'),
     u.id,
-    COALESCE(NULLIF(SPLIT_PART(u.name, ' ', 1), ''), 'Staff'),
-    COALESCE(NULLIF(SUBSTRING(u.name FROM POSITION(' ' IN u.name) + 1), ''), 'Member'),
+    -- The users table column is "fullName" (migration 001); an earlier
+    -- revision of this backfill referenced a non-existent u.name, which
+    -- aborted the whole migration with 'column u.name does not exist' and
+    -- took migrations 019-022 down with it.
+    COALESCE(NULLIF(SPLIT_PART(u."fullName", ' ', 1), ''), 'Staff'),
+    COALESCE(NULLIF(SUBSTRING(u."fullName" FROM POSITION(' ' IN u."fullName") + 1), ''), 'Member'),
     u.email,
     NULL,
     CASE u.role

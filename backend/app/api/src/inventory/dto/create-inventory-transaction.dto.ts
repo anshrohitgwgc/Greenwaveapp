@@ -1,4 +1,6 @@
 import {
+  ArrayMaxSize,
+  IsArray,
   IsIn,
   IsInt,
   IsNumber,
@@ -8,6 +10,8 @@ import {
   Min,
   ValidateIf,
 } from 'class-validator';
+
+import { MAX_INVENTORY_PHOTOS } from '../../common/photo-limits';
 
 export class CreateInventoryTransactionDto {
   @IsUUID()
@@ -70,9 +74,27 @@ export class CreateInventoryTransactionDto {
   @IsIn(['kg', 'lb'], { message: 'weightUnit must be either kg or lb' })
   weightUnit?: 'kg' | 'lb';
 
+  /**
+   * Cover photo. Retained for backward compatibility with clients and rows
+   * written before multi-photo support; when `photoIds` is supplied the
+   * service derives this from its first entry.
+   */
   @IsOptional()
   @IsUUID()
   photoId?: string;
+
+  /**
+   * Full set of photos attached to this entry (see MAX_INVENTORY_PHOTOS).
+   * The cap is enforced here so an over-long list is a clean 400 naming the
+   * limit rather than a silently truncated set.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_INVENTORY_PHOTOS, {
+    message: `A maximum of ${MAX_INVENTORY_PHOTOS} photos can be attached to one inventory entry`,
+  })
+  @IsUUID('all', { each: true })
+  photoIds?: string[];
 
   // Required whenever type === 'adjustment' — enforced again in service/DB
   @ValidateIf((dto: CreateInventoryTransactionDto) => dto.type === 'adjustment')

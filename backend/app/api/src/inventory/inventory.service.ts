@@ -15,6 +15,7 @@ import {
   normalizeDivision,
 } from '../divisions/divisions.constants';
 import { DivisionsService } from '../divisions/divisions.service';
+import { MAX_INVENTORY_PHOTOS } from '../common/photo-limits';
 
 import { Material } from '../materials/entities/material.entity';
 import { PhotoAsset } from '../photos/entities/photo-asset.entity';
@@ -263,6 +264,101 @@ export class InventoryService {
     return qb.getMany();
   }
 
+  /**
+   * Validate and de-duplicate the photos a caller wants attached to an entry.
+   *
+   * This is an authorization boundary, not just a tidy-up: without it a staff
+   * user could post an arbitrary photo UUID and then read the image back
+   * through the transaction detail view, which returns attached photos
+   * without re-checking each one. So every id is confirmed to exist, to sit
+   * in the same warehouse as the entry (or be unscoped), and — for
+   * non-privileged roles — to have been taken by the caller.
+   */
+  private async resolveAttachedPhotos(
+    dto: CreateInventoryTransactionDto,
+    actor: AuthenticatedUser,
+  ): Promise<string[]> {
+    const requested =
+      dto.photoIds && dto.photoIds.length > 0
+        ? dto.photoIds
+        : dto.photoId
+          ? [dto.photoId]
+          : [];
+
+    // Preserve caller order while dropping repeats — the first surviving
+    // entry is the cover photo.
+    const unique = Array.from(new Set(requested));
+    if (unique.length === 0) return [];
+
+    if (unique.length > MAX_INVENTORY_PHOTOS) {
+      throw new BadRequestException(
+        `A maximum of ${MAX_INVENTORY_PHOTOS} photos can be attached to one inventory entry`,
+      );
+    }
+
+    const photos = await this.photoRepository.find({
+      where: { id: In(unique) },
+    });
+    const byId = new Map(photos.map((photo) => [photo.id, photo]));
+
+    const missing = unique.filter((id) => !byId.has(id));
+    if (missing.length > 0) {
+      throw new BadRequestException(
+        `Photo not found: ${missing.join(', ')}. Re-attach the photos and try again.`,
+      );
+    }
+
+    const privileged = actor.role === 'admin' || actor.role === 'manager';
+    for (const id of unique) {
+      const photo = byId.get(id)!;
+      if (!privileged && photo.takenBy !== actor.id) {
+        throw new ForbiddenException(
+          'You can only attach photos that you uploaded',
+        );
+      }
+      if (photo.warehouseId && photo.warehouseId !== dto.warehouseId) {
+        throw new ForbiddenException(
+          'Photos must belong to the same warehouse as the inventory entry',
+        );
+      }
+    }
+
+    return unique;
+  }
+
+  /**
+   * Bind a photo set to the entry that now owns it.
+   *
+   * Photos are uploaded before the transaction exists, so they are tagged at
+   * upload time with the operator's order number and found again by the
+   * reference match in getTransactionById. That match is left intact — it is
+   * what makes an order's photos discoverable in the photo library, and what
+   * keeps already-stored photos visible.
+   *
+   * The gap it leaves is an entry with no order number: those photos carry no
+   * reference at all and would be orphaned the moment the modal closed. Only
+   * those get stamped with the transaction id, which the same reference match
+   * already looks for.
+   */
+  private async bindPhotosToTransaction(
+    photoIds: string[],
+    transactionId: string,
+  ): Promise<void> {
+    if (photoIds.length === 0) return;
+    try {
+      await this.photoRepository
+        .createQueryBuilder()
+        .update(PhotoAsset)
+        .set({ jobReference: transactionId })
+        .where('id IN (:...photoIds)', { photoIds })
+        .andWhere("(job_reference IS NULL OR job_reference = '')")
+        .execute();
+    } catch {
+      // The photos are already stored and the entry is already saved; a
+      // failure to stamp the reference must not fail the transaction.
+    }
+  }
+
   async createTransaction(
     dto: CreateInventoryTransactionDto,
     actor: AuthenticatedUser,
@@ -342,6 +438,13 @@ export class InventoryService {
       }
     }
 
+    // Resolve the photo set for this entry. `photoIds` is the multi-photo
+    // path; `photoId` remains accepted so older clients (and anything
+    // replaying a stored payload) keep working. The first entry becomes the
+    // cover photo written to the scalar `photo_id` column.
+    const attachedPhotoIds = await this.resolveAttachedPhotos(dto, actor);
+    const coverPhotoId = attachedPhotoIds[0] ?? null;
+
     const transaction = this.transactionRepository.create({
       id: randomUUID(),
       warehouseId: dto.warehouseId,
@@ -352,7 +455,7 @@ export class InventoryService {
       division,
       weightValue: weightValue !== null ? String(weightValue) : null,
       weightUnit,
-      photoId: dto.photoId ?? null,
+      photoId: coverPhotoId,
       xl: String(xl),
       l: String(l),
       m: String(m),
@@ -370,6 +473,8 @@ export class InventoryService {
 
     const saved = await this.transactionRepository.save(transaction);
 
+    await this.bindPhotosToTransaction(attachedPhotoIds, saved.id);
+
     // Link/trace container record if container number provided
     if (!dto.containerId && (dto.containerNumber || dto.sealNumber)) {
       try {
@@ -384,7 +489,7 @@ export class InventoryService {
             division: division as 'recycling' | 'healthcare',
             weightValue: weightValue ?? undefined,
             weightUnit: (weightUnit as 'kg' | 'lb') ?? undefined,
-            photoId: dto.photoId,
+            photoId: coverPhotoId ?? undefined,
             xl,
             l,
             m,
@@ -432,7 +537,8 @@ export class InventoryService {
         division,
         weightValue,
         weightUnit,
-        photoId: dto.photoId ?? null,
+        photoId: coverPhotoId,
+        photoCount: attachedPhotoIds.length,
         xl,
         l,
         m,

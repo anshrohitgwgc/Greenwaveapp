@@ -1404,9 +1404,97 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
   .staff-actions .btn { padding: 6px 14px; }
 }
 
+/* --------------------------------------------------------------------------
+   Mobile operational refinements
+
+   Paired with enhanceTablesForMobile() in app.js, which adds `.stack-mobile`
+   and the per-cell `data-label` to every four-plus column table at runtime.
+   -------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+  /* The top bar carries a menu button, a facility select, a division toggle
+     and two status chips. Left to wrap on its own they interleave -- the
+     facility select ends up beside the "on shift" chip with the division
+     toggle overlapping it. Two explicit rows instead: status on the first,
+     the scope controls full-width on the second, where the select and the
+     toggle are both big enough to hit. */
+  .topbar { flex-wrap: wrap; row-gap: 10px; align-items: center; }
+  .topbar .grow { display: none; }
+  .menubtn { order: 0; }
+  .onlinechip, .shiftchip { order: 1; font-size: 11px; white-space: nowrap; }
+  .shiftchip { margin-left: auto; }
+
+  .scope-group { order: 2; flex: 1 0 100%; gap: 8px; align-items: stretch; }
+  .wh { flex: 1 1 50%; min-width: 0; }
+  .wh-select-wrap, .wh select { width: 100%; max-width: none; min-height: 40px; }
+  .top-division-wrap { flex: 1 1 auto; min-width: 0; }
+  .top-division-toggle { width: 100%; }
+  .top-div-btn { flex: 1 1 0; min-height: 40px; }
+
+  /* A stacked table is a column of cards, so the scroll container around it
+     must stop being a scroll container -- otherwise the wrapper keeps the
+     horizontal scrollbar and the drag that goes with it for content that no
+     longer overflows. */
+  .tablewrap:has(> .table.stack-mobile) { overflow-x: visible; }
+
+  /* Long identifiers (order numbers, container numbers, emails) are the main
+     cause of a row forcing the page wider than the screen. */
+  .table.stack-mobile td,
+  .table.stack-mobile td.mono {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  /* Row-level actions stay reachable with a thumb instead of being squeezed
+     into a narrow trailing column. */
+  .table.stack-mobile td[data-label=""],
+  .table.stack-mobile td:last-child:not([data-label]) {
+    justify-content: stretch;
+  }
+  .table.stack-mobile .btn {
+    min-height: 40px;
+    padding-inline: 14px;
+  }
+  .table.stack-mobile td .btn + .btn { margin-left: 8px; }
+
+  /* A tappable row needs to look tappable once it is a card. */
+  .table.stack-mobile tr.clickable-row {
+    position: relative;
+    box-shadow: var(--shadow-1, 0 1px 2px rgba(17, 28, 45, 0.06));
+  }
+  .table.stack-mobile tr.clickable-row:active { background: var(--panel-2); }
+
+  /* Anything still scrolling sideways should do so inside its own box and
+     never drag the page with it. */
+  body { overflow-x: hidden; }
+  .tablewrap { -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+
+  /* Comfortable minimum touch targets for the small controls that appear in
+     toolbars and card headers. */
+  .btn.btn-sm { min-height: 38px; }
+  .iconbtn { min-width: 40px; min-height: 40px; }
+
+  /* Inputs at 16px or larger stop iOS Safari zooming the viewport on focus,
+     which otherwise leaves the form scrolled off-centre after every field. */
+  input, select, textarea { font-size: 16px; }
+
+  /* The bottom tab bar is fixed, so scrollable regions need to clear it. */
+  .scroll { padding-bottom: calc(88px + env(safe-area-inset-bottom)); }
+}
+
 @media (max-width: 420px) {
   .kpi-grid { grid-template-columns: 1fr; }
   .sizes-grid { grid-template-columns: 1fr 1fr; }
+
+  /* At 320-390px two full-width add buttons stacked read better than two
+     cramped ones side by side. */
+  .photo-add-btn { flex-basis: 100%; }
+  .photo-picker-grid { grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); }
+
+  /* Two per row rather than four squeezed onto one: `flex: 1` with no
+     minimum lets four buttons shrink to ~80px each, which is narrower than
+     their own labels ("Export CSV" then spills out of its button). */
+  .vactions .btn { flex: 1 1 calc(50% - 4px); min-width: 0; }
+  .modalhead h2 { font-size: 16.5px; }
 }
 
 /* Respect a reduced-motion preference across every transition above. */
@@ -2128,6 +2216,96 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
   height: 56px;
   object-fit: cover;
   border-radius: 4px;
+}
+
+/* --------------------------------------------------------------------------
+   Inventory photo picker (up to 15 per entry)
+
+   Built phone-first: the two add buttons share a row and wrap to full width
+   when there is no room, the preview grid is driven by auto-fill so it goes
+   from five columns on a desktop modal to three on a 320px screen without a
+   breakpoint, and every thumbnail is a fixed square with object-fit so a
+   portrait phone photo cannot stretch the modal or overflow the page.
+   -------------------------------------------------------------------------- */
+.photo-picker-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.photo-counter {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 10px;
+  white-space: nowrap;
+}
+.photo-counter.is-full {
+  color: var(--acc);
+  border-color: var(--acc);
+}
+
+.photo-add-btn {
+  flex: 1 1 140px;
+  min-height: 44px;           /* comfortable touch target */
+  justify-content: center;
+}
+
+.photo-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 8px;
+}
+
+.photo-chip {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--r);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.photo-chip img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Sits above the image corner rather than below the grid so removing a photo
+   never means hunting for a control that moved when the grid reflowed. */
+.photo-chip-x {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(17, 28, 45, 0.72);
+  color: #fff;
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.photo-chip-x:hover,
+.photo-chip-x:focus-visible {
+  background: var(--crit, #c0392b);
+}
+
+.photo-picker-hint {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--muted);
 }
 
 /* Detailed Transaction History Drawer / Modal */

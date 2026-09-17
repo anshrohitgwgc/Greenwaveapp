@@ -9,23 +9,26 @@ import {
   Query,
   Res,
   UploadedFile,
+  UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import sharp from 'sharp';
 
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
+import {
+  ALLOWED_IMAGE_MIME as ALLOWED_MIME,
+  MAX_INVENTORY_PHOTOS,
+  MAX_UPLOAD_BYTES,
+} from '../common/photo-limits';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { UploadPhotoMetadataDto } from './dto/upload-photo-metadata.dto';
 import { PhotosService } from './photos.service';
-
-const MAX_UPLOAD_BYTES = 15 * 1024 * 1024;
-const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 @Controller('photos')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -52,6 +55,46 @@ export class PhotosController {
       );
     }
     return this.photosService.upload(file, meta, actor);
+  }
+
+  /**
+   * Batch upload — used by the inventory photo picker, which lets an operator
+   * attach up to MAX_INVENTORY_PHOTOS images to one entry.
+   *
+   * `FilesInterceptor` is given the cap as its maxCount, so Multer rejects a
+   * 16th part before any of it is buffered; the explicit length check below
+   * still runs because maxCount alone would surface as a generic Multer error
+   * rather than a message an operator can act on. Every file is validated for
+   * content type individually — one bad image fails the whole batch rather
+   * than being silently dropped, which is the behaviour the inventory flow
+   * needs: a partially-saved photo set is worse than a clear error.
+   */
+  @Post('batch')
+  @UseInterceptors(
+    FilesInterceptor('files', MAX_INVENTORY_PHOTOS, {
+      limits: { fileSize: MAX_UPLOAD_BYTES, files: MAX_INVENTORY_PHOTOS },
+    }),
+  )
+  uploadMany(
+    @UploadedFiles() files: Express.Multer.File[],
+    @Body() meta: UploadPhotoMetadataDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    if (!files || files.length === 0) {
+      throw new BadRequestException('At least one file is required');
+    }
+    if (files.length > MAX_INVENTORY_PHOTOS) {
+      throw new BadRequestException(
+        `A maximum of ${MAX_INVENTORY_PHOTOS} photos can be uploaded at once`,
+      );
+    }
+    const rejected = files.find((f) => !ALLOWED_MIME.has(f.mimetype));
+    if (rejected) {
+      throw new BadRequestException(
+        `Only JPEG, PNG or WebP images are accepted (${rejected.originalname} is ${rejected.mimetype})`,
+      );
+    }
+    return this.photosService.uploadMany(files, meta, actor);
   }
 
   @Get()
