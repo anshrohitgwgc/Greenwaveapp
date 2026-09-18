@@ -542,145 +542,203 @@ export class ProformasService {
   }
 
   /**
-   * Generates a professional Proforma Invoice HTML string for PDF rendering.
-   * Prominently displays PROFORMA INVOICE notice with 0 payment instructions.
+   * Proforma Invoice document HTML (A4, rendered by Chromium in renderPdf()).
+   *
+   * Deliberately unlike a payable invoice: no due date, no payment status,
+   * no payment instructions or links, and the non-payment / non-tax-invoice
+   * statement sits directly under the title. Multi-page output repeats the
+   * table header, never splits a line item across pages, and keeps the
+   * totals and terms blocks whole. Page numbers come from the PDF footer.
    */
   generateProformaHtml(proforma: ProformaInvoice): string {
-    const itemsHtml = proforma.items
-      .map(
-        (item, idx) => `
+    const cur = proforma.currency || 'CAD';
+    const wUnit = proforma.weightUnit || 'kg';
+    const fmt = (n: unknown, min: number, max: number) =>
+      Number(n ?? 0).toLocaleString('en-CA', { minimumFractionDigits: min, maximumFractionDigits: max });
+    const money = (n: unknown) => fmt(n, 2, 2);
+    // Unit prices keep up to 4 decimals (per-kg pricing), so qty x price
+    // visibly reproduces the line total.
+    const price = (n: unknown) => fmt(n, 2, 4);
+    const qty = (n: unknown) => fmt(n, 0, 3);
+    const text = (v: string | null | undefined) => escapeHtml(v || '');
+    const multi = (v: string | null | undefined) => text(v).replace(/\r?\n/g, '<br>');
+
+    const items = proforma.items || [];
+    const hasDiscount = items.some((i) => Number(i.discount) > 0);
+    const hasTax = items.some((i) => Number(i.taxRate) > 0);
+    const hasWeight = items.some((i) => Number(i.weight) > 0);
+    const totalWeight = Number(proforma.totalWeight) || 0;
+
+    const rows = items
+      .map((item, idx) => {
+        const lineSub = Number(item.quantity) * Number(item.unitPrice) - Number(item.discount || 0);
+        return `
         <tr>
-          <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">${idx + 1}</td>
-          <td style="padding: 10px; border-bottom: 1px solid #e5e7eb;">
-            <strong>${escapeHtml(item.description)}</strong>
-            ${item.weight ? `<br><small style="color: #6b7280;">Est. Weight: ${item.weight} ${item.unit || 'kg'}</small>` : ''}
-          </td>
-          <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; text-align: right;">${item.quantity} ${escapeHtml(item.unit)}</td>
-          <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; text-align: right;">$${Number(item.unitPrice).toFixed(2)}</td>
-          <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; text-align: right;">$${Number(item.discount).toFixed(2)}</td>
-          <td style="padding: 10px; border-bottom: 1px solid #e5e7eb; text-align: right;">$${Number(item.total).toFixed(2)}</td>
-        </tr>`,
-      )
+          <td class="c-n">${idx + 1}</td>
+          <td class="c-desc">${text(item.description)}</td>
+          <td class="r">${qty(item.quantity)}&nbsp;${text(item.unit)}</td>
+          <td class="r">${price(item.unitPrice)}</td>
+          ${hasDiscount ? `<td class="r">${Number(item.discount) > 0 ? '−' + money(item.discount) : '—'}</td>` : ''}
+          ${hasTax ? `<td class="r">${fmt(item.taxRate, 0, 3)}%</td>` : ''}
+          ${hasWeight ? `<td class="r">${Number(item.weight) > 0 ? qty(item.weight) + '&nbsp;' + text(wUnit) : '—'}</td>` : ''}
+          <td class="r strong">${money(Math.round(lineSub * 100) / 100)}</td>
+        </tr>`;
+      })
       .join('');
 
+    const statusNote: Record<string, string> = {
+      draft: 'Draft',
+      expired: 'Expired',
+      cancelled: 'Cancelled',
+      converted: 'Converted to invoice',
+    };
+    const status = statusNote[proforma.status] ? `<div class="status">${statusNote[proforma.status]}</div>` : '';
+
+    const detail = (label: string, value: string) =>
+      value ? `<div class="kv"><span>${label}</span><strong>${value}</strong></div>` : '';
+
+    const incoterm = proforma.incoterm
+      ? text(proforma.incoterm) + (proforma.incotermLocation ? ' ' + text(proforma.incotermLocation) : '')
+      : '';
+
     return `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Proforma Invoice ${proforma.proformaNumber}</title>
+  <title>Proforma Invoice ${text(proforma.proformaNumber)}</title>
   <style>
-    body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #111827; margin: 0; padding: 30px; font-size: 13px; line-height: 1.5; }
-    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 25px; }
-    .brand { font-size: 24px; font-weight: bold; color: #047857; letter-spacing: -0.5px; }
-    .doc-title { font-size: 26px; font-weight: 800; color: #1f2937; text-align: right; margin: 0; }
-    .badge { display: inline-block; padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 4px; background: #fef3c7; color: #92400e; text-transform: uppercase; margin-top: 4px; }
-    .banner { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; padding: 10px 14px; border-radius: 6px; font-weight: 600; font-size: 12px; margin-bottom: 25px; text-align: center; }
-    .grid { display: flex; justify-content: space-between; margin-bottom: 25px; gap: 20px; }
-    .box { flex: 1; background: #f9fafb; border: 1px solid #e5e7eb; padding: 14px; border-radius: 6px; }
-    .box h4 { margin: 0 0 8px 0; font-size: 11px; text-transform: uppercase; color: #6b7280; letter-spacing: 0.5px; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
-    th { background: #f3f4f6; color: #374151; font-weight: 600; text-align: left; padding: 10px; font-size: 11px; text-transform: uppercase; border-bottom: 2px solid #d1d5db; }
-    .totals { display: flex; justify-content: flex-end; margin-bottom: 25px; }
-    .totals-table { width: 320px; }
-    .totals-table tr td { padding: 6px 10px; }
-    .totals-table tr.grand-total td { font-size: 16px; font-weight: 700; color: #047857; border-top: 2px solid #111827; }
-    .footer { border-top: 1px solid #e5e7eb; padding-top: 15px; font-size: 11px; color: #6b7280; text-align: center; margin-top: 40px; }
+    @page { size: A4; margin: 14mm 14mm 18mm 14mm; }
+    * { box-sizing: border-box; }
+    body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #111827; margin: 0; font-size: 9.5pt; line-height: 1.4; }
+    .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; padding-bottom: 12px; border-bottom: 2px solid #065f46; }
+    .brand { font-size: 17pt; font-weight: 700; color: #065f46; letter-spacing: -0.2px; }
+    .seller { color: #374151; font-size: 8.5pt; margin-top: 4px; line-height: 1.45; }
+    .title { text-align: right; }
+    .title h1 { font-size: 20pt; letter-spacing: 1.5px; margin: 0; color: #111827; font-weight: 800; }
+    .title .no { font-size: 12pt; font-weight: 700; margin-top: 2px; font-family: 'Courier New', monospace; }
+    .status { display: inline-block; margin-top: 6px; padding: 2px 8px; border: 1px solid #9ca3af; border-radius: 3px; font-size: 7.5pt; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; color: #374151; }
+    .disclaimer { margin: 10px 0 14px; padding: 7px 10px; border: 1px solid #111827; border-left-width: 4px; font-weight: 700; font-size: 9pt; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+    .box { border: 1px solid #d1d5db; border-radius: 4px; padding: 8px 10px; break-inside: avoid; overflow-wrap: anywhere; }
+    .box h4 { margin: 0 0 5px; font-size: 7.5pt; text-transform: uppercase; letter-spacing: .6px; color: #6b7280; }
+    .box .name { font-weight: 700; }
+    .kv { display: flex; justify-content: space-between; gap: 10px; padding: 1.5px 0; }
+    .kv span { color: #6b7280; white-space: nowrap; }
+    .kv strong { text-align: right; font-weight: 600; overflow-wrap: anywhere; }
+    table.items { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+    table.items thead { display: table-header-group; }
+    table.items th { background: #f3f4f6; color: #374151; font-size: 7.5pt; text-transform: uppercase; letter-spacing: .4px; text-align: left; padding: 6px 6px; border-bottom: 1.5px solid #6b7280; white-space: nowrap; }
+    table.items td { padding: 6px 6px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+    table.items tr { break-inside: avoid; page-break-inside: avoid; }
+    .r { text-align: right !important; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .strong { font-weight: 700; }
+    .c-n { width: 22px; color: #6b7280; }
+    .c-desc { overflow-wrap: anywhere; }
+    .cur-note { font-size: 7.5pt; color: #6b7280; margin: -4px 0 10px; text-align: right; }
+    .end { display: flex; gap: 14px; align-items: flex-start; break-inside: avoid; page-break-inside: avoid; }
+    .end .terms { flex: 1; }
+    .totals { width: 275px; border: 1px solid #111827; border-radius: 4px; padding: 8px 10px; break-inside: avoid; }
+    .totals .kv { padding: 3px 0; }
+    .totals .grand { border-top: 1.5px solid #111827; margin-top: 4px; padding-top: 6px; font-size: 11pt; }
+    .totals .grand span { color: #111827; font-weight: 700; white-space: normal; }
+    .totals .kv strong { white-space: nowrap; }
+    .terms .box + .box { margin-top: 8px; }
+    .pre { white-space: normal; }
   </style>
 </head>
 <body>
-  <div class="header">
+  <div class="top">
     <div>
-      <div class="brand">GreenWave Recycling</div>
-      <div style="color: #4b5563; font-size: 12px; margin-top: 4px;">
-        Commercial Recycling & Waste Recovery Solutions<br>
-        Email: sales@greenwaverecycling.ca
-      </div>
+      <div class="brand">GreenWave Recycling Inc.</div>
+      <div class="seller">23394, Fisherman Rd<br>Maple Ridge, BC, V3W 1B9, CANADA<br>1-672-472-0423 · sales@greenwaverecycling.ca</div>
     </div>
-    <div style="text-align: right;">
-      <h1 class="doc-title">PROFORMA INVOICE</h1>
-      <div style="font-size: 14px; font-weight: 700; color: #374151; margin-top: 4px;">${proforma.proformaNumber}</div>
-      <div class="badge">${proforma.status}</div>
+    <div class="title">
+      <h1>PROFORMA INVOICE</h1>
+      <div class="no">${text(proforma.proformaNumber)}</div>
+      ${status}
     </div>
   </div>
 
-  <div class="banner">
-    ⚠️ NOTICE: This is a preliminary proforma estimate for commercial and customs purposes. It is NOT a tax invoice or demand for payment.
-  </div>
+  <div class="disclaimer">This is a proforma invoice and is not a demand for payment or a tax invoice.</div>
 
   <div class="grid">
     <div class="box">
-      <h4>Bill To</h4>
-      <strong>${escapeHtml(proforma.customerName || 'Customer')}</strong><br>
-      ${proforma.billTo ? escapeHtml(proforma.billTo).replace(/\n/g, '<br>') : '—'}
+      <h4>Bill to</h4>
+      <div class="name">${text(proforma.customerName) || '—'}</div>
+      ${proforma.billTo ? `<div class="pre">${multi(proforma.billTo)}</div>` : ''}
     </div>
     <div class="box">
-      <h4>Ship / Delivery To</h4>
-      ${proforma.shipTo ? escapeHtml(proforma.shipTo).replace(/\n/g, '<br>') : (proforma.destination ? escapeHtml(proforma.destination) : '—')}
+      <h4>Ship to</h4>
+      ${proforma.shipTo ? `<div class="pre">${multi(proforma.shipTo)}</div>` : (proforma.destination ? text(proforma.destination) : '—')}
     </div>
     <div class="box">
-      <h4>Document Details</h4>
-      <strong>Issue Date:</strong> ${proforma.issueDate}<br>
-      <strong>Valid Until:</strong> ${proforma.validityDate || 'Open'}<br>
-      <strong>PO Reference:</strong> ${proforma.poReference || '—'}<br>
-      <strong>Currency:</strong> ${proforma.currency}<br>
-      ${proforma.incoterm ? `<strong>Incoterm:</strong> ${escapeHtml(proforma.incoterm)} ${proforma.incotermLocation ? `(${escapeHtml(proforma.incotermLocation)})` : ''}<br>` : ''}
-      ${proforma.totalWeight ? `<strong>Est. Total Weight:</strong> ${proforma.totalWeight} ${proforma.weightUnit}<br>` : ''}
+      <h4>Document</h4>
+      ${detail('Issue date', text(proforma.issueDate))}
+      ${detail('Valid until', text(proforma.validityDate) || 'Open')}
+      ${detail('Customer ref.', text(proforma.poReference))}
+      ${detail('Currency', text(cur))}
     </div>
   </div>
 
-  <table>
+  <div class="grid2">
+    <div class="box">
+      <h4>Shipment</h4>
+      ${detail('Origin', text(proforma.origin)) || '<div class="kv"><span>Origin</span><strong>—</strong></div>'}
+      ${detail('Destination', text(proforma.destination)) || '<div class="kv"><span>Destination</span><strong>—</strong></div>'}
+      ${detail('Incoterm', incoterm)}
+      ${detail('Est. total weight', totalWeight > 0 ? qty(totalWeight) + ' ' + text(wUnit) : '')}
+    </div>
+    <div class="box">
+      <h4>Shipping terms</h4>
+      <div class="pre">${multi(proforma.shippingTerms) || '—'}</div>
+    </div>
+  </div>
+
+  <table class="items">
     <thead>
       <tr>
-        <th style="width: 40px;">#</th>
+        <th>#</th>
         <th>Description</th>
-        <th style="text-align: right; width: 110px;">Quantity</th>
-        <th style="text-align: right; width: 100px;">Unit Price</th>
-        <th style="text-align: right; width: 90px;">Discount</th>
-        <th style="text-align: right; width: 110px;">Line Total</th>
+        <th class="r">Quantity</th>
+        <th class="r">Unit price</th>
+        ${hasDiscount ? '<th class="r">Discount</th>' : ''}
+        ${hasTax ? '<th class="r">Tax</th>' : ''}
+        ${hasWeight ? '<th class="r">Weight</th>' : ''}
+        <th class="r">Amount</th>
       </tr>
     </thead>
-    <tbody>
-      ${itemsHtml}
-    </tbody>
+    <tbody>${rows}</tbody>
   </table>
+  <div class="cur-note">All amounts in ${text(cur)}${hasTax ? '. Line amounts exclude tax; estimated tax is added in the totals' : ''}.</div>
 
-  <div class="totals">
-    <table class="totals-table">
-      <tr>
-        <td>Subtotal:</td>
-        <td style="text-align: right; font-weight: 600;">$${Number(proforma.subtotal).toFixed(2)}</td>
-      </tr>
-      <tr>
-        <td>Estimated Tax / Duties:</td>
-        <td style="text-align: right; font-weight: 600;">$${Number(proforma.taxTotal).toFixed(2)}</td>
-      </tr>
-      <tr class="grand-total">
-        <td>Estimated Total (${proforma.currency}):</td>
-        <td style="text-align: right;">$${Number(proforma.total).toFixed(2)}</td>
-      </tr>
-    </table>
-  </div>
-
-  ${proforma.commercialTerms || proforma.notes ? `
-  <div class="box" style="margin-bottom: 20px;">
-    <h4>Commercial Terms & Notes</h4>
-    ${proforma.commercialTerms ? `<div><strong>Terms:</strong> ${escapeHtml(proforma.commercialTerms)}</div>` : ''}
-    ${proforma.notes ? `<div><strong>Notes:</strong> ${escapeHtml(proforma.notes)}</div>` : ''}
-  </div>` : ''}
-
-  <div class="footer">
-    GreenWave Recycling • This proforma invoice is valid until the specified date and subject to commercial confirmation.
+  <div class="end">
+    <div class="terms">
+      ${proforma.notes ? `<div class="box"><h4>Notes</h4><div class="pre">${multi(proforma.notes)}</div></div>` : ''}
+      ${proforma.commercialTerms ? `<div class="box"><h4>Commercial terms</h4><div class="pre">${multi(proforma.commercialTerms)}</div></div>` : ''}
+    </div>
+    <div class="totals">
+      ${totalWeight > 0 ? `<div class="kv"><span>Total weight</span><strong>${qty(totalWeight)} ${text(wUnit)}</strong></div>` : ''}
+      <div class="kv"><span>Subtotal</span><strong>${money(proforma.subtotal)}</strong></div>
+      <div class="kv"><span>Estimated tax</span><strong>${money(proforma.taxTotal)}</strong></div>
+      <div class="kv grand"><span>Estimated total (${text(cur)})</span><strong>${money(proforma.total)}</strong></div>
+    </div>
   </div>
 </body>
 </html>`;
   }
 
   /**
-   * Renders the Proforma Invoice into a PDF buffer.
+   * Renders the Proforma Invoice into a PDF buffer. Page size and margins
+   * come from the template's @page rule; the footer (document number,
+   * non-payment statement, page x of y) is the only header/footer printed.
    */
   async renderPdf(id: string, actor: AuthenticatedUser): Promise<Buffer> {
     const proforma = await this.findOne(id, actor);
     const html = this.generateProformaHtml(proforma);
+    const footer = `<div style="width:100%;font-family:Helvetica,Arial,sans-serif;font-size:7.5px;color:#6b7280;padding:0 14mm;display:flex;justify-content:space-between;">
+      <span>GreenWave Recycling Inc. · Proforma ${escapeHtml(proforma.proformaNumber)} · Not a demand for payment or a tax invoice</span>
+      <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span></div>`;
 
     try {
       const { chromium } = require('playwright');
@@ -694,8 +752,11 @@ export class ProformasService {
         const pdfBuffer = await page.pdf({
           format: 'A4',
           printBackground: true,
-          displayHeaderFooter: false,
-          margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
+          preferCSSPageSize: true,
+          displayHeaderFooter: true,
+          headerTemplate: '<span></span>',
+          footerTemplate: footer,
+          margin: { top: '14mm', right: '14mm', bottom: '18mm', left: '14mm' },
         });
         return pdfBuffer;
       } finally {

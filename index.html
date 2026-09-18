@@ -9,13 +9,13 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Greenwave">
 <title>GreenWave Operations Platform</title>
-<link rel="manifest" href="manifest.webmanifest?v=20260917_proforma_rc1">
+<link rel="manifest" href="manifest.webmanifest?v=20260917_proforma_rc2">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <link rel="icon" href="assets/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/app.css?v=20260917_proforma_rc1">
+<link rel="stylesheet" href="assets/app.css?v=20260917_proforma_rc2">
 </head>
 <body>
 
@@ -36,6 +36,7 @@
   <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></symbol>
   <symbol id="i-truck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.6 4.6 4.6L19 6.6"/></symbol>
   <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5m0 0 6-6m-6 6 6 6"/></symbol>
@@ -488,7 +489,7 @@
         <div class="vhead">
           <div>
             <h1>Proforma Invoices</h1>
-            <p>Preliminary sales estimates &amp; commercial quotations. Non-accounting documents with independent numbering sequence (PF-XXXX).</p>
+            <p>Quotations for customers, freight forwarders and customs. Not a demand for payment — nothing reaches accounting until a proforma is converted to an invoice.</p>
           </div>
           <div class="vactions">
             <button type="button" class="btn btn-primary" id="newProforma"><svg><use href="#i-plus"></use></svg>New proforma</button>
@@ -503,6 +504,7 @@
             <button type="button" class="inven-tab" data-pf-filter="sent" role="tab" aria-selected="false">Sent</button>
             <button type="button" class="inven-tab" data-pf-filter="accepted" role="tab" aria-selected="false">Accepted</button>
             <button type="button" class="inven-tab" data-pf-filter="converted" role="tab" aria-selected="false">Converted</button>
+            <button type="button" class="inven-tab" data-pf-filter="expired" role="tab" aria-selected="false">Expired</button>
             <button type="button" class="inven-tab" data-pf-filter="cancelled" role="tab" aria-selected="false">Cancelled</button>
           </div>
           <div class="inven-filters">
@@ -521,12 +523,9 @@
         <div class="vhead noprint">
           <div><button type="button" class="linkback" data-goto="proformas"><svg><use href="#i-back"></use></svg>All proformas</button>
             <h1 id="pfEdTitle">New proforma invoice</h1></div>
-          <div class="vactions">
-            <button type="button" class="btn ghost btn-sm" id="pfEdSend" hidden><svg><use href="#i-send"></use></svg>Send Email</button>
-            <button type="button" class="btn ghost btn-sm" id="pfEdConvert" hidden><svg><use href="#i-check"></use></svg>Convert to Final Invoice</button>
-            <button type="button" class="btn ghost btn-sm" id="pfEdPdf" hidden><svg><use href="#i-download"></use></svg>Download PDF</button>
-            <button type="button" class="btn" id="pfEdSave"><svg><use href="#i-check"></use></svg>Save proforma</button>
-          </div>
+          <!-- Filled by renderProformaEditor(): only the actions valid for the
+               proforma's status are rendered. -->
+          <div class="vactions pf-ed-actions" id="pfEdActions"></div>
         </div>
         <div id="proformaEditorBody"></div>
       </section>
@@ -615,7 +614,13 @@
       <!-- ============ MATERIALS / PRODUCTS VIEW ============ -->
       <section class="view" id="v-products">
         <div class="vhead">
-          <div><h1 id="prodTitle">Materials</h1><p id="prodSub">Catalog items tracked for this facility.</p></div>
+          <div><h1 id="prodTitle">Materials</h1>
+            <div class="scope-context-pill">
+              <span class="scope-facility" id="prodScopeFacility">—</span>
+              <span class="scope-divider">·</span>
+              <span class="scope-division-unit" id="prodScopeDivision">Recycling</span>
+            </div>
+            <p id="prodSub">Catalog items tracked for this facility.</p></div>
           <button type="button" class="btn" id="newProduct"><svg><use href="#i-plus"></use></svg><span id="prodCta">Add material</span></button>
         </div>
         <div id="productBody"></div>
@@ -1273,10 +1278,10 @@
   <div class="lbmeta" id="lbMeta"></div>
 </div>
 
-<script src="assets/api.js?v=20260917_proforma_rc1"></script>
-<script src="assets/store.js?v=20260917_proforma_rc1"></script>
-<script src="assets/photos.js?v=20260917_proforma_rc1"></script>
-<script src="assets/app.js?v=20260917_proforma_rc1"></script>
+<script src="assets/api.js?v=20260917_proforma_rc2"></script>
+<script src="assets/store.js?v=20260917_proforma_rc2"></script>
+<script src="assets/photos.js?v=20260917_proforma_rc2"></script>
+<script src="assets/app.js?v=20260917_proforma_rc2"></script>
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {

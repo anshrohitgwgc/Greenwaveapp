@@ -56,6 +56,12 @@
     return (n ? '-$' : '$') + v.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   function moneyDollars(d) { return money(Math.round((Number(d) || 0) * 100)); }
+  /* A unit rate keeps up to four decimals (per-kg / per-lb pricing), so a
+     printed rate x quantity reproduces the printed amount. */
+  function moneyRate(d) {
+    var n = Number(d) || 0;
+    return (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  }
   function parseQty(s) { var n = parseFloat(String(s).replace(/[^0-9.\-]/g, '')); return isFinite(n) ? n : 0; }
   function num(n, dp) {
     return Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: dp || 0, maximumFractionDigits: dp === undefined ? 3 : dp });
@@ -672,6 +678,10 @@
   }
 
   function show(next) {
+    // Every Recycling-only financial screen (ledger, banking, payables...)
+    // falls back to Inventory outside Recycling, so switching division never
+    // leaves a stale finance screen on display.
+    if (!isRecycling() && RECYCLING_ONLY_FINANCIAL_VIEWS.indexOf(next) >= 0) next = 'inventory';
     if (next === 'invoices' && !isRecycling()) next = 'inventory';
     if (next === 'proformas' && !isRecycling()) next = 'inventory';
     if (next === 'payments' && !isRecycling()) next = 'inventory';
@@ -1144,27 +1154,34 @@
   function openTransactionDetailModal(txId) {
     Api.getInventoryTransaction(txId).then(function (tx) {
       var photoCount = (tx.photos && tx.photos.length) || 0;
-      var canAddPhotos = photoCount < 15;
+      var photoMax = inventoryPhotoMax();
+      var canAddPhotos = photoCount < photoMax;
+      /* Camera and library are separate inputs for the same reason as the
+         inbound picker: `capture` opens the camera directly and hides the
+         photo library, so one input cannot serve both. */
       var addPhotoBtnHtml = canAddPhotos
-        ? '<label class="btn ghost btn-sm" style="cursor:pointer;margin:0;display:inline-flex;align-items:center;gap:4px">' +
-            '<svg style="width:13px;height:13px"><use href="#i-plus"></use></svg> Add Photos' +
-            '<input type="file" id="txAddPhotoInput" accept="image/*" multiple style="display:none">' +
-          '</label>'
-        : '<span style="font-size:12px;color:var(--muted)">Max photos reached (15/15)</span>';
+        ? '<div class="tx-photo-add">' +
+            '<input type="file" id="txAddPhotoCamera" accept="image/*" capture="environment" multiple hidden>' +
+            '<input type="file" id="txAddPhotoLibrary" accept="image/*" multiple hidden>' +
+            '<button type="button" class="btn ghost btn-sm photo-add-btn" id="txAddPhotoCameraBtn"><svg><use href="#i-cam"></use></svg>Take photo</button>' +
+            '<button type="button" class="btn ghost btn-sm photo-add-btn" id="txAddPhotoLibraryBtn"><svg><use href="#i-plus"></use></svg>Add photos</button>' +
+          '</div>'
+        : '<span class="tx-photo-full">Maximum reached (' + photoMax + ' / ' + photoMax + ')</span>';
+      var photoHeadHtml = '<div class="tx-photos-head">' +
+          '<span class="tx-detail-label">Photos <span class="photo-counter' + (canAddPhotos ? '' : ' is-full') + '">' + photoCount + ' / ' + photoMax + '</span></span>' +
+          addPhotoBtnHtml +
+        '</div>';
 
       var photoHtml = '';
       if (photoCount > 0) {
         photoHtml = '<div class="tx-photos-section" style="margin-top:16px">' +
-          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
-            '<span class="tx-detail-label">Associated Photos (' + photoCount + ' / 15)</span>' +
-            addPhotoBtnHtml +
-          '</div>' +
+          photoHeadHtml +
           '<div class="tx-photos-grid">' +
           tx.photos.map(function (p, idx) {
             var fileName = p.originalFilename || p.filename || ('Photo #' + (idx + 1));
             var thumbUrl = (p.id ? Api.photoThumbnailUrl(p.id) : (p.thumbnailUrl ? Api.photoThumbnailUrl(p.thumbnailUrl) : (p.url || '')));
-            return '<div class="tx-photo-card" data-idx="' + idx + '" style="cursor:pointer;position:relative">' +
-              '<button type="button" class="tx-photo-del-btn" data-photo-id="' + esc(p.id) + '" title="Remove photo" style="position:absolute;top:4px;right:4px;background:rgba(220,38,38,0.85);color:#fff;border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;z-index:2">✕</button>' +
+            return '<div class="tx-photo-card" data-idx="' + idx + '" role="button" tabindex="0" aria-label="Open photo ' + (idx + 1) + ' of ' + photoCount + '" style="cursor:pointer;position:relative">' +
+              '<button type="button" class="tx-photo-del-btn" data-photo-id="' + esc(p.id) + '" title="Remove photo from this record" aria-label="Remove photo ' + (idx + 1) + ' from this record">&times;</button>' +
               '<div class="photo-thumb-wrap" style="height:110px">' +
                 '<img src="' + esc(thumbUrl) + '" alt="' + esc(fileName) + '" class="tx-photo-img" loading="lazy" onerror="this.style.display=\'none\';if(this.nextElementSibling)this.nextElementSibling.style.display=\'flex\';">' +
                 '<div class="photo-error-placeholder" style="display:none">' +
@@ -1177,11 +1194,8 @@
           '</div></div>';
       } else {
         photoHtml = '<div class="tx-photos-section" style="margin-top:16px">' +
-          '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
-            '<span class="tx-detail-label">Associated Photos (0 / 15)</span>' +
-            addPhotoBtnHtml +
-          '</div>' +
-          '<div class="tx-detail-val" style="color:var(--muted)">— None attached</div>' +
+          photoHeadHtml +
+          '<div class="tx-detail-val" style="color:var(--muted)">No photos attached yet.</div>' +
         '</div>';
       }
 
@@ -1246,30 +1260,47 @@
       var okBtn = $('#modalOk'); if (okBtn) okBtn.hidden = true;
       var cancelBtn = $('#modalCancel'); if (cancelBtn) cancelBtn.textContent = 'Close';
 
-      var fileInput = $('#txAddPhotoInput');
-      if (fileInput) {
-        fileInput.addEventListener('change', function () {
-          var files = Array.prototype.slice.call(fileInput.files || []);
-          if (!files.length) return;
-          var curCount = (tx.photos && tx.photos.length) || 0;
-          if (curCount + files.length > 15) {
-            toast('Cannot add ' + files.length + ' photos. Maximum is 15 (currently ' + curCount + ').');
-            return;
-          }
-          toast('Uploading ' + files.length + ' photo(s)...', 'info');
-          Api.uploadPhotosBatch(files, { transactionId: tx.id, warehouseId: tx.warehouseId }).then(function (res) {
-            var uploaded = res.photos || (Array.isArray(res) ? res : [res]);
-            var ids = uploaded.map(function (p) { return p.id; }).filter(Boolean);
-            if (!ids.length) throw new Error('No photo IDs returned from upload');
-            return Api.attachTransactionPhotos(tx.id, ids);
-          }).then(function () {
-            toast('Photos attached successfully');
-            openTransactionDetailModal(txId);
-          }).catch(function (err) {
-            toast('Failed to attach photos: ' + (err.message || err));
+      /* Appends to the existing set -- never replaces it. The same
+         downscale/EXIF-strip and batch endpoint as the inbound picker, then
+         an explicit attach to this transaction. */
+      function addPhotosToTx(fileList) {
+        var files = Array.prototype.slice.call(fileList || []).filter(function (f) {
+          return !f.type || f.type.indexOf('image/') === 0;
+        });
+        if (!files.length) return;
+        var room = photoMax - photoCount;
+        if (files.length > room) {
+          toast('This record already has ' + photoCount + ' of ' + photoMax + ' photos. You can add ' + room + ' more.');
+          return;
+        }
+        toast('Uploading ' + files.length + (files.length === 1 ? ' photo…' : ' photos…'));
+        Photos.prepareAll(files).then(function (prepared) {
+          return Api.uploadPhotos(prepared.map(function (r) { return r.file; }), {
+            warehouseId: tx.warehouseId,
+            photoType: tx.type === 'outbound' ? 'inventory_outbound' : 'inventory_inbound',
+            jobReference: tx.orderNumber || tx.reference || undefined
           });
+        }).then(function (res) {
+          var uploaded = Array.isArray(res) ? res : ((res && (res.photos || res.items)) || []);
+          var ids = uploaded.map(function (p) { return p.id; }).filter(Boolean);
+          if (!ids.length) throw new Error('The server did not return the uploaded photos.');
+          return Api.attachTransactionPhotos(tx.id, ids);
+        }).then(function () {
+          toast(files.length === 1 ? 'Photo added.' : files.length + ' photos added.');
+          openTransactionDetailModal(txId);
+        }).catch(function (err) {
+          toast('Could not add photos: ' + (err.message || err));
         });
       }
+      [['#txAddPhotoCameraBtn', '#txAddPhotoCamera'], ['#txAddPhotoLibraryBtn', '#txAddPhotoLibrary']].forEach(function (pair) {
+        var btn = $(pair[0]), input = $(pair[1]);
+        if (!btn || !input) return;
+        btn.addEventListener('click', function () { input.click(); });
+        input.addEventListener('change', function () {
+          addPhotosToTx(input.files);
+          input.value = '';
+        });
+      });
 
       $$('.tx-photo-del-btn').forEach(function (btn) {
         btn.addEventListener('click', function (e) {
@@ -1291,6 +1322,11 @@
           if (e.target.closest('.tx-photo-del-btn')) return;
           var idx = Number(card.dataset.idx);
           openLightbox(idx, tx.photos);
+        });
+        card.addEventListener('keydown', function (e) {
+          if (e.target !== card || (e.key !== 'Enter' && e.key !== ' ')) return;
+          e.preventDefault();
+          openLightbox(Number(card.dataset.idx), tx.photos);
         });
       });
     }).catch(function (err) {
@@ -1420,12 +1456,17 @@
         return (th.textContent || '').replace(/\s+/g, ' ').trim();
       });
 
-      $$('tbody tr', table).forEach(function (tr) {
+      $$('tbody tr, tfoot tr', table).forEach(function (tr) {
         var cells = Array.prototype.slice.call(tr.children);
         /* Empty-state and group rows span the table; they read fine as-is and
            must not be given a column label. */
         if (cells.length === 1 && cells[0].colSpan > 1) return;
         cells.forEach(function (td, i) {
+          /* A card row reading "Description —" is noise on a phone; blank
+             cells are marked so the stacked layout can drop them. */
+          if (i > 0 && !td.querySelector('button, a, input, select') && /^[\s—–-]*$/.test(td.textContent || '')) {
+            td.classList.add('stack-empty');
+          }
           if (td.hasAttribute('data-label')) return;
           if (labels[i]) td.setAttribute('data-label', labels[i]);
         });
@@ -3100,6 +3141,10 @@
     };
   }
 
+  function savedInvoiceTaxRate(inv) {
+    return (inv.taxRate == null || inv.taxRate === '' || isNaN(Number(inv.taxRate))) ? 5 : Number(inv.taxRate);
+  }
+
   function invoiceToDraft(inv) {
     var termsDays = 15;
     if (inv.dueDate && inv.invoiceDate) {
@@ -3138,8 +3183,11 @@
       termsDays: termsDays,
       invoiceDate: inv.invoiceDate || today(),
       dueDate: inv.dueDate || (inv.invoiceDate ? new Date(new Date(inv.invoiceDate).getTime() + termsDays * 864e5).toISOString().slice(0, 10) : today()),
-      taxLabel: inv.taxLabel || 'GST @ 5%',
-      taxRatePct: Number(inv.taxRate) || 5,
+      // A stored 0% (zero-rated / export) is a real rate: only a missing
+      // value falls back to the 5% GST default. The label follows the rate
+      // when none was stored (e.g. an invoice converted from a proforma).
+      taxLabel: inv.taxLabel || ('GST @ ' + savedInvoiceTaxRate(inv) + '%'),
+      taxRatePct: savedInvoiceTaxRate(inv),
       companyInfo: {
         name: co.name || 'Greenwave Recycling Inc.',
         bn: co.bn || 'BN 751161951BC0001',
@@ -3473,7 +3521,7 @@
         '<td>' + esc(it.unit || '') + '</td>' +
         '<td>' + esc(it.description || '—') + '</td>' +
         '<td class="num mono">' + num(it.quantity, 3) + '</td>' +
-        '<td class="num mono">' + moneyDollars(it.unitPrice) + '</td>' +
+        '<td class="num mono">' + moneyRate(it.unitPrice) + '</td>' +
         '<td class="num mono" style="font-weight:600">' + moneyDollars(lineAmt) + '</td>' +
         '<td class="num">' + esc(it.taxRateLabel || 'GST') + '</td>' +
       '</tr>';
@@ -3853,7 +3901,7 @@
         paymentInstructions: draft.paymentInstructions,
         notes: draft.notes || '',
         taxLabel: draft.taxLabel || 'GST @ 5%',
-        taxRate: Number(draft.taxRatePct) || 5,
+        taxRate: (draft.taxRatePct === '' || draft.taxRatePct == null || isNaN(Number(draft.taxRatePct))) ? 5 : Number(draft.taxRatePct),
         // Same rule as customers: the invoice is created in the division the
         // user is working in, stated explicitly. This is scoping only — it has
         // no bearing on the invoice number, which stays a single global
@@ -4963,10 +5011,49 @@
   var proformaFilter = 'all';
   var proformaSearchQuery = '';
   var proformaListCache = [];
+  var proformaDirty = false;
+  var proformaFiltersBound = false;
+  var proformaCustomersCache = null;
 
   var INCOTERM_OPTIONS = [
     'FOB', 'CIF', 'CFR', 'EXW', 'DAP', 'DDP', 'FCA', 'CPT', 'CIP'
   ];
+  var PF_CURRENCIES = ['CAD', 'USD'];
+  var PF_WEIGHT_UNITS = ['kg', 'lb', 't'];
+  var PF_DEFAULT_TERMS = 'Commercial proforma estimate. This is not a tax invoice or demand for payment.';
+
+  /* Status vocabulary. Every chip carries its word, never colour alone. */
+  var PF_STATUS = {
+    draft:     { label: 'Draft',     cls: 'pf-st-draft' },
+    sent:      { label: 'Sent',      cls: 'pf-st-sent' },
+    accepted:  { label: 'Accepted',  cls: 'pf-st-accepted' },
+    expired:   { label: 'Expired',   cls: 'pf-st-expired' },
+    converted: { label: 'Converted', cls: 'pf-st-converted' },
+    cancelled: { label: 'Cancelled', cls: 'pf-st-cancelled' }
+  };
+
+  function pfStatusChip(status) {
+    var st = PF_STATUS[(status || 'draft').toLowerCase()] || PF_STATUS.draft;
+    return '<span class="badge pf-st ' + st.cls + '">' + esc(st.label) + '</span>';
+  }
+
+  function pfRound(n) { return Math.round((Number(n) || 0) * 100) / 100; }
+
+  function pfMoney(amount, currency) {
+    return (currency || 'CAD') + ' ' + (Number(amount) || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function pfWeight(value, unit) {
+    var n = Number(value);
+    if (!value || !isFinite(n) || n <= 0) return '—';
+    return n.toLocaleString('en-CA', { maximumFractionDigits: 3 }) + ' ' + (unit || 'kg');
+  }
+
+  /* Editable until it has become a real invoice or been withdrawn. The API
+     enforces the same rule (converted/cancelled are read-only). */
+  function pfIsEditable(status) { return status !== 'converted' && status !== 'cancelled'; }
+  /* Mirrors ProformasService.convert(): draft, sent and accepted only. */
+  function pfIsConvertible(status) { return status === 'draft' || status === 'sent' || status === 'accepted'; }
 
   function blankProformaLine() {
     return {
@@ -4975,8 +5062,32 @@
       unit: 'kg',
       unitPrice: 0,
       discount: 0,
-      taxRate: 5,
-      weight: 0
+      taxRate: 0,
+      weight: null
+    };
+  }
+
+  function newProformaDraft() {
+    return {
+      customerId: '',
+      customerName: '',
+      warehouseId: warehouseId || '',
+      issueDate: today(),
+      validityDate: '',
+      currency: 'CAD',
+      poReference: '',
+      billTo: '',
+      shipTo: '',
+      origin: '',
+      destination: '',
+      incoterm: 'FOB',
+      incotermLocation: '',
+      shippingTerms: '',
+      notes: '',
+      commercialTerms: PF_DEFAULT_TERMS,
+      weightUnit: 'kg',
+      status: 'draft',
+      items: [blankProformaLine()]
     };
   }
 
@@ -4988,7 +5099,7 @@
       customerId: p.customerId || '',
       customerName: p.customerName || '',
       warehouseId: p.warehouseId || '',
-      issueDate: p.issueDate || new Date().toISOString().split('T')[0],
+      issueDate: p.issueDate || today(),
       validityDate: p.validityDate || '',
       currency: p.currency || 'CAD',
       poReference: p.poReference || '',
@@ -4996,11 +5107,11 @@
       shipTo: p.shipTo || '',
       origin: p.origin || '',
       destination: p.destination || '',
-      incoterm: p.incoterm || 'FOB',
+      incoterm: p.incoterm || '',
       incotermLocation: p.incotermLocation || '',
       shippingTerms: p.shippingTerms || '',
       notes: p.notes || '',
-      commercialTerms: p.commercialTerms || 'Commercial proforma estimate. This is not a tax invoice or demand for payment.',
+      commercialTerms: p.commercialTerms || '',
       status: p.status || 'draft',
       convertedInvoiceId: p.convertedInvoiceId || null,
       convertedAt: p.convertedAt || null,
@@ -5018,15 +5129,252 @@
           unit: it.unit || 'kg',
           unitPrice: Number(it.unitPrice) || 0,
           discount: Number(it.discount) || 0,
-          taxRate: Number(it.taxRate) || 0,
+          // A saved 0% rate is a real value -- never substitute a default.
+          taxRate: it.taxRate != null && it.taxRate !== '' ? Number(it.taxRate) : 0,
           total: Number(it.total) || 0,
-          weight: it.weight != null ? Number(it.weight) : null
+          weight: it.weight != null && it.weight !== '' ? Number(it.weight) : null
         };
       }) : [blankProformaLine()]
     };
   }
 
+  /* Same arithmetic as ProformasService (per-line rounding), so the live
+     preview matches the saved document to the cent. */
+  function pfLineCalc(it) {
+    var sub = pfRound((Number(it.quantity) || 0) * (Number(it.unitPrice) || 0) - (Number(it.discount) || 0));
+    var tax = pfRound(sub * ((Number(it.taxRate) || 0) / 100));
+    return { sub: sub, tax: tax, total: pfRound(sub + tax) };
+  }
+
+  function pfTotals(items) {
+    var t = { subtotal: 0, tax: 0, total: 0, weight: 0, rates: {} };
+    (items || []).forEach(function (it) {
+      var c = pfLineCalc(it);
+      t.subtotal = pfRound(t.subtotal + c.sub);
+      t.tax = pfRound(t.tax + c.tax);
+      if (it.weight) t.weight += Number(it.weight) || 0;
+      if (it.description) t.rates[String(Number(it.taxRate) || 0)] = true;
+    });
+    t.total = pfRound(t.subtotal + t.tax);
+    t.mixedRates = Object.keys(t.rates).length > 1;
+    return t;
+  }
+
+  function downloadProformaPdf(id, number) {
+    toast('Preparing ' + (number || 'proforma') + ' PDF…');
+    return Api.downloadProformaPdf(id).then(function (blob) {
+      var url = window.URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = (number || 'proforma') + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { window.URL.revokeObjectURL(url); }, 1000);
+    }).catch(function (err) {
+      toast('Could not generate the PDF: ' + (err.message || err));
+    });
+  }
+
+  function openFinalInvoice(invoiceId) {
+    if (!invoiceId) return;
+    Api.getInvoice(invoiceId).then(function (inv) {
+      draft = invoiceToDraft(inv);
+      editorViewMode = true;
+      show('editor');
+    }).catch(function (err) {
+      toast('Could not open the invoice: ' + (err.message || err));
+    });
+  }
+
+  function openSendProformaModal(pf, onSent) {
+    var email = (pf && pf.customer && pf.customer.email) || (pf && pf.customerEmail) || '';
+    openModal('Email ' + (pf.proformaNumber || 'proforma'),
+      '<p class="pf-modal-note">The PDF is attached. The email states that this is a proforma and not a demand for payment. It contains no payment link.</p>' +
+      field('email', 'Recipient email', { type: 'email', required: true, value: email, placeholder: 'purchasing@customer.com', autocomplete: 'email' }),
+      function (fd) {
+        return Api.sendProforma(pf.id, { email: fd.email }).then(function (res) {
+          if (res && res.sent === false) {
+            // The API answers 200 with sent:false when no mail transport is
+            // configured -- that must not read as success.
+            throw new Error('Email was not sent' + (res.note ? ': ' + res.note : '. Email delivery is not configured.'));
+          }
+          toast(pf.proformaNumber + ' emailed to ' + fd.email + '.');
+          if (onSent) onSent();
+        });
+      },
+      { okLabel: 'Send email', savingLabel: 'Sending…' }
+    );
+  }
+
+  function confirmCancelProforma(pf, onDone) {
+    openModal('Cancel ' + pf.proformaNumber + '?',
+      '<div class="delete-confirm">' +
+        '<p class="delete-confirm-lead">' + esc(pf.proformaNumber) + ' will be marked <strong>Cancelled</strong>.</p>' +
+        '<p class="pf-modal-note">It stays on record for reference but can no longer be edited, sent or converted. No accounting entries exist for a proforma, so nothing else changes.</p>' +
+      '</div>',
+      function () {
+        return Api.updateProforma(pf.id, { status: 'cancelled' }).then(function (res) {
+          toast(pf.proformaNumber + ' cancelled.');
+          if (onDone) onDone(res);
+        });
+      },
+      { okLabel: 'Cancel proforma', okClass: 'danger', cancelLabel: 'Keep it', savingLabel: 'Cancelling…' }
+    );
+  }
+
+  function setProformaStatus(pf, status, onDone) {
+    return Api.updateProforma(pf.id, { status: status }).then(function (res) {
+      toast(pf.proformaNumber + ' marked ' + PF_STATUS[status].label.toLowerCase() + '.');
+      if (onDone) onDone(res);
+    }).catch(function (err) {
+      toast('Could not update status: ' + (err.message || err));
+    });
+  }
+
+  /* Conversion creates a real, numbered invoice with a receivable, so it is
+     confirmed with a plain statement of what happens -- and afterwards the
+     proforma is shown in its converted, read-only state with a direct link
+     to the new invoice. */
+  function confirmConvertProforma(pf, onDone) {
+    var totals = pfTotals(pf.items || []);
+    var mixed = totals.mixedRates;
+    var bodyHtml =
+      '<div class="pf-convert">' +
+        '<div class="pf-convert-sum">' +
+          '<div><span>Proforma</span><strong class="mono">' + esc(pf.proformaNumber) + '</strong></div>' +
+          '<div><span>Customer</span><strong>' + esc(pf.customerName || '—') + '</strong></div>' +
+          '<div><span>Invoice total</span><strong class="mono">' + esc(pfMoney(pf.total, pf.currency)) + '</strong></div>' +
+        '</div>' +
+        '<p class="pf-modal-note">Converting will:</p>' +
+        '<ul class="pf-convert-list">' +
+          '<li>Create a <strong>final invoice</strong> with the next invoice number, dated today.</li>' +
+          '<li>Enter it into normal accounting and create an <strong>Accounts Receivable</strong> balance for the customer.</li>' +
+          '<li>Mark ' + esc(pf.proformaNumber) + ' as <strong>Converted</strong> and link it to the invoice. The proforma becomes read-only.</li>' +
+        '</ul>' +
+        '<p class="pf-modal-note">A proforma can be converted only once. Any later change is made on the invoice itself.</p>' +
+        (mixed ? '<p class="pf-convert-warn" role="alert">These items use different tax rates. Conversion needs a single rate — edit the items first.</p>' : '') +
+      '</div>';
+
+    openModal('Convert to final invoice', bodyHtml, function () {
+      if (mixed) return Promise.reject(new Error('Use a single tax rate on all items before converting.'));
+      return Api.convertProforma(pf.id).then(function (res) {
+        var invNo = res && res.invoice ? res.invoice.invoiceNumber : null;
+        toast(pf.proformaNumber + ' converted' + (invNo ? ' to invoice #' + invNo : '') + '.');
+        if (onDone) onDone(res);
+      });
+    }, { okLabel: 'Create final invoice', okClass: 'btn-primary', cancelLabel: 'Not now', savingLabel: 'Converting…' });
+
+    // Nothing to focus in a confirmation body; start on the safe choice.
+    var cancelBtn = $('#modalCancel'); if (cancelBtn) cancelBtn.focus();
+    var okBtn = $('#modalOk'); if (okBtn && mixed) okBtn.disabled = true;
+  }
+
+  /* Which actions a proforma offers, by status and role. The list, the card
+     menu and the editor header all read from this one table. */
+  function proformaActions(pf) {
+    var st = (pf.status || 'draft').toLowerCase();
+    var manage = isAdminOrManager();
+    var acts = [];
+    acts.push({ key: 'open', label: pfIsEditable(st) && manage ? 'Edit' : 'View', icon: pfIsEditable(st) && manage ? 'edit' : 'doc' });
+    if (st === 'converted' && pf.convertedInvoiceId) acts.push({ key: 'invoice', label: 'Open final invoice', icon: 'doc' });
+    acts.push({ key: 'pdf', label: 'Download PDF', icon: 'download' });
+    if (manage && (st === 'draft' || st === 'sent' || st === 'accepted')) acts.push({ key: 'send', label: 'Email to customer', icon: 'send' });
+    if (manage && (st === 'draft' || st === 'sent')) acts.push({ key: 'accept', label: 'Mark accepted', icon: 'check' });
+    if (manage && st === 'expired') acts.push({ key: 'reopen', label: 'Reopen as draft', icon: 'edit' });
+    if (manage && pfIsConvertible(st)) acts.push({ key: 'convert', label: 'Convert to final invoice…', icon: 'check', divider: true });
+    if (manage && pfIsEditable(st)) acts.push({ key: 'cancel', label: 'Cancel proforma…', icon: 'trash', danger: true });
+    return acts;
+  }
+
+  function pfMenuHtml(pf, acts, extraClass) {
+    var items = acts.filter(function (a) { return a.key !== 'open'; });
+    if (!items.length) return '';
+    return '<details class="row-menu ' + (extraClass || '') + '">' +
+      '<summary class="btn ghost btn-sm" aria-label="More actions for ' + esc(pf.proformaNumber) + '">' +
+        '<svg><use href="#i-more"></use></svg><span class="row-menu-text">More</span></summary>' +
+      '<div class="row-menu-pop" role="menu">' +
+        items.map(function (a) {
+          return (a.divider ? '<hr>' : '') +
+            '<button type="button" role="menuitem" class="' + (a.danger ? 'is-danger' : '') + '" data-pf-act="' + a.key + '" data-pf-id="' + esc(pf.id) + '">' +
+              '<svg><use href="#i-' + a.icon + '"></use></svg>' + esc(a.label) + '</button>';
+        }).join('') +
+      '</div></details>';
+  }
+
+  function runProformaAction(key, id) {
+    var pf = proformaListCache.filter(function (x) { return x.id === id; })[0];
+    if (!pf && proformaDraft && proformaDraft.id === id) pf = proformaDraft;
+    if (!pf) return;
+    var refresh = function () { if (view === 'proformas') renderProformaList(); };
+    if (key === 'open') {
+      Api.getProforma(id).then(function (full) {
+        proformaDraft = proformaToDraft(full);
+        proformaDirty = false;
+        show('proformaeditor');
+      }).catch(function (err) { toast('Could not open proforma: ' + (err.message || err)); });
+    } else if (key === 'pdf') downloadProformaPdf(pf.id, pf.proformaNumber);
+    else if (key === 'invoice') openFinalInvoice(pf.convertedInvoiceId);
+    else if (key === 'send') openSendProformaModal(pf, refresh);
+    else if (key === 'accept') setProformaStatus(pf, 'accepted', refresh);
+    else if (key === 'reopen') setProformaStatus(pf, 'draft', refresh);
+    else if (key === 'cancel') confirmCancelProforma(pf, refresh);
+    else if (key === 'convert') {
+      // After converting, land on the proforma in its converted state, which
+      // carries the "Open final invoice" action.
+      confirmConvertProforma(pf, function () {
+        return Api.getProforma(pf.id).then(function (full) {
+          proformaDraft = proformaToDraft(full);
+          proformaDirty = false;
+          show('proformaeditor');
+        });
+      });
+    }
+  }
+
+  /* Closes any other open row menu, and any menu on an outside click, so
+     at most one popover is ever open. Bound once. */
+  document.addEventListener('click', function (e) {
+    var inside = e.target.closest ? e.target.closest('details.row-menu') : null;
+    $$('details.row-menu[open]').forEach(function (d) { if (d !== inside) d.removeAttribute('open'); });
+  });
+  /* The popover is positioned against the viewport so no scrolling table
+     wrapper can clip it; it opens upward when there is no room below. */
+  document.addEventListener('toggle', function (e) {
+    var d = e.target;
+    if (!d || !d.classList || !d.classList.contains('row-menu') || !d.open) return;
+    var pop = d.querySelector('.row-menu-pop');
+    var sum = d.querySelector('summary');
+    if (!pop || !sum) return;
+    var r = sum.getBoundingClientRect();
+    pop.style.position = 'fixed';
+    pop.style.left = 'auto';
+    pop.style.right = Math.max(8, window.innerWidth - r.right) + 'px';
+    pop.style.top = 'auto';
+    pop.style.bottom = 'auto';
+    var h = pop.offsetHeight;
+    if (r.bottom + 6 + h > window.innerHeight - 8 && r.top - 6 - h > 8) {
+      pop.style.bottom = (window.innerHeight - r.top + 6) + 'px';
+    } else {
+      pop.style.top = (r.bottom + 6) + 'px';
+    }
+    var first = pop.querySelector('button'); if (first) first.focus({ preventScroll: true });
+  }, true);
+  /* A fixed popover would float away from its row on scroll; close instead. */
+  document.addEventListener('scroll', function () {
+    $$('details.row-menu[open]').forEach(function (d) { d.removeAttribute('open'); });
+  }, true);
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    $$('details.row-menu[open]').forEach(function (d) {
+      d.removeAttribute('open');
+      var s = d.querySelector('summary'); if (s) s.focus();
+    });
+  });
+
   function setupProformaFilters() {
+    if (proformaFiltersBound) return;
+    proformaFiltersBound = true;
     $$('#proformaFilterTabs [data-pf-filter]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         $$('#proformaFilterTabs [data-pf-filter]').forEach(function (b) {
@@ -5036,7 +5384,7 @@
         btn.classList.add('active');
         btn.setAttribute('aria-selected', 'true');
         proformaFilter = btn.dataset.pfFilter;
-        renderProformaList();
+        paintProformaList();
       });
     });
 
@@ -5044,509 +5392,518 @@
     if (s) {
       s.addEventListener('input', function () {
         proformaSearchQuery = s.value.trim().toLowerCase();
-        renderProformaList();
+        paintProformaList();
       });
     }
 
     var newBtn = $('#newProforma');
     if (newBtn) {
       newBtn.onclick = function () {
-        proformaDraft = {
-          customerId: '',
-          customerName: '',
-          warehouseId: warehouseId || '',
-          issueDate: new Date().toISOString().split('T')[0],
-          validityDate: '',
-          currency: 'CAD',
-          poReference: '',
-          billTo: '',
-          shipTo: '',
-          origin: '',
-          destination: '',
-          incoterm: 'FOB',
-          incotermLocation: '',
-          shippingTerms: '',
-          notes: '',
-          commercialTerms: 'Commercial proforma estimate. This is not a tax invoice or demand for payment.',
-          status: 'draft',
-          items: [blankProformaLine()]
-        };
+        proformaDraft = newProformaDraft();
+        proformaDirty = false;
         show('proformaeditor');
       };
+    }
+
+    var host = $('#proformaList');
+    if (host) {
+      host.addEventListener('click', function (e) {
+        var actBtn = e.target.closest('[data-pf-act]');
+        if (actBtn) {
+          e.stopPropagation();
+          var menu = actBtn.closest('details.row-menu'); if (menu) menu.removeAttribute('open');
+          runProformaAction(actBtn.dataset.pfAct, actBtn.dataset.pfId);
+          return;
+        }
+        if (e.target.closest('details.row-menu, a, button, summary')) return;
+        var card = e.target.closest('[data-pf-row]');
+        if (card) runProformaAction('open', card.dataset.pfRow);
+      });
     }
   }
 
   function renderProformaList() {
-    loadingState('#proformaList');
     setupProformaFilters();
-
+    if (!proformaListCache.length) loadingState('#proformaList');
     Api.listProformas().then(function (list) {
       proformaListCache = list || [];
-      var rows = proformaListCache.slice();
-
-      if (proformaFilter && proformaFilter !== 'all') {
-        rows = rows.filter(function (p) {
-          return (p.status || '').toLowerCase() === proformaFilter.toLowerCase();
-        });
-      }
-
-      if (proformaSearchQuery) {
-        var q = proformaSearchQuery;
-        rows = rows.filter(function (p) {
-          var num = (p.proformaNumber || '').toLowerCase();
-          var cust = (p.customerName || '').toLowerCase();
-          var po = (p.poReference || '').toLowerCase();
-          var inco = (p.incoterm || '').toLowerCase();
-          var dest = (p.destination || '').toLowerCase();
-          return num.indexOf(q) >= 0 || cust.indexOf(q) >= 0 || po.indexOf(q) >= 0 || inco.indexOf(q) >= 0 || dest.indexOf(q) >= 0;
-        });
-      }
-
-      var cList = $('#proformaList');
-      if (!cList) return;
-
-      if (!rows.length) {
-        cList.innerHTML = emptyState('doc', 'No proforma invoices found',
-          'Create preliminary commercial quotes with custom Incoterms and weights.',
-          'New proforma', 'newProformaEmpty');
-        var emptyBtn = $('#newProformaEmpty');
-        if (emptyBtn) {
-          emptyBtn.onclick = function () {
-            var newBtn = $('#newProforma');
-            if (newBtn) newBtn.click();
-          };
-        }
-        return;
-      }
-
-      var html = '<div class="card"><div class="tablewrap" tabindex="0" role="region" aria-label="Proforma Invoices"><table class="table"><thead><tr>' +
-        '<th>Proforma #</th><th>Date</th><th>Customer</th><th>Incoterm / Terms</th><th>Total Weight</th><th>Amount</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
-
-      html += rows.map(function (pf) {
-        var statusBadgeClass = 'badge-secondary';
-        var st = (pf.status || 'draft').toLowerCase();
-        if (st === 'draft') statusBadgeClass = 'badge-warning';
-        else if (st === 'sent') statusBadgeClass = 'badge-info';
-        else if (st === 'accepted') statusBadgeClass = 'badge-success';
-        else if (st === 'converted') statusBadgeClass = 'badge-success';
-        else if (st === 'cancelled') statusBadgeClass = 'badge-danger';
-
-        var weightStr = pf.totalWeight ? (Number(pf.totalWeight).toLocaleString() + ' ' + (pf.weightUnit || 'kg')) : '—';
-        var incoStr = pf.incoterm ? (pf.incoterm + (pf.incotermLocation ? ' (' + pf.incotermLocation + ')' : '')) : '—';
-
-        var canEdit = st !== 'converted' && st !== 'cancelled';
-        var canConvert = st !== 'converted' && st !== 'cancelled' && (isAdmin() || isManager());
-
-        var actions = '<div class="btn-group" style="justify-content:flex-end;gap:4px">' +
-          '<button type="button" class="btn ghost btn-sm pf-btn-view" data-pf-id="' + esc(pf.id) + '" title="View / Edit"><svg style="width:13px;height:13px"><use href="#i-edit"></use></svg></button>' +
-          '<button type="button" class="btn ghost btn-sm pf-btn-pdf" data-pf-id="' + esc(pf.id) + '" title="Download PDF"><svg style="width:13px;height:13px"><use href="#i-download"></use></svg></button>' +
-          '<button type="button" class="btn ghost btn-sm pf-btn-send" data-pf-id="' + esc(pf.id) + '" title="Send Email"><svg style="width:13px;height:13px"><use href="#i-send"></use></svg></button>';
-
-        if (canConvert) {
-          actions += '<button type="button" class="btn btn-sm btn-primary pf-btn-convert" data-pf-id="' + esc(pf.id) + '" data-pf-num="' + esc(pf.proformaNumber) + '" title="Convert to Real Invoice"><svg style="width:12px;height:12px;margin-right:2px"><use href="#i-check"></use></svg>Convert</button>';
-        }
-
-        actions += '</div>';
-
-        return '<tr>' +
-          '<td><strong class="mono" style="font-size:14px">' + esc(pf.proformaNumber) + '</strong>' +
-            (pf.convertedInvoiceId ? '<div style="font-size:11px;color:var(--text-success)">Converted to Invoice</div>' : '') + '</td>' +
-          '<td class="mono" style="font-size:13px">' + esc(pf.issueDate || '—') + '</td>' +
-          '<td><strong>' + esc(pf.customerName || '—') + '</strong>' + (pf.poReference ? '<div style="font-size:11px;color:var(--muted)">PO: ' + esc(pf.poReference) + '</div>' : '') + '</td>' +
-          '<td>' + esc(incoStr) + '</td>' +
-          '<td class="mono">' + esc(weightStr) + '</td>' +
-          '<td class="mono" style="font-size:14px;font-weight:600">' + (pf.currency || 'CAD') + ' ' + (Number(pf.total || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) + '</td>' +
-          '<td><span class="badge ' + statusBadgeClass + '">' + esc((pf.status || 'draft').toUpperCase()) + '</span></td>' +
-          '<td style="text-align:right">' + actions + '</td>' +
-        '</tr>';
-      }).join('');
-
-      html += '</tbody></table></div></div>';
-      cList.innerHTML = html;
-
-      // Event Listeners on buttons
-      $$('.pf-btn-view').forEach(function (b) {
-        b.addEventListener('click', function () {
-          Api.getProforma(b.dataset.pfId).then(function (pf) {
-            proformaDraft = proformaToDraft(pf);
-            show('proformaeditor');
-          }).catch(function (err) {
-            toast('Failed to load proforma: ' + (err.message || err));
-          });
-        });
-      });
-
-      $$('.pf-btn-pdf').forEach(function (b) {
-        b.addEventListener('click', function () {
-          var id = b.dataset.pfId;
-          toast('Generating proforma PDF...', 'info');
-          Api.downloadProformaPdf(id).then(function (blob) {
-            var url = window.URL.createObjectURL(blob);
-            var a = document.createElement('a');
-            a.href = url;
-            a.download = 'proforma-' + id.slice(0, 8) + '.pdf';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
-          }).catch(function (err) {
-            toast('Failed to download PDF: ' + (err.message || err));
-          });
-        });
-      });
-
-      $$('.pf-btn-send').forEach(function (b) {
-        b.addEventListener('click', function () {
-          var id = b.dataset.pfId;
-          var pf = proformaListCache.filter(function (x) { return x.id === id; })[0];
-          var defaultEmail = (pf && pf.customer && pf.customer.email) || '';
-          openModal('Send Proforma Invoice',
-            field('email', 'Recipient Email Address', { type: 'email', required: true, value: defaultEmail, placeholder: 'billing@client.com' }) +
-            field('message', 'Optional Message', { type: 'textarea', placeholder: 'Please find attached the proforma invoice quotation...' }),
-            function (fd) {
-              return Api.sendProforma(id, { email: fd.email, message: fd.message }).then(function () {
-                toast('Proforma email dispatched successfully');
-                renderProformaList();
-              });
-            },
-            { okLabel: 'Send Proforma', savingLabel: 'Sending...' }
-          );
-        });
-      });
-
-      $$('.pf-btn-convert').forEach(function (b) {
-        b.addEventListener('click', function () {
-          var id = b.dataset.pfId;
-          var num = b.dataset.pfNum;
-          confirmConvertProforma(id, num);
-        });
-      });
-
+      paintProformaList();
     }).catch(function (err) {
       apiErrorState('#proformaList', err);
     });
   }
 
-  function confirmConvertProforma(id, num) {
-    var bodyHtml =
-      '<div class="delete-confirm">' +
-        '<p class="delete-confirm-lead">Convert <strong>' + esc(num) + '</strong> into a final real invoice?</p>' +
-        '<p style="font-size:13px;color:var(--text);margin-top:8px">' +
-          'This action will:' +
-        '</p>' +
-        '<ul style="font-size:13px;color:var(--text);margin-left:20px;list-style:disc">' +
-          '<li>Allocate a formal real invoice number from the standard sequence.</li>' +
-          '<li>Post formal accounts receivable entries to the General Ledger.</li>' +
-          '<li>Mark this proforma as converted with an immutable link to the new invoice.</li>' +
-        '</ul>' +
-      '</div>';
+  function paintProformaList() {
+    var cList = $('#proformaList');
+    if (!cList) return;
+    var rows = proformaListCache.slice();
 
-    openModal('Convert Proforma to Invoice', bodyHtml, function () {
-      return Api.convertProforma(id).then(function (res) {
-        toast('Proforma converted to Invoice #' + (res.invoice ? res.invoice.invoiceNumber : 'created'));
-        show('invoices');
+    if (proformaFilter && proformaFilter !== 'all') {
+      rows = rows.filter(function (p) { return (p.status || '').toLowerCase() === proformaFilter; });
+    }
+    if (proformaSearchQuery) {
+      var q = proformaSearchQuery;
+      rows = rows.filter(function (p) {
+        return [p.proformaNumber, p.customerName, p.poReference, p.incoterm, p.destination].some(function (v) {
+          return (v || '').toLowerCase().indexOf(q) >= 0;
+        });
       });
-    }, { okLabel: 'Convert to Invoice', okClass: 'primary', savingLabel: 'Converting...' });
+    }
+
+    if (!rows.length) {
+      var filtered = proformaListCache.length > 0;
+      cList.innerHTML = filtered
+        ? emptyState('search', 'No proformas match', 'Try another status tab or search term.')
+        : emptyState('doc', 'No proforma invoices yet',
+            'Quote a customer, freight forwarder or customs broker before invoicing. Proformas never touch accounting.',
+            isAdminOrManager() ? 'New proforma' : null, 'newProformaEmpty');
+      var emptyBtn = cList.querySelector('[data-action="newProformaEmpty"]');
+      if (emptyBtn) emptyBtn.onclick = function () { var b = $('#newProforma'); if (b) b.click(); };
+      return;
+    }
+
+    var tableRows = rows.map(function (pf) {
+      var acts = proformaActions(pf);
+      var inco = pf.incoterm ? pf.incoterm + (pf.incotermLocation ? ' · ' + pf.incotermLocation : '') : '—';
+      return '<tr class="clickable-row" data-pf-row="' + esc(pf.id) + '">' +
+        '<td><strong class="mono">' + esc(pf.proformaNumber) + '</strong>' +
+          (pf.poReference ? '<div class="pf-sub">Ref ' + esc(pf.poReference) + '</div>' : '') + '</td>' +
+        '<td class="pf-cust"><strong>' + esc(pf.customerName || '—') + '</strong>' +
+          (pf.destination ? '<div class="pf-sub">To ' + esc(pf.destination) + '</div>' : '') + '</td>' +
+        '<td class="pf-dates"><span class="mono">' + esc(pf.issueDate || '—') + '</span>' +
+          '<div class="pf-sub">' + (pf.validityDate ? 'Valid to <span class="mono">' + esc(pf.validityDate) + '</span>' : 'No expiry') + '</div></td>' +
+        '<td>' + esc(inco) + '</td>' +
+        '<td class="num mono">' + esc(pfWeight(pf.totalWeight, pf.weightUnit)) + '</td>' +
+        '<td class="num mono"><strong>' + esc(pfMoney(pf.total, pf.currency)) + '</strong></td>' +
+        '<td>' + pfStatusChip(pf.status) + '</td>' +
+        '<td class="pf-actions-cell"><div class="pf-row-actions">' +
+          '<button type="button" class="btn ghost btn-sm" data-pf-act="open" data-pf-id="' + esc(pf.id) + '">' + esc(acts[0].label) + '</button>' +
+          pfMenuHtml(pf, acts) +
+        '</div></td>' +
+      '</tr>';
+    }).join('');
+
+    /* Phones get purpose-built cards instead of the generic stacked table:
+       number and status on top, customer, then the two figures that matter
+       (value and weight), then one line of shipping context. */
+    var cards = rows.map(function (pf) {
+      var acts = proformaActions(pf);
+      var meta = ['Issued ' + (pf.issueDate || '—')];
+      if (pf.validityDate) meta.push('Valid to ' + pf.validityDate);
+      if (pf.incoterm) meta.push(pf.incoterm + (pf.incotermLocation ? ' ' + pf.incotermLocation : ''));
+      return '<article class="pf-card" data-pf-row="' + esc(pf.id) + '">' +
+        '<div class="pf-card-top"><strong class="mono">' + esc(pf.proformaNumber) + '</strong>' + pfStatusChip(pf.status) + '</div>' +
+        '<div class="pf-card-cust">' + esc(pf.customerName || 'No customer') + '</div>' +
+        '<div class="pf-card-figs"><span class="mono pf-card-total">' + esc(pfMoney(pf.total, pf.currency)) + '</span>' +
+          '<span class="mono pf-card-weight">' + esc(pfWeight(pf.totalWeight, pf.weightUnit)) + '</span></div>' +
+        '<div class="pf-card-meta">' + esc(meta.join(' · ')) + '</div>' +
+        '<div class="pf-card-actions">' +
+          '<button type="button" class="btn ghost btn-sm" data-pf-act="open" data-pf-id="' + esc(pf.id) + '">' + esc(acts[0].label) + '</button>' +
+          pfMenuHtml(pf, acts, 'row-menu-up') +
+        '</div>' +
+      '</article>';
+    }).join('');
+
+    cList.innerHTML =
+      '<div class="card pf-table-card"><div class="tablewrap"><table class="table no-stack pf-table" aria-label="Proforma invoices">' +
+        '<thead><tr><th>Proforma #</th><th>Customer</th><th>Issued / validity</th><th>Incoterm</th>' +
+        '<th class="num">Weight</th><th class="num">Est. total</th><th>Status</th><th><span class="sr-only">Actions</span></th></tr></thead>' +
+        '<tbody>' + tableRows + '</tbody></table></div></div>' +
+      '<div class="pf-cards">' + cards + '</div>';
+  }
+
+  function pfField(id, label, control, cls) {
+    return '<div class="field ' + (cls || '') + '"><label for="' + id + '">' + label + '</label>' + control + '</div>';
   }
 
   function renderProformaEditor() {
     var body = $('#proformaEditorBody');
     if (!body) return;
-
-    if (!proformaDraft) {
-      proformaDraft = {
-        customerId: '',
-        customerName: '',
-        warehouseId: warehouseId || '',
-        issueDate: new Date().toISOString().split('T')[0],
-        validityDate: '',
-        currency: 'CAD',
-        poReference: '',
-        billTo: '',
-        shipTo: '',
-        origin: '',
-        destination: '',
-        incoterm: 'FOB',
-        incotermLocation: '',
-        shippingTerms: '',
-        notes: '',
-        commercialTerms: 'Commercial proforma estimate. This is not a tax invoice or demand for payment.',
-        status: 'draft',
-        items: [blankProformaLine()]
-      };
-    }
+    if (!proformaDraft) { proformaDraft = newProformaDraft(); proformaDirty = false; }
 
     var d = proformaDraft;
-    var isConverted = d.status === 'converted';
+    var st = (d.status || 'draft').toLowerCase();
+    var manage = isAdminOrManager();
+    var ro = !pfIsEditable(st) || !manage;
+    var dis = ro ? ' disabled' : '';
 
-    // Top action buttons
     var titleEl = $('#pfEdTitle');
-    if (titleEl) {
-      titleEl.textContent = d.proformaNumber ? ('Proforma Invoice ' + d.proformaNumber) : 'New proforma invoice';
+    if (titleEl) titleEl.innerHTML = (d.proformaNumber ? 'Proforma ' + esc(d.proformaNumber) : 'New proforma invoice') +
+      (d.id ? ' ' + pfStatusChip(st) : '');
+
+    function inp(id, value, attrs) {
+      if (ro) attrs = '';
+      return '<input id="' + id + '" type="text" class="input" value="' + esc(value || '') + '"' + (attrs || '') + dis + '>';
+    }
+    function area(id, value, rows, attrs) {
+      if (ro) attrs = '';
+      return '<textarea id="' + id + '" class="input" rows="' + rows + '"' + (attrs || '') + dis + '>' + esc(value || '') + '</textarea>';
+    }
+    function sel(id, value, options, blank) {
+      return '<select id="' + id + '" class="input"' + dis + '>' + (blank ? '<option value="">' + blank + '</option>' : '') +
+        options.map(function (o) { return '<option value="' + esc(o) + '"' + (o === value ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') +
+        (value && options.indexOf(value) < 0 ? '<option value="' + esc(value) + '" selected>' + esc(value) + '</option>' : '') +
+        '</select>';
     }
 
-    var saveBtn = $('#pfEdSave');
-    if (saveBtn) {
-      saveBtn.disabled = isConverted;
-      saveBtn.innerHTML = '<svg><use href="#i-check"></use></svg>' + (d.id ? 'Save changes' : 'Create proforma');
-      saveBtn.onclick = function () { doSaveProforma(); };
+    /* ---- Status banner ------------------------------------------------ */
+    var banner = '';
+    if (st === 'converted') {
+      banner = '<div class="pf-banner pf-banner-done" role="status"><svg><use href="#i-check"></use></svg><div>' +
+        '<strong>Converted to a final invoice' + (d.convertedAt ? ' on ' + esc(String(d.convertedAt).slice(0, 10)) : '') + '.</strong> ' +
+        'This proforma is now read-only. Payment, due dates and receivables are handled on the invoice.</div>' +
+        (d.convertedInvoiceId ? '<button type="button" class="btn btn-primary btn-sm" id="pfOpenInvoice"><svg><use href="#i-doc"></use></svg>Open final invoice</button>' : '') +
+        '</div>';
+    } else if (st === 'cancelled') {
+      banner = '<div class="pf-banner pf-banner-muted" role="status"><svg><use href="#i-alert"></use></svg><div><strong>Cancelled.</strong> Kept for reference; it cannot be edited, sent or converted.</div></div>';
+    } else if (st === 'expired') {
+      banner = '<div class="pf-banner pf-banner-warn" role="status"><svg><use href="#i-clock"></use></svg><div><strong>Expired.</strong> Update “Valid until”, save, then reopen it as a draft to send or convert it again.</div></div>';
     }
+    var notice = '<div class="pf-notice"><svg><use href="#i-doc"></use></svg><span><strong>Proforma invoice</strong> — a quotation for the customer, shipping and customs. ' +
+      'It is not a demand for payment or a tax invoice, and creates no receivable until it is converted.</span></div>';
 
-    var pdfBtn = $('#pfEdPdf');
-    if (pdfBtn) {
-      pdfBtn.hidden = !d.id;
-      pdfBtn.onclick = function () {
-        toast('Generating proforma PDF...', 'info');
-        Api.downloadProformaPdf(d.id).then(function (blob) {
-          var url = window.URL.createObjectURL(blob);
-          var a = document.createElement('a');
-          a.href = url;
-          a.download = (d.proformaNumber || 'proforma') + '.pdf';
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          window.URL.revokeObjectURL(url);
-        }).catch(function (err) {
-          toast('Failed to download PDF: ' + (err.message || err));
-        });
-      };
-    }
+    /* ---- Customer ----------------------------------------------------- */
+    var customerCard =
+      '<section class="card pf-sec"><h2 class="pf-sec-title">Customer</h2>' +
+        (ro ? '' : pfField('pfCustomerPick', 'Saved customer <span class="pf-opt">(fills the addresses)</span>',
+          '<select id="pfCustomerPick" class="input"><option value="">— Type a new customer below —</option></select>')) +
+        pfField('pfCustomerName', 'Customer / consignee', inp('pfCustomerName', d.customerName, ' autocomplete="organization" placeholder="Company name"')) +
+        '<div class="pf-grid-2">' +
+          pfField('pfBillTo', 'Bill to', area('pfBillTo', d.billTo, 4, ' placeholder="Name, street, city, country"')) +
+          pfField('pfShipTo', 'Ship to', area('pfShipTo', d.shipTo, 4, ' placeholder="Delivery address or terminal"')) +
+        '</div>' +
+      '</section>';
 
-    var sendBtn = $('#pfEdSend');
-    if (sendBtn) {
-      sendBtn.hidden = !d.id;
-      sendBtn.onclick = function () {
-        openModal('Send Proforma Invoice',
-          field('email', 'Recipient Email', { type: 'email', required: true, value: d.customerEmail || '', placeholder: 'client@example.com' }) +
-          field('message', 'Message (Optional)', { type: 'textarea' }),
-          function (fd) {
-            return Api.sendProforma(d.id, { email: fd.email, message: fd.message }).then(function () {
-              toast('Proforma sent to ' + fd.email);
-            });
-          },
-          { okLabel: 'Send', savingLabel: 'Sending...' }
-        );
-      };
-    }
+    /* ---- Document ----------------------------------------------------- */
+    var docCard =
+      '<section class="card pf-sec"><h2 class="pf-sec-title">Document</h2>' +
+        '<div class="pf-grid-2">' +
+          pfField('pfNumber', 'Proforma #', '<input id="pfNumber" class="input mono" value="' + esc(d.proformaNumber || '') + '" placeholder="' + (d.id ? '' : 'Assigned on save') + '" readonly tabindex="-1">') +
+          pfField('pfCurrency', 'Currency', sel('pfCurrency', d.currency, PF_CURRENCIES)) +
+          pfField('pfIssueDate', 'Issue date', '<input type="date" id="pfIssueDate" class="input" value="' + esc(d.issueDate) + '"' + dis + '>') +
+          pfField('pfValidityDate', 'Valid until', '<input type="date" id="pfValidityDate" class="input" value="' + esc(d.validityDate) + '"' + dis + '>') +
+        '</div>' +
+        pfField('pfPoRef', 'Customer PO / reference', inp('pfPoRef', d.poReference, ' placeholder="e.g. PO-2026-0412"')) +
+      '</section>';
 
-    var convertBtn = $('#pfEdConvert');
-    if (convertBtn) {
-      convertBtn.hidden = !d.id || isConverted;
-      convertBtn.onclick = function () {
-        confirmConvertProforma(d.id, d.proformaNumber);
-      };
-    }
-
-    // Render form content
-    var incotermSelect = '<select id="pfIncoterm" class="input"' + (isConverted ? ' disabled' : '') + '>' +
-      INCOTERM_OPTIONS.map(function (opt) {
-        return '<option value="' + esc(opt) + '"' + (d.incoterm === opt ? ' selected' : '') + '>' + esc(opt) + '</option>';
-      }).join('') +
-      '</select>';
-
-    var linesHtml = d.items.map(function (it, idx) {
-      var lineTot = (Number(it.quantity) * Number(it.unitPrice)) - Number(it.discount || 0);
-      if (it.taxRate) lineTot += lineTot * (Number(it.taxRate) / 100);
-
-      return '<tr data-pf-line="' + idx + '">' +
-        '<td><input type="text" class="input pf-f-desc" value="' + esc(it.description) + '" placeholder="Item / material description"' + (isConverted ? ' disabled' : '') + '></td>' +
-        '<td><input type="number" step="any" class="input pf-f-qty mono" value="' + esc(it.quantity) + '" style="width:90px"' + (isConverted ? ' disabled' : '') + '></td>' +
-        '<td><input type="text" class="input pf-f-unit" value="' + esc(it.unit || 'kg') + '" style="width:70px"' + (isConverted ? ' disabled' : '') + '></td>' +
-        '<td><input type="number" step="0.0001" class="input pf-f-price mono" value="' + esc(it.unitPrice) + '" style="width:95px"' + (isConverted ? ' disabled' : '') + '></td>' +
-        '<td><input type="number" step="0.01" class="input pf-f-disc mono" value="' + esc(it.discount || 0) + '" style="width:80px"' + (isConverted ? ' disabled' : '') + '></td>' +
-        '<td><input type="number" step="0.1" class="input pf-f-tax mono" value="' + esc(it.taxRate || 5) + '" style="width:65px"' + (isConverted ? ' disabled' : '') + '></td>' +
-        '<td><input type="number" step="any" class="input pf-f-weight mono" value="' + esc(it.weight != null ? it.weight : '') + '" placeholder="kg" style="width:90px"' + (isConverted ? ' disabled' : '') + '></td>' +
-        '<td class="mono pf-line-total" style="font-weight:600;text-align:right">$' + lineTot.toFixed(2) + '</td>' +
-        '<td>' + (isConverted ? '' : '<button type="button" class="btn ghost btn-sm pf-line-del" title="Remove line"><svg style="width:13px;height:13px"><use href="#i-trash"></use></svg></button>') + '</td>' +
-      '</tr>';
-    }).join('');
-
-    var html =
-      '<div class="form-grid" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:16px;margin-bottom:20px">' +
-        '<div class="card">' +
-          '<h3 style="margin-top:0;font-size:15px;margin-bottom:12px">Customer &amp; Logistics</h3>' +
-          '<div class="field"><label for="pfCustomerName">Customer / Consignee</label><input type="text" id="pfCustomerName" class="input" value="' + esc(d.customerName) + '" placeholder="Customer company name"' + (isConverted ? ' disabled' : '') + '></div>' +
-          '<div class="field"><label for="pfPoRef">Customer PO Reference</label><input type="text" id="pfPoRef" class="input" value="' + esc(d.poReference) + '" placeholder="e.g. PO-2026-XYZ"' + (isConverted ? ' disabled' : '') + '></div>' +
-          '<div class="field-row" style="display:flex;gap:10px">' +
-            '<div class="field" style="flex:1"><label for="pfIncoterm">Incoterm</label>' + incotermSelect + '</div>' +
-            '<div class="field" style="flex:2"><label for="pfIncotermLoc">Named Port / Place</label><input type="text" id="pfIncotermLoc" class="input" value="' + esc(d.incotermLocation) + '" placeholder="e.g. Port of Vancouver"' + (isConverted ? ' disabled' : '') + '></div>' +
+    /* ---- Shipping & customs ------------------------------------------ */
+    var shipCard =
+      '<section class="card pf-sec pf-sec-wide"><h2 class="pf-sec-title">Shipping &amp; customs</h2>' +
+        '<div class="pf-grid-3">' +
+          pfField('pfOrigin', 'Origin', inp('pfOrigin', d.origin, ' placeholder="e.g. Maple Ridge, BC, Canada"')) +
+          pfField('pfDestination', 'Destination', inp('pfDestination', d.destination, ' placeholder="e.g. Busan, South Korea"')) +
+          '<div class="pf-inco">' +
+            pfField('pfIncoterm', 'Incoterm', sel('pfIncoterm', d.incoterm, INCOTERM_OPTIONS, '—')) +
+            pfField('pfIncotermLoc', 'Named place / port', inp('pfIncotermLoc', d.incotermLocation, ' placeholder="e.g. Port of Vancouver"')) +
           '</div>' +
-          '<div class="field-row" style="display:flex;gap:10px">' +
-            '<div class="field" style="flex:1"><label for="pfOrigin">Origin</label><input type="text" id="pfOrigin" class="input" value="' + esc(d.origin) + '" placeholder="e.g. Calgary, AB"' + (isConverted ? ' disabled' : '') + '></div>' +
-            '<div class="field" style="flex:1"><label for="pfDestination">Destination</label><input type="text" id="pfDestination" class="input" value="' + esc(d.destination) + '" placeholder="e.g. Tokyo, Japan"' + (isConverted ? ' disabled' : '') + '></div>' +
-          '</div>' +
-          '<div class="field"><label for="pfShippingTerms">Shipping Terms / Instructions</label><input type="text" id="pfShippingTerms" class="input" value="' + esc(d.shippingTerms) + '" placeholder="e.g. Ocean freight prepaid; 40ft HC container"' + (isConverted ? ' disabled' : '') + '></div>' +
         '</div>' +
+        '<div class="pf-grid-ship">' +
+          pfField('pfShippingTerms', 'Shipping terms', inp('pfShippingTerms', d.shippingTerms, ' placeholder="e.g. Ocean freight, 2 × 40ft HC, booking by buyer"')) +
+          pfField('pfWeightUnit', 'Weight unit', sel('pfWeightUnit', d.weightUnit || 'kg', PF_WEIGHT_UNITS)) +
+        '</div>' +
+      '</section>';
 
-        '<div class="card">' +
-          '<h3 style="margin-top:0;font-size:15px;margin-bottom:12px">Document Details &amp; Addresses</h3>' +
-          '<div class="field-row" style="display:flex;gap:10px">' +
-            '<div class="field" style="flex:1"><label for="pfIssueDate">Issue Date</label><input type="date" id="pfIssueDate" class="input" value="' + esc(d.issueDate) + '"' + (isConverted ? ' disabled' : '') + '></div>' +
-            '<div class="field" style="flex:1"><label for="pfValidityDate">Valid Until</label><input type="date" id="pfValidityDate" class="input" value="' + esc(d.validityDate) + '"' + (isConverted ? ' disabled' : '') + '></div>' +
-            '<div class="field" style="flex:1"><label for="pfCurrency">Currency</label><select id="pfCurrency" class="input"' + (isConverted ? ' disabled' : '') + '><option value="CAD"' + (d.currency === 'CAD' ? ' selected' : '') + '>CAD</option><option value="USD"' + (d.currency === 'USD' ? ' selected' : '') + '>USD</option></select></div>' +
-          '</div>' +
-          '<div class="field"><label for="pfBillTo">Billing Address (Bill To)</label><textarea id="pfBillTo" class="input" rows="2"' + (isConverted ? ' disabled' : '') + '>' + esc(d.billTo) + '</textarea></div>' +
-          '<div class="field"><label for="pfShipTo">Shipping Address (Ship To)</label><textarea id="pfShipTo" class="input" rows="2"' + (isConverted ? ' disabled' : '') + '>' + esc(d.shipTo) + '</textarea></div>' +
-        '</div>' +
-      '</div>' +
-
-      '<div class="card" style="margin-bottom:20px">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">' +
-          '<h3 style="margin:0;font-size:15px">Quoted Items &amp; Weights</h3>' +
-          (isConverted ? '' : '<button type="button" class="btn ghost btn-sm" id="pfAddLine"><svg style="width:13px;height:13px"><use href="#i-plus"></use></svg>Add item</button>') +
-        '</div>' +
-        '<div class="tablewrap" tabindex="0" role="region" aria-label="Items Table">' +
-          '<table class="table" style="width:100%">' +
-            '<thead><tr>' +
-              '<th>Description</th><th style="width:90px">Qty</th><th style="width:70px">Unit</th><th style="width:95px">Price</th><th style="width:80px">Disc ($)</th><th style="width:65px">Tax (%)</th><th style="width:90px">Weight</th><th style="text-align:right">Total</th><th></th>' +
-            '</tr></thead>' +
-            '<tbody id="pfItemsWrap">' + linesHtml + '</tbody>' +
-          '</table>' +
-        '</div>' +
-      '</div>' +
-
-      '<div class="form-grid" style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:20px">' +
-        '<div class="card">' +
-          '<div class="field"><label for="pfCommercialTerms">Commercial Terms &amp; Conditions</label><textarea id="pfCommercialTerms" class="input" rows="3"' + (isConverted ? ' disabled' : '') + '>' + esc(d.commercialTerms) + '</textarea></div>' +
-          '<div class="field"><label for="pfNotes">Public Notes (Visible to Customer)</label><textarea id="pfNotes" class="input" rows="2"' + (isConverted ? ' disabled' : '') + '>' + esc(d.notes) + '</textarea></div>' +
-        '</div>' +
-        '<div class="card" style="background:var(--card-bg);border:1px solid var(--border)">' +
-          '<h3 style="margin-top:0;font-size:15px;margin-bottom:12px">Estimate Summary</h3>' +
-          '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span>Total Weight</span><strong class="mono" id="pfSumWeight">0 kg</strong></div>' +
-          '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span>Subtotal</span><strong class="mono" id="pfSumSubtotal">$0.00</strong></div>' +
-          '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span>Estimated Tax</span><strong class="mono" id="pfSumTax">$0.00</strong></div>' +
-          '<div style="display:flex;justify-content:space-between;padding:10px 0 4px 0;font-size:17px"><span>ESTIMATED TOTAL</span><strong class="mono text-success" id="pfSumTotal">$0.00</strong></div>' +
-          '<p style="font-size:11px;color:var(--muted);margin-top:10px;margin-bottom:0">Non-accounting estimate. No AR or Ledger entries are created until formal conversion.</p>' +
-        '</div>' +
+    /* ---- Items -------------------------------------------------------- */
+    var wu = d.weightUnit || 'kg';
+    function lineHtml(it, idx) {
+      var c = pfLineCalc(it);
+      function num(cls, label, value, step, extra) {
+        var fid = 'pf' + cls + idx;
+        return '<div class="pf-cell pf-c-' + cls + '"><label class="pf-l" for="' + fid + '">' + label + '</label>' +
+          '<input id="' + fid + '" type="number" inputmode="decimal" step="' + step + '" min="0" class="input mono pf-f-' + cls + '" value="' + esc(value) + '"' + (extra || '') + dis + '></div>';
+      }
+      return '<div class="pf-line" data-pf-line="' + idx + '">' +
+        '<div class="pf-cell pf-c-desc"><label class="pf-l" for="pfdesc' + idx + '">Item ' + (idx + 1) + ' description</label>' +
+          '<input id="pfdesc' + idx + '" type="text" class="input pf-f-desc" value="' + esc(it.description) + '" placeholder="Material / item description"' + dis + '></div>' +
+        num('qty', 'Qty', it.quantity, 'any') +
+        '<div class="pf-cell pf-c-unit"><label class="pf-l" for="pfunit' + idx + '">Unit</label>' +
+          '<input id="pfunit' + idx + '" type="text" class="input pf-f-unit" list="pfUnitList" value="' + esc(it.unit || 'kg') + '"' + dis + '></div>' +
+        num('price', 'Unit price', it.unitPrice, 'any') +
+        num('disc', 'Discount', it.discount || 0, '0.01') +
+        num('tax', 'Tax %', it.taxRate != null ? it.taxRate : 0, 'any') +
+        num('weight', 'Weight (' + esc(wu) + ')', it.weight != null ? it.weight : '', 'any', ' placeholder="—"') +
+        '<div class="pf-cell pf-c-total"><span class="pf-l">Line total</span><span class="mono pf-line-total">' + esc(pfMoney(c.total, d.currency)) + '</span></div>' +
+        '<div class="pf-cell pf-c-del">' + (ro ? '' : '<button type="button" class="btn ghost btn-sm pf-line-del" aria-label="Remove item ' + (idx + 1) + '" title="Remove item"><svg><use href="#i-trash"></use></svg></button>') + '</div>' +
       '</div>';
+    }
+    var itemsCard =
+      '<section class="card pf-sec pf-sec-wide pf-items"><div class="pf-sec-head"><h2 class="pf-sec-title">Items <span class="pf-count" id="pfItemCount"></span></h2>' +
+        (ro ? '' : '<button type="button" class="btn ghost btn-sm" id="pfAddLineTop"><svg><use href="#i-plus"></use></svg>Add item</button>') + '</div>' +
+        '<div class="pf-lines-head" aria-hidden="true"><span>Description</span><span>Qty</span><span>Unit</span><span>Unit price</span><span>Discount</span><span>Tax %</span><span>Weight (' + esc(wu) + ')</span><span>Line total</span><span></span></div>' +
+        '<div id="pfItemsWrap">' + d.items.map(lineHtml).join('') + '</div>' +
+        '<datalist id="pfUnitList"><option value="kg"><option value="lb"><option value="t"><option value="bale"><option value="pallet"><option value="container"><option value="ea"></datalist>' +
+        (ro ? '' : '<button type="button" class="btn ghost pf-add-line" id="pfAddLine"><svg><use href="#i-plus"></use></svg>Add item</button>') +
+      '</section>';
 
-    body.innerHTML = html;
+    /* ---- Notes + summary ---------------------------------------------- */
+    var notesCard =
+      '<section class="card pf-sec"><h2 class="pf-sec-title">Notes &amp; terms</h2>' +
+        pfField('pfNotes', 'Notes <span class="pf-opt">(printed on the proforma)</span>', area('pfNotes', d.notes, 3)) +
+        pfField('pfCommercialTerms', 'Commercial terms', area('pfCommercialTerms', d.commercialTerms, 4)) +
+      '</section>';
+    var summaryCard =
+      '<section class="card pf-sec pf-summary" aria-live="polite"><h2 class="pf-sec-title">Estimate</h2>' +
+        '<dl class="pf-sum">' +
+          '<div><dt>Total weight</dt><dd class="mono" id="pfSumWeight">—</dd></div>' +
+          '<div><dt>Subtotal</dt><dd class="mono" id="pfSumSubtotal">—</dd></div>' +
+          '<div><dt>Estimated tax</dt><dd class="mono" id="pfSumTax">—</dd></div>' +
+          '<div class="pf-sum-total"><dt>Estimated total</dt><dd class="mono" id="pfSumTotal">—</dd></div>' +
+        '</dl>' +
+        '<p class="pf-convert-warn" id="pfMixedWarn" hidden>Items use different tax rates. Converting to a final invoice needs a single rate.</p>' +
+        '<p class="pf-sum-note">Estimate only — no payment is requested and nothing is posted to accounting.</p>' +
+      '</section>';
 
-    // Recalculate summary totals live
-    function syncAndCalc() {
-      var rows = $$('#pfItemsWrap tr');
-      var subtotal = 0;
-      var taxTotal = 0;
-      var totalWeight = 0;
+    var stickyBar = ro ? '' :
+      '<div class="pf-sticky" id="pfSticky"><div><span class="pf-sticky-l">Estimated total</span><strong class="mono" id="pfStickyTotal">—</strong></div>' +
+      '<button type="button" class="btn btn-primary" id="pfStickySave"><svg><use href="#i-check"></use></svg>' + (d.id ? 'Save' : 'Create') + '</button></div>';
 
-      d.items = rows.map(function (tr) {
-        var descEl = tr.querySelector('.pf-f-desc');
-        var qtyEl = tr.querySelector('.pf-f-qty');
-        var unitEl = tr.querySelector('.pf-f-unit');
-        var priceEl = tr.querySelector('.pf-f-price');
-        var discEl = tr.querySelector('.pf-f-disc');
-        var taxREl = tr.querySelector('.pf-f-tax');
-        var wValEl = tr.querySelector('.pf-f-weight');
+    body.innerHTML = banner + notice +
+      '<div class="pf-layout">' + customerCard + docCard + shipCard + itemsCard + notesCard + summaryCard + '</div>' + stickyBar;
 
-        var desc = descEl ? descEl.value : '';
-        var qty = qtyEl ? (Number(qtyEl.value) || 0) : 0;
-        var unit = unitEl ? (unitEl.value || 'kg') : 'kg';
-        var price = priceEl ? (Number(priceEl.value) || 0) : 0;
-        var disc = discEl ? (Number(discEl.value) || 0) : 0;
-        var taxR = taxREl ? (Number(taxREl.value) || 0) : 0;
-        var wVal = wValEl ? wValEl.value : '';
-        var weight = wVal !== '' ? Number(wVal) : null;
+    /* ---- Header actions ------------------------------------------------ */
+    var actionsEl = $('#pfEdActions');
+    if (actionsEl) {
+      var html = '';
+      if (d.id) {
+        var acts = proformaActions(d).filter(function (a) { return a.key !== 'open'; });
+        // Converted: "Open final invoice" lives in the status banner, so the
+        // header keeps only the PDF.
+        var primaryKey = null;
+        acts.forEach(function (a) {
+          if (a.key === primaryKey) html += '<button type="button" class="btn btn-primary" data-pf-ed="' + a.key + '"><svg><use href="#i-' + a.icon + '"></use></svg>' + esc(a.label) + '</button>';
+        });
+        if (acts.some(function (a) { return a.key === 'pdf'; })) html += '<button type="button" class="btn ghost" data-pf-ed="pdf"><svg><use href="#i-download"></use></svg>PDF</button>';
+        var menuActs = acts.filter(function (a) { return a.key !== 'pdf' && a.key !== 'invoice'; });
+        if (menuActs.length) {
+          html += '<details class="row-menu"><summary class="btn ghost" aria-label="More proforma actions"><svg><use href="#i-more"></use></svg><span class="row-menu-text">More</span></summary><div class="row-menu-pop" role="menu">' +
+            menuActs.map(function (a) {
+              return (a.divider ? '<hr>' : '') + '<button type="button" role="menuitem" class="' + (a.danger ? 'is-danger' : '') + '" data-pf-ed="' + a.key + '"><svg><use href="#i-' + a.icon + '"></use></svg>' + esc(a.label) + '</button>';
+            }).join('') + '</div></details>';
+        }
+      }
+      if (!ro) html += '<button type="button" class="btn btn-primary" id="pfEdSave"><svg><use href="#i-check"></use></svg>' + (d.id ? 'Save changes' : 'Create proforma') + '</button>';
+      actionsEl.innerHTML = html;
 
-        var lineSub = (qty * price) - disc;
-        var lineTax = lineSub > 0 ? (lineSub * (taxR / 100)) : 0;
-        var lineTot = lineSub + lineTax;
+      $$('[data-pf-ed]', actionsEl).forEach(function (b) {
+        b.addEventListener('click', function () {
+          var menu = b.closest('details'); if (menu) menu.removeAttribute('open');
+          var key = b.dataset.pfEd;
+          if (proformaDirty && (key === 'pdf' || key === 'send' || key === 'convert' || key === 'accept')) {
+            toast('Save your changes first — the PDF, email and conversion use the saved proforma.');
+            return;
+          }
+          var after = function () {
+            return Api.getProforma(d.id).then(function (full) {
+              proformaDraft = proformaToDraft(full);
+              proformaDirty = false;
+              renderProformaEditor();
+            });
+          };
+          if (key === 'pdf') downloadProformaPdf(d.id, d.proformaNumber);
+          else if (key === 'invoice') openFinalInvoice(d.convertedInvoiceId);
+          else if (key === 'send') openSendProformaModal(d, after);
+          else if (key === 'accept') setProformaStatus(d, 'accepted', after);
+          else if (key === 'reopen') setProformaStatus(d, 'draft', after);
+          else if (key === 'cancel') confirmCancelProforma(d, after);
+          else if (key === 'convert') confirmConvertProforma(d, after);
+        });
+      });
+      var saveBtn = $('#pfEdSave');
+      if (saveBtn) saveBtn.addEventListener('click', doSaveProforma);
+    }
 
-        subtotal += lineSub;
-        taxTotal += lineTax;
-        if (weight != null) totalWeight += weight;
+    var openInv = $('#pfOpenInvoice');
+    if (openInv) openInv.addEventListener('click', function () { openFinalInvoice(d.convertedInvoiceId); });
+    var stickySave = $('#pfStickySave');
+    if (stickySave) stickySave.addEventListener('click', doSaveProforma);
 
-        var totEl = tr.querySelector('.pf-line-total');
-        if (totEl) totEl.textContent = '$' + lineTot.toFixed(2);
+    /* ---- Saved-customer picker ----------------------------------------- */
+    var pick = $('#pfCustomerPick');
+    if (pick) {
+      var pickList = [];
+      var fillPick = function (list) {
+        pickList = list || [];
+        pick.innerHTML = '<option value="">— Type a new customer below —</option>' + pickList.map(function (c) {
+          return '<option value="' + esc(c.id) + '"' + (c.id === d.customerId ? ' selected' : '') + '>' + esc(c.name) + '</option>';
+        }).join('');
+      };
+      if (proformaCustomersCache && proformaCustomersCache.wh === warehouseId) fillPick(proformaCustomersCache.list);
+      else Api.listCustomers(warehouseId).then(function (list) {
+        fillPick(list);
+        proformaCustomersCache = { wh: warehouseId, list: list || [] };
+      }).catch(function () { fillPick([]); });
+      pick.addEventListener('change', function () {
+        var c = pickList.filter(function (x) { return x.id === pick.value; })[0];
+        d.customerId = c ? c.id : '';
+        if (!c) return;
+        $('#pfCustomerName').value = c.name || '';
+        if (c.billTo || c.bill_to) $('#pfBillTo').value = c.billTo || c.bill_to;
+        if (c.shipTo || c.ship_to) $('#pfShipTo').value = c.shipTo || c.ship_to;
+        proformaDirty = true;
+      });
+    }
 
+    /* ---- Live recalculation ------------------------------------------- */
+    function readLines() {
+      return $$('#pfItemsWrap .pf-line').map(function (row) {
+        function v(cls) { var el = row.querySelector('.pf-f-' + cls); return el ? el.value : ''; }
+        var w = v('weight');
         return {
-          description: desc,
-          quantity: qty,
-          unit: unit,
-          unitPrice: price,
-          discount: disc,
-          taxRate: taxR,
-          weight: weight
+          description: v('desc').trim(),
+          quantity: Number(v('qty')) || 0,
+          unit: v('unit').trim() || 'kg',
+          unitPrice: Number(v('price')) || 0,
+          discount: Number(v('disc')) || 0,
+          taxRate: Number(v('tax')) || 0,
+          weight: w !== '' ? Number(w) : null
         };
       });
-
-      var total = subtotal + taxTotal;
-      var cur = $('#pfCurrency') ? $('#pfCurrency').value : 'CAD';
-
-      var wEl = $('#pfSumWeight'); if (wEl) wEl.textContent = totalWeight.toLocaleString() + ' kg';
-      var sEl = $('#pfSumSubtotal'); if (sEl) sEl.textContent = cur + ' $' + subtotal.toFixed(2);
-      var tEl = $('#pfSumTax'); if (tEl) tEl.textContent = cur + ' $' + taxTotal.toFixed(2);
-      var totEl = $('#pfSumTotal'); if (totEl) totEl.textContent = cur + ' $' + total.toFixed(2);
     }
-
+    function syncAndCalc() {
+      if (!ro) d.items = readLines();
+      var cur = $('#pfCurrency') ? $('#pfCurrency').value : d.currency;
+      var unit = $('#pfWeightUnit') ? $('#pfWeightUnit').value : wu;
+      d.currency = cur;
+      $$('#pfItemsWrap .pf-line').forEach(function (row, i) {
+        var el = row.querySelector('.pf-line-total');
+        if (el && d.items[i]) el.textContent = pfMoney(pfLineCalc(d.items[i]).total, cur);
+      });
+      var t = pfTotals(d.items);
+      var set = function (id, txt) { var el = $(id); if (el) el.textContent = txt; };
+      set('#pfSumWeight', pfWeight(t.weight, unit));
+      set('#pfSumSubtotal', pfMoney(t.subtotal, cur));
+      set('#pfSumTax', pfMoney(t.tax, cur));
+      set('#pfSumTotal', pfMoney(t.total, cur));
+      set('#pfStickyTotal', pfMoney(t.total, cur));
+      set('#pfItemCount', d.items.length + (d.items.length === 1 ? ' item' : ' items'));
+      var warn = $('#pfMixedWarn'); if (warn) warn.hidden = !t.mixedRates;
+    }
     syncAndCalc();
 
-    // Event listeners on form inputs
-    body.querySelectorAll('input, select, textarea').forEach(function (inp) {
-      inp.addEventListener('input', syncAndCalc);
-    });
-
-    var addLineBtn = $('#pfAddLine');
-    if (addLineBtn) {
-      addLineBtn.addEventListener('click', function () {
+    body.oninput = function (e) {
+      if (e.target.closest('input, select, textarea') && e.target.id !== 'pfCustomerPick') {
+        proformaDirty = true;
+        e.target.classList.remove('is-invalid');
         syncAndCalc();
-        d.items.push(blankProformaLine());
-        renderProformaEditor();
-      });
+      }
+    };
+    body.onchange = function (e) {
+      if (e.target.id === 'pfWeightUnit') {
+        wu = e.target.value; d.weightUnit = wu;
+        syncAndCalc();
+        renderLinesOnly();
+      } else if (e.target.id === 'pfCurrency') syncAndCalc();
+    };
+
+    function renderLinesOnly() {
+      var wrap = $('#pfItemsWrap');
+      if (!wrap) return;
+      syncHeaderFields();
+      renderProformaEditor();
     }
+
+    /* Header fields are read into the draft before any full re-render so a
+       re-render (add/remove line) never loses typed values. */
+    function syncHeaderFields() {
+      if (ro) return;
+      function val(id) { var el = $('#' + id); return el ? el.value : ''; }
+      d.customerName = val('pfCustomerName');
+      d.poReference = val('pfPoRef');
+      d.incoterm = val('pfIncoterm');
+      d.incotermLocation = val('pfIncotermLoc');
+      d.origin = val('pfOrigin');
+      d.destination = val('pfDestination');
+      d.shippingTerms = val('pfShippingTerms');
+      d.issueDate = val('pfIssueDate');
+      d.validityDate = val('pfValidityDate');
+      d.currency = val('pfCurrency') || 'CAD';
+      d.weightUnit = val('pfWeightUnit') || 'kg';
+      d.billTo = val('pfBillTo');
+      d.shipTo = val('pfShipTo');
+      d.commercialTerms = val('pfCommercialTerms');
+      d.notes = val('pfNotes');
+      d.items = readLines();
+    }
+
+    function addLine() {
+      syncHeaderFields();
+      var last = d.items[d.items.length - 1];
+      var line = blankProformaLine();
+      // A new line inherits the unit and tax rate of the one above: quotes
+      // are usually one unit and one rate throughout.
+      if (last) { line.unit = last.unit || 'kg'; line.taxRate = last.taxRate || 0; }
+      d.items.push(line);
+      proformaDirty = true;
+      renderProformaEditor();
+      var rows = $$('#pfItemsWrap .pf-line');
+      var desc = rows.length ? rows[rows.length - 1].querySelector('.pf-f-desc') : null;
+      if (desc) { desc.focus(); if (desc.scrollIntoView) desc.scrollIntoView({ block: 'center' }); }
+    }
+    var addTop = $('#pfAddLineTop'); if (addTop) addTop.addEventListener('click', addLine);
+    var addBottom = $('#pfAddLine'); if (addBottom) addBottom.addEventListener('click', addLine);
 
     $$('.pf-line-del').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        var tr = btn.closest('tr');
-        var idx = tr ? Number(tr.dataset.pfLine) : -1;
-        if (idx >= 0) {
-          syncAndCalc();
-          d.items.splice(idx, 1);
-          if (!d.items.length) d.items.push(blankProformaLine());
-          renderProformaEditor();
-        }
+        var row = btn.closest('.pf-line');
+        var idx = row ? Number(row.dataset.pfLine) : -1;
+        if (idx < 0) return;
+        syncHeaderFields();
+        d.items.splice(idx, 1);
+        if (!d.items.length) d.items.push(blankProformaLine());
+        proformaDirty = true;
+        renderProformaEditor();
       });
     });
 
-    function doSaveProforma() {
-      syncAndCalc();
-      var customerName = $('#pfCustomerName') ? $('#pfCustomerName').value.trim() : '';
-      var poRef = $('#pfPoRef') ? $('#pfPoRef').value.trim() : '';
-      var incoterm = $('#pfIncoterm') ? $('#pfIncoterm').value : 'FOB';
-      var incotermLoc = $('#pfIncotermLoc') ? $('#pfIncotermLoc').value.trim() : '';
-      var origin = $('#pfOrigin') ? $('#pfOrigin').value.trim() : '';
-      var destination = $('#pfDestination') ? $('#pfDestination').value.trim() : '';
-      var shippingTerms = $('#pfShippingTerms') ? $('#pfShippingTerms').value.trim() : '';
-      var issueDate = $('#pfIssueDate') ? $('#pfIssueDate').value : new Date().toISOString().split('T')[0];
-      var validityDate = $('#pfValidityDate') ? $('#pfValidityDate').value : '';
-      var currency = $('#pfCurrency') ? $('#pfCurrency').value : 'CAD';
-      var billTo = $('#pfBillTo') ? $('#pfBillTo').value.trim() : '';
-      var shipTo = $('#pfShipTo') ? $('#pfShipTo').value.trim() : '';
-      var commercialTerms = $('#pfCommercialTerms') ? $('#pfCommercialTerms').value.trim() : '';
-      var notes = $('#pfNotes') ? $('#pfNotes').value.trim() : '';
+    function flagInvalid(el, msg) {
+      toast(msg);
+      if (!el) return;
+      el.classList.add('is-invalid');
+      el.focus();
+      if (el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+    }
 
-      if (!d.items.length || !d.items[0].description) {
-        toast('Please specify at least one line item description.');
-        return;
+    function doSaveProforma() {
+      syncHeaderFields();
+      // Fully blank rows are dropped rather than rejected.
+      var items = d.items.filter(function (it) { return it.description || it.unitPrice || it.weight; });
+      if (!d.customerName.trim()) return flagInvalid($('#pfCustomerName'), 'Enter the customer name.');
+      if (!items.length) return flagInvalid($('#pfItemsWrap .pf-f-desc'), 'Add at least one item.');
+      for (var i = 0; i < items.length; i++) {
+        var rowIdx = d.items.indexOf(items[i]);
+        var row = $$('#pfItemsWrap .pf-line')[rowIdx];
+        if (!items[i].description) return flagInvalid(row && row.querySelector('.pf-f-desc'), 'Item ' + (rowIdx + 1) + ' needs a description.');
+        if (!(items[i].quantity > 0)) return flagInvalid(row && row.querySelector('.pf-f-qty'), 'Item ' + (rowIdx + 1) + ' needs a quantity above zero.');
+      }
+      if (d.validityDate && d.issueDate && d.validityDate < d.issueDate) {
+        return flagInvalid($('#pfValidityDate'), '“Valid until” is before the issue date.');
       }
 
+      var updating = !!d.id;
+      // On update an emptied field must be sent as empty, or the API keeps
+      // the old value; on create it is simply left out.
+      function opt(v) { v = (v || '').trim(); return v ? v : (updating ? '' : undefined); }
+      var totals = pfTotals(items);
       var payload = {
-        customerName: customerName || undefined,
+        customerId: d.customerId || undefined,
+        customerName: d.customerName.trim(),
         warehouseId: d.warehouseId || warehouseId || undefined,
-        division: 'recycling',
-        issueDate: issueDate,
-        validityDate: validityDate || undefined,
-        currency: currency,
-        poReference: poRef || undefined,
-        billTo: billTo || undefined,
-        shipTo: shipTo || undefined,
-        origin: origin || undefined,
-        destination: destination || undefined,
-        incoterm: incoterm || undefined,
-        incotermLocation: incotermLoc || undefined,
-        shippingTerms: shippingTerms || undefined,
-        notes: notes || undefined,
-        commercialTerms: commercialTerms || undefined,
-        items: d.items.map(function (it) {
+        issueDate: d.issueDate || today(),
+        validityDate: d.validityDate || (updating ? null : undefined),
+        currency: d.currency || 'CAD',
+        poReference: opt(d.poReference),
+        billTo: opt(d.billTo),
+        shipTo: opt(d.shipTo),
+        origin: opt(d.origin),
+        destination: opt(d.destination),
+        incoterm: d.incoterm || undefined,
+        incotermLocation: opt(d.incotermLocation),
+        shippingTerms: opt(d.shippingTerms),
+        notes: opt(d.notes),
+        commercialTerms: opt(d.commercialTerms),
+        totalWeight: totals.weight,
+        weightUnit: d.weightUnit || 'kg',
+        items: items.map(function (it) {
           return {
             description: it.description,
             quantity: Number(it.quantity),
@@ -5554,27 +5911,23 @@
             unitPrice: Number(it.unitPrice),
             discount: Number(it.discount || 0),
             taxRate: Number(it.taxRate || 0),
-            weight: it.weight != null ? Number(it.weight) : undefined
+            weight: it.weight != null && !isNaN(it.weight) ? Number(it.weight) : undefined
           };
         })
       };
 
-      if (saveBtn) {
-        saveBtn.disabled = true;
-        saveBtn.textContent = 'Saving...';
-      }
+      var btns = [$('#pfEdSave'), $('#pfStickySave')].filter(Boolean);
+      btns.forEach(function (b) { b.disabled = true; b.dataset.label = b.innerHTML; b.textContent = 'Saving…'; });
 
-      var req = d.id ? Api.updateProforma(d.id, payload) : Api.createProforma(payload);
+      var req = updating ? Api.updateProforma(d.id, payload) : Api.createProforma(payload);
       req.then(function (res) {
-        toast('Proforma invoice ' + res.proformaNumber + ' saved successfully.');
+        toast((updating ? 'Saved ' : 'Created ') + res.proformaNumber + '.');
         proformaDraft = proformaToDraft(res);
+        proformaDirty = false;
         renderProformaEditor();
       }).catch(function (err) {
-        if (saveBtn) {
-          saveBtn.disabled = false;
-          saveBtn.innerHTML = '<svg><use href="#i-check"></use></svg>Save proforma';
-        }
-        toast('Failed to save proforma: ' + (err.message || err));
+        btns.forEach(function (b) { b.disabled = false; b.innerHTML = b.dataset.label; });
+        toast('Could not save the proforma: ' + (err.message || err));
       });
     }
   }
@@ -5663,22 +6016,30 @@
   function renderProducts() {
     var pTitle = $('#prodTitle');
     if (pTitle) pTitle.textContent = isRecycling() ? 'Materials Catalog' : 'Healthcare Products';
-    var pSub = $('#prodSub');
-    if (pSub) pSub.textContent = isRecycling() ? 'Recycling materials tracked for this facility.' : 'Healthcare products tracked for this facility.';
-    loadingState('#productBody');
     var w = warehouse();
+    var noun = isRecycling() ? 'material' : 'product';
+    var pSub = $('#prodSub');
+    /* Catalog, not stock: a product listed here can have zero on hand, and
+       the page says so rather than letting the list be read as inventory. */
+    if (pSub) pSub.textContent = (isRecycling() ? 'Materials' : 'Products') + ' that can be received at this facility. ' +
+      'This is the catalog only — stock on hand is under Inventory.';
+    var pFac = $('#prodScopeFacility'); if (pFac) pFac.textContent = w ? w.name : 'No facility';
+    var pDiv = $('#prodScopeDivision'); if (pDiv) pDiv.textContent = divisionLabel(entity);
+    var pCta = $('#prodCta'); if (pCta) pCta.textContent = 'Add ' + noun;
+    loadingState('#productBody');
     if (!w) { var pBody0 = $('#productBody'); if (pBody0) pBody0.innerHTML = ''; return; }
     Api.listMaterials({ warehouseId: w.id, division: entity, includeInactive: true }).then(function (all) {
       var list = all;
       var pBody = $('#productBody');
       if (!pBody) return;
       if (!list.length) {
-        pBody.innerHTML = emptyState('tag', 'No catalog items',
-          'Add materials or products to track inventory.', 'Add material', 'newProduct');
+        pBody.innerHTML = emptyState('tag', 'No ' + noun + 's in the ' + esc(w.name) + ' catalog',
+          esc(divisionLabel(entity)) + ' ' + noun + 's are set up per facility. Add one here, or copy an existing catalog from another facility, before stock can be received.',
+          'Add ' + noun, 'newProduct');
         return;
       }
       pBody.innerHTML = '<div class="card"><div class="tablewrap" tabindex="0" role="region" aria-label="Scrollable table"><table class="table"><thead><tr>' +
-        '<th>Product / Material</th><th>Category</th><th>Description</th><th>Division</th><th>Status</th><th>Actions</th></tr></thead><tbody>' +
+        '<th>' + (isRecycling() ? 'Material' : 'Product') + '</th><th>Category</th><th>Description</th><th>Division</th><th>Status</th><th>Actions</th></tr></thead><tbody>' +
         list.map(function (m) {
           var divLabel = m.division === 'healthcare' ? 'Healthcare' : 'Recycling';
           var statusLabel = m.active === false ? 'Inactive' : 'Active';
@@ -5689,7 +6050,7 @@
             '<td><span class="badge ' + statusCls + '">' + statusLabel + '</span></td>' +
             '<td><div style="display:flex;gap:6px">' +
               '<button type="button" class="btn ghost btn-sm" data-edit-material="' + esc(m.id) + '">Edit</button>' +
-              (isAdmin() ? '<button type="button" class="btn btn-sm danger" data-delete-material="' + esc(m.id) + '">Delete Product</button>' : '') +
+              (isAdmin() ? '<button type="button" class="btn ghost btn-sm btn-danger-quiet" data-delete-material="' + esc(m.id) + '" aria-label="Delete ' + esc(m.name) + '">Delete Product</button>' : '') +
             '</div></td></tr>';
         }).join('') + '</tbody></table></div></div>';
 
@@ -6238,7 +6599,14 @@
       dialogOpenerEl = null;
     };
 
-    var firstField = formEl ? $('input, select, textarea', formEl) : null;
+    /* Focus the first field the user can actually type in -- not a read-only
+       location box or a hidden file input. On touch screens focus stays on
+       the dialog's close control instead: focusing an input there opens the
+       keyboard over half the form before the user has read it. */
+    var coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    var firstField = (formEl && !coarse)
+      ? $('input:not([readonly]):not([hidden]):not([type=hidden]):not([type=file]):not([disabled]), select:not([disabled]), textarea:not([readonly]):not([disabled])', formEl)
+      : null;
     (firstField || $('#modalClose')).focus();
 
     var closeBtn = $('#modalClose');
@@ -6343,8 +6711,12 @@
   function render() {
     syncChrome();
 
-    if (isHealthcare() && RECYCLING_ONLY_FINANCIAL_VIEWS.indexOf(view) >= 0) {
-      view = 'inventory';
+    // Changing only `view` would leave the previous section marked active
+    // (a Banking screen stayed visible in Healthcare); show() swaps the
+    // visible section and re-enters render().
+    if (!isRecycling() && RECYCLING_ONLY_FINANCIAL_VIEWS.indexOf(view) >= 0) {
+      show('inventory');
+      return;
     }
 
     // Guard every division-scoped view behind an actual grant. Settings, Staff,
@@ -6490,7 +6862,6 @@
         entity = newEntity;
         db.entity = entity;
         S.save(db);
-        if (isHealthcare() && RECYCLING_ONLY_FINANCIAL_VIEWS.indexOf(view) >= 0) view = 'inventory';
         // Close any open form so a product/material selected under the
         // previous division can't linger after switching divisions.
         var modalWrap = $('#modalWrap');
@@ -6499,8 +6870,9 @@
           var modalFormEl = $('#modalForm');
           if (modalFormEl) modalFormEl.innerHTML = '';
         }
-        syncChrome();
-        render();
+        // show() re-validates the current view for the new division (finance
+        // screens fall back to Inventory) and swaps the visible section.
+        show(view);
       });
     });
 
@@ -7935,7 +8307,8 @@
     // Bills tab
     host.innerHTML = '<div style="text-align:center;padding:24px"><div class="spin" style="margin:0 auto 10px"></div>Loading bills…</div>';
     Api.listBills({ q: apSearchQ || undefined }).then(function (bills) {
-      bills = bills || [];
+      // GET /payables/bills is paginated ({ page, pageSize, total, items }).
+      bills = Array.isArray(bills) ? bills : ((bills && bills.items) || []);
       var pendingCount = bills.filter(function (b) { return b.status === 'PENDING_APPROVAL'; }).length;
       var kPend = $('#kpiApPending'); if (kPend) kPend.textContent = num(pendingCount);
 
