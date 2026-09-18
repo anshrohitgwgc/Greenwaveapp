@@ -6,6 +6,8 @@ import { Repository } from 'typeorm';
 import { Material } from './entities/material.entity';
 import { Warehouse } from '../warehouses/entities/warehouse.entity';
 
+export const OPERATIONAL_ONTARIO_WAREHOUSE_ID = 'b0000000-0000-4000-8000-000000000003';
+export const OPERATIONAL_CALGARY_WAREHOUSE_ID = 'b0000000-0000-4000-8000-000000000002';
 export const ONTARIO_WAREHOUSE_ID = '33333333-3333-4333-8333-333333333333';
 export const CALGARY_WAREHOUSE_ID = '22222222-2222-4222-8222-222222222222';
 
@@ -70,15 +72,26 @@ export class HealthcareProductCopyService {
     targetWarehouseId?: string,
   ): Promise<CopyPreviewResult> {
     const warehouses = await this.warehouseRepo.find();
-    const resolve = (id: string | undefined, name: RegExp) => {
-      const matches = warehouses.filter(w => id ? w.id === id : name.test(w.name));
-      if (matches.length !== 1 || !matches[0].active || !name.test(matches[0].name)) {
-        throw new BadRequestException('NOT_VERIFIED: select explicit verified Ontario and Calgary warehouse IDs');
+    const resolve = (id: string | undefined, name: RegExp, preferredCode: string) => {
+      if (id) {
+        const found = warehouses.find(w => w.id === id);
+        if (!found || !found.active || !name.test(found.name)) {
+          throw new BadRequestException(`NOT_VERIFIED: warehouse ID ${id} not found, inactive, or mismatched`);
+        }
+        return found.id;
       }
-      return matches[0].id;
+      // Resolve operational warehouse by code first (ON-MAIN / CGY-AB)
+      const operational = warehouses.find(w => w.code === preferredCode && w.active);
+      if (operational) return operational.id;
+
+      // Fallback for single active match in test environments
+      const matches = warehouses.filter(w => name.test(w.name) && w.active);
+      if (matches.length === 1) return matches[0].id;
+
+      throw new BadRequestException('NOT_VERIFIED: select explicit verified Ontario and Calgary warehouse IDs');
     };
-    sourceWarehouseId = resolve(sourceWarehouseId, /ontario/i);
-    targetWarehouseId = resolve(targetWarehouseId, /calgary/i);
+    sourceWarehouseId = resolve(sourceWarehouseId, /ontario/i, 'ON-MAIN');
+    targetWarehouseId = resolve(targetWarehouseId, /calgary/i, 'CGY-AB');
     const [sourceWh, targetWh] = await Promise.all([
       this.warehouseRepo.findOne({ where: { id: sourceWarehouseId } }),
       this.warehouseRepo.findOne({ where: { id: targetWarehouseId } }),
