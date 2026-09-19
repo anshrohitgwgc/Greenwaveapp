@@ -231,6 +231,7 @@ export class InvoicesService {
     // a rejected request never reaches allocateInvoiceNumber and therefore
     // never burns a number from the sequence.
     const division = await this.resolveCreateDivision(actor, dto.division);
+    this.assertRecyclingResource(division);
     const divisionStorage = this.divisionsService.storageValueFor(division);
     await this.assertCustomerInDivision(dto.customerId, divisionStorage);
     if (dto.status === 'paid') {
@@ -344,6 +345,7 @@ export class InvoicesService {
       actor,
       source.division,
     );
+    this.assertRecyclingResource(source.division);
     if (source.warehouseId) {
       await this.warehousesService.assertWarehouseAccess(
         actor,
@@ -427,14 +429,17 @@ export class InvoicesService {
       actor,
       existing.division,
     );
+    this.assertRecyclingResource(existing.division);
     let divisionStorage = existing.division;
     if (dto.division !== undefined) {
       const target = await this.divisionsService.assertDivisionAccess(
         actor,
         dto.division,
       );
-      if (target)
+      if (target) {
+        this.assertRecyclingResource(target);
         divisionStorage = this.divisionsService.storageValueFor(target);
+      }
     }
     if (dto.customerId !== undefined) {
       await this.assertCustomerInDivision(dto.customerId, divisionStorage);
@@ -532,11 +537,12 @@ export class InvoicesService {
       );
     }
 
-    const divisionValues =
+    const divisionValues = (
       await this.divisionsService.scopeDivisionStorageValues(
         actor,
         filters.division,
-      );
+      )
+    ).filter((value) => normalizeDivision(value) === DIVISION_GREENWAVE);
     if (divisionValues.length === 0) return [];
 
     const qb = this.invoiceRepository
@@ -657,7 +663,22 @@ export class InvoicesService {
       actor,
       invoice.division,
     );
+    this.assertRecyclingResource(invoice.division);
     return invoice;
+  }
+
+  /**
+   * Invoices are GreenWave Recycling records. Holding another division does not
+   * make that division's rows reachable through this module, so the stored (or
+   * requested) division is checked on its own, after the actor checks — the
+   * same invariant PaymentsService.assertInvoiceAccess applies.
+   */
+  private assertRecyclingResource(division: string | null | undefined): void {
+    if (normalizeDivision(division) !== DIVISION_GREENWAVE) {
+      throw new ForbiddenException(
+        'Financial operations are strictly restricted to the GreenWave Recycling division',
+      );
+    }
   }
 
   /**

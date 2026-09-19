@@ -465,6 +465,115 @@ describe('E2E Security: Invoice & Purchase Order APIs restricted to GreenWave Re
   });
 
   // ==========================================================================
+  describe('Stored Healthcare invoices/POs are unreachable through the Recycling modules', () => {
+    // The dual admin also belongs to Healthcare; membership must not make
+    // Healthcare rows reachable from the Recycling-only invoice/PO subsystem.
+    const rc: Actor = { name: 'dual/recycling', token: () => tokens.dualAdmin, division: 'recycling' };
+    const gwAdmin: Actor = { name: 'gw', token: () => tokens.gwAdmin };
+    let hcInvoiceId: string;
+    let hcPoId: string;
+    const count = async (table: string) => Number((await dataSource.query(`SELECT COUNT(*) AS n FROM ${table}`))[0].n);
+    const sideEffects = async () => ({
+      invoices: await count('invoices'),
+      purchaseOrders: await count('purchase_orders'),
+      journals: await count('journal_entries'),
+      payments: await count('payments'),
+      outbox: await count('email_outbox'),
+      hcInvoice: await dataSource.getRepository(Invoice).findOneBy({ id: hcInvoiceId }),
+      hcPo: await dataSource.getRepository(PurchaseOrder).findOneBy({ id: hcPoId }),
+    });
+
+    beforeAll(async () => {
+      await app.get(LedgerService).ensureDefaultChart();
+      // Created normally, then stored as Healthcare — a legacy/other-division row.
+      hcInvoiceId = (await as(request(server()).post('/api/invoices').send(invoicePayload()), gwAdmin).expect(201)).body.id;
+      await dataSource.getRepository(Invoice).update(hcInvoiceId, { division: 'healthcare' });
+      hcPoId = (await as(request(server()).post('/api/purchase-orders').send(poPayload()), gwAdmin).expect(201)).body.id;
+      await dataSource.getRepository(PurchaseOrder).update(hcPoId, { division: 'healthcare' });
+    });
+
+    const invoiceOps = (): Array<[string, () => request.Test]> => [
+      ['detail', () => request(server()).get(`/api/invoices/${hcInvoiceId}`)],
+      ['update', () => request(server()).patch(`/api/invoices/${hcInvoiceId}`).send({ notes: 'x' })],
+      ['finalize', () => request(server()).patch(`/api/invoices/${hcInvoiceId}`).send({ status: 'final' })],
+      ['duplicate', () => request(server()).post(`/api/invoices/${hcInvoiceId}/duplicate`)],
+      ['payment link', () => request(server()).post(`/api/payments/invoices/${hcInvoiceId}/link`).send({})],
+      ['payment link regenerate', () => request(server()).post(`/api/payments/invoices/${hcInvoiceId}/link/regenerate`).send({})],
+      ['send/email', () => request(server()).post(`/api/payments/invoices/${hcInvoiceId}/send`).send({ recipientEmail: 'x@example.invalid', documentHtml: '<p>invoice</p>' })],
+    ];
+    const poOps = (): Array<[string, () => request.Test]> => [
+      ['detail', () => request(server()).get(`/api/purchase-orders/${hcPoId}`)],
+      ['update', () => request(server()).patch(`/api/purchase-orders/${hcPoId}`).send({ notes: 'x' })],
+      ['status change', () => request(server()).patch(`/api/purchase-orders/${hcPoId}`).send({ status: 'issued' })],
+      ['delete', () => request(server()).delete(`/api/purchase-orders/${hcPoId}`)],
+    ];
+
+    for (const actor of [rc, { name: 'dual/greenwave', token: () => tokens.dualAdmin, division: 'greenwave' }, gwAdmin] as Actor[]) {
+      it(`${actor.name}: every Healthcare invoice operation → 403, zero side effects`, async () => {
+        const before = await sideEffects();
+        for (const [label, make] of invoiceOps()) {
+          const res = await as(make(), actor);
+          if (res.status !== 403) throw new Error(`invoice ${label}: expected 403, got ${res.status} ${JSON.stringify(res.body).slice(0, 160)}`);
+        }
+        expect(await sideEffects()).toEqual(before);
+      });
+
+      it(`${actor.name}: every Healthcare PO operation → 403, zero side effects`, async () => {
+        const before = await sideEffects();
+        for (const [label, make] of poOps()) {
+          const res = await as(make(), actor);
+          if (res.status !== 403) throw new Error(`PO ${label}: expected 403, got ${res.status} ${JSON.stringify(res.body).slice(0, 160)}`);
+        }
+        expect(await sideEffects()).toEqual(before);
+      });
+    }
+
+    it('Healthcare rows never appear in the Recycling lists (with or without ?division=)', async () => {
+      for (const q of ['', '?division=healthcare', '?division=recycling']) {
+        const inv = await as(request(server()).get(`/api/invoices${q}`), rc).expect(200);
+        expect(inv.body.map((i: any) => i.id)).not.toContain(hcInvoiceId);
+        expect(inv.body.every((i: any) => i.division === 'recycling')).toBe(true);
+        const po = await as(request(server()).get(`/api/purchase-orders${q}`), rc).expect(200);
+        expect(po.body.map((p: any) => p.id)).not.toContain(hcPoId);
+        expect(po.body.every((p: any) => p.division === 'recycling')).toBe(true);
+      }
+    });
+
+    it('create cannot target Healthcare through the payload (no row, no number consumed)', async () => {
+      const before = await sideEffects();
+      const nextInv = (await as(request(server()).get('/api/invoices/next-number'), rc).expect(200)).body.nextNumber;
+      const nextPo = (await as(request(server()).get('/api/purchase-orders/next-number'), rc).expect(200)).body.nextNumber;
+      await as(request(server()).post('/api/invoices').send({ ...invoicePayload(), division: 'healthcare' }), rc).expect(403);
+      await as(request(server()).post('/api/purchase-orders').send({ ...poPayload(), division: 'healthcare' }), rc).expect(403);
+      expect(await sideEffects()).toEqual(before);
+      expect((await as(request(server()).get('/api/invoices/next-number'), rc).expect(200)).body.nextNumber).toBe(nextInv);
+      expect((await as(request(server()).get('/api/purchase-orders/next-number'), rc).expect(200)).body.nextNumber).toBe(nextPo);
+    });
+
+    it('update cannot move a Recycling invoice or PO into Healthcare', async () => {
+      await as(request(server()).patch(`/api/invoices/${invoiceId}`).send({ division: 'healthcare' }), rc).expect(403);
+      await as(request(server()).patch(`/api/purchase-orders/${poId}`).send({ division: 'healthcare' }), rc).expect(403);
+      expect((await dataSource.getRepository(Invoice).findOneBy({ id: invoiceId }))!.division).toBe('recycling');
+      expect((await dataSource.getRepository(PurchaseOrder).findOneBy({ id: poId }))!.division).toBe('recycling');
+    });
+
+    it('denial for a Healthcare UUID follows the finance convention: 403 (existing, out of scope) vs 404 (unknown)', async () => {
+      const ghost = '00000000-0000-4000-8000-000000000000';
+      await as(request(server()).get(`/api/invoices/${hcInvoiceId}`), rc).expect(403);
+      await as(request(server()).get(`/api/invoices/${ghost}`), rc).expect(404);
+      await as(request(server()).get(`/api/purchase-orders/${hcPoId}`), rc).expect(403);
+      await as(request(server()).get(`/api/purchase-orders/${ghost}`), rc).expect(404);
+    });
+
+    it('Recycling records remain fully usable by the same dual admin', async () => {
+      await as(request(server()).get(`/api/invoices/${invoiceId}`), rc).expect(200);
+      const copy = await as(request(server()).post(`/api/invoices/${invoiceId}/duplicate`), rc).expect(201);
+      expect(copy.body.division).toBe('recycling');
+      await as(request(server()).get(`/api/purchase-orders/${poId}`), rc).expect(200);
+    });
+  });
+
+  // ==========================================================================
   describe('Existing RBAC and warehouse restrictions still apply inside Recycling', () => {
     it('Recycling manager is still refused an invoice in a warehouse they are not assigned', async () => {
       await as(request(server()).get(`/api/invoices/${otherWhInvoiceId}`), { name: 'mgr', token: () => tokens.gwManager }).expect(403);

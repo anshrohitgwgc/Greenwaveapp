@@ -15,6 +15,10 @@ import {
   lineAmountCents,
   sumCents,
 } from '../common/decimal';
+import {
+  DIVISION_GREENWAVE,
+  normalizeDivision,
+} from '../divisions/divisions.constants';
 import { DivisionsService } from '../divisions/divisions.service';
 import { WarehousesService } from '../warehouses/warehouses.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
@@ -235,6 +239,7 @@ export class PurchaseOrdersService {
     // a rejected request never reaches allocateSequenceNumber and therefore
     // never burns a number from the sequence.
     const division = await this.resolveCreateDivision(actor, dto.division);
+    this.assertRecyclingResource(division);
     const divisionStorage = this.divisionsService.storageValueFor(division);
 
     const queryRunner = this.dataSource.createQueryRunner();
@@ -338,6 +343,7 @@ export class PurchaseOrdersService {
       actor,
       existing.division,
     );
+    this.assertRecyclingResource(existing.division);
     let divisionStorage = existing.division;
     if (dto.division !== undefined) {
       const target = await this.divisionsService.assertDivisionAccess(
@@ -345,6 +351,7 @@ export class PurchaseOrdersService {
         dto.division,
       );
       if (target) {
+        this.assertRecyclingResource(target);
         divisionStorage = this.divisionsService.storageValueFor(target);
       }
     }
@@ -448,6 +455,7 @@ export class PurchaseOrdersService {
       actor,
       existing.division,
     );
+    this.assertRecyclingResource(existing.division);
 
     // Items go with it via ON DELETE CASCADE in PostgreSQL; deleted explicitly
     // first so the sqlite-backed specs (which synchronize the schema rather
@@ -486,11 +494,12 @@ export class PurchaseOrdersService {
       );
     }
 
-    const divisionValues =
+    const divisionValues = (
       await this.divisionsService.scopeDivisionStorageValues(
         actor,
         filters.division,
-      );
+      )
+    ).filter((value) => normalizeDivision(value) === DIVISION_GREENWAVE);
     if (divisionValues.length === 0) return [];
 
     const qb = this.purchaseOrderRepository
@@ -558,7 +567,22 @@ export class PurchaseOrdersService {
       actor,
       purchaseOrder.division,
     );
+    this.assertRecyclingResource(purchaseOrder.division);
     return purchaseOrder;
+  }
+
+  /**
+   * Purchase orders are GreenWave Recycling records. Holding another division does not
+   * make that division's rows reachable through this module, so the stored (or
+   * requested) division is checked on its own, after the actor checks — the
+   * same invariant PaymentsService.assertInvoiceAccess applies.
+   */
+  private assertRecyclingResource(division: string | null | undefined): void {
+    if (normalizeDivision(division) !== DIVISION_GREENWAVE) {
+      throw new ForbiddenException(
+        'Financial operations are strictly restricted to the GreenWave Recycling division',
+      );
+    }
   }
 
   private async resolveCreateDivision(
