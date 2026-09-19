@@ -3668,14 +3668,7 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
 
 /* ---- Proforma editor -------------------------------------------------- */
 .pf-ed-actions { align-items: center; }
-.pf-notice {
-  display: flex; gap: 10px; align-items: flex-start;
-  padding: 10px 14px; margin-bottom: 16px;
-  background: var(--info-bg); color: var(--info-ink);
-  border: 1px solid color-mix(in srgb, var(--info) 25%, transparent);
-  border-radius: var(--r-md); font-size: 13px; line-height: 1.45;
-}
-.pf-notice svg, .pf-banner svg { width: 18px; height: 18px; flex: none; margin-top: 1px; }
+.pf-banner svg { width: 18px; height: 18px; flex: none; margin-top: 1px; }
 .pf-banner {
   display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
   padding: 12px 16px; margin-bottom: 12px; border-radius: var(--r-md);
@@ -3786,6 +3779,9 @@ a:hover { color: var(--acc-hover); text-decoration-color: currentColor; }
   .pf-ed-actions .row-menu-pop { left: 0; right: auto; }
   /* The sticky bar carries Save + total, so the header copy is redundant. */
   .pf-ed-actions #pfEdSave { display: none; }
+  /* With Save as its only child (a new draft) the row is empty, but left in
+     the flow it still wraps under the title and adds the header's row gap. */
+  .pf-ed-actions:not(:has(> :not(#pfEdSave))) { display: none; }
   .pf-sticky {
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
     /* #scroll runs under the fixed 60px tab bar with 88px bottom padding,

@@ -1,14 +1,14 @@
 /* Offline cache for Greenwave Ops */
-var CACHE = 'greenwave-v29-proforma-ux';
+var CACHE = 'greenwave-v30-photo-save';
 var FILES = [
   '/',
   '/index.html',
-  '/manifest.webmanifest?v=20260917_proforma_rc2',
-  '/assets/app.css?v=20260917_proforma_rc2',
-  '/assets/api.js?v=20260917_proforma_rc2',
-  '/assets/app.js?v=20260917_proforma_rc2',
-  '/assets/store.js?v=20260917_proforma_rc2',
-  '/assets/photos.js?v=20260917_proforma_rc2',
+  '/manifest.webmanifest?v=20260919_photo_save',
+  '/assets/app.css?v=20260919_photo_save',
+  '/assets/api.js?v=20260919_photo_save',
+  '/assets/app.js?v=20260919_photo_save',
+  '/assets/store.js?v=20260919_photo_save',
+  '/assets/photos.js?v=20260919_photo_save',
   '/assets/logo.png?v=20260908_invoiceredesign',
   '/assets/icon-192.png',
   '/assets/icon-512.png'

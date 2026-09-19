@@ -44,8 +44,8 @@ const photoFile = (name) => ({
 const photoFiles = (n, prefix = 'load') =>
   Array.from({ length: n }, (_, i) => photoFile(`${prefix}-${i + 1}.jpg`));
 
-async function stubApi(page) {
-  const uploaded = { batches: [], transactions: [] };
+async function stubApi(page, opts = {}) {
+  const uploaded = { batches: [], transactions: [], deleted: [] };
 
   await page.route('**/api/**', async (route) => {
     const req = route.request();
@@ -83,6 +83,11 @@ async function stubApi(page) {
       const body = req.postData() || '';
       const count = (body.match(/name="files"/g) || []).length;
       uploaded.batches.push(count);
+      if (opts.batchStatus === 413) {
+        // What production's nginx sent back before client_max_body_size was
+        // raised: an HTML page, not the API's JSON.
+        return route.fulfill({ status: 413, contentType: 'text/html', body: '<html><body><h1>413 Request Entity Too Large</h1></body></html>' });
+      }
       return json(
         Array.from({ length: count }, (_, i) => ({
           id: `33333333-3333-4333-8333-${String(i + 1).padStart(12, '0')}`,
@@ -92,7 +97,16 @@ async function stubApi(page) {
     }
     if (path === '/inventory/transactions' && req.method() === 'POST') {
       uploaded.transactions.push(JSON.parse(req.postData() || '{}'));
+      if (opts.txStatus) return json({ message: 'Material not found' }, opts.txStatus);
       return json({ id: 'tx-1' }, 201);
+    }
+    if (path === '/inventory/transactions/tx-1') {
+      const last = uploaded.transactions[uploaded.transactions.length - 1] || {};
+      return json({ id: 'tx-1', photos: (last.photoIds || []).map((id) => ({ id })) });
+    }
+    if (path.startsWith('/photos/') && req.method() === 'DELETE') {
+      uploaded.deleted.push(path.slice('/photos/'.length));
+      return json({ ok: true });
     }
     if (path === '/inventory/transactions') return json([]);
     if (path === '/inventory/balances') return json([]);
@@ -217,6 +231,76 @@ test.describe('inventory photo picker', () => {
     const tx = uploaded.transactions[0];
     expect(tx.photoIds).toHaveLength(5);
     expect(tx.photoId).toBe(tx.photoIds[0]);
+  });
+
+  test('reports the saved photo count once the entry is read back', async ({ page }) => {
+    await stubApi(page);
+    await openInboundModal(page);
+
+    await page.setInputFiles('#inboundPhotoLibrary', photoFiles(3));
+    await page.fill('input[name="orderNumber"]', 'ORD-READBACK');
+    await page.fill('input[name="weightValue"]', '100');
+    await page.fill('input[name="palletQty"]', '1');
+    await page.click('#modalOk');
+
+    await expect(page.locator('.toast')).toContainText('with 3 photos', { timeout: 20000 });
+  });
+
+  /* The production bug: nginx refused the batch with a 413 and the entry
+     was then saved without photos under a success message. Nothing may be
+     saved, and the operator must be able to retry with the same selection. */
+  test('does not save the entry when the photo upload is rejected', async ({ page }) => {
+    const uploaded = await stubApi(page, { batchStatus: 413 });
+    await openInboundModal(page);
+
+    await page.setInputFiles('#inboundPhotoLibrary', photoFiles(3));
+    await page.fill('input[name="orderNumber"]', 'ORD-413');
+    await page.fill('input[name="weightValue"]', '100');
+    await page.fill('input[name="palletQty"]', '1');
+    await page.click('#modalOk');
+
+    await expect(page.locator('.toast')).toContainText('Nothing was saved', { timeout: 20000 });
+    expect(uploaded.batches).toEqual([3]);
+    expect(uploaded.transactions).toEqual([]);
+    await expect(page.locator('#modalWrap')).toBeVisible();
+    await expect(page.locator('#inboundPhotoCount')).toHaveText('3 / 15');
+    await expect(page.locator('#modalOk')).toBeEnabled();
+  });
+
+  test('removes uploaded photos and does not retry when the entry fails to save', async ({ page }) => {
+    const uploaded = await stubApi(page, { txStatus: 400 });
+    await openInboundModal(page);
+
+    await page.setInputFiles('#inboundPhotoLibrary', photoFiles(2));
+    await page.fill('input[name="orderNumber"]', 'ORD-TXFAIL');
+    await page.fill('input[name="weightValue"]', '100');
+    await page.fill('input[name="palletQty"]', '1');
+    await page.click('#modalOk');
+
+    await expect(page.locator('.toast')).toContainText('Material not found', { timeout: 20000 });
+    // One attempt only -- the old flow re-posted the entry without photos.
+    expect(uploaded.transactions).toHaveLength(1);
+    await expect.poll(() => uploaded.deleted.length).toBe(2);
+    await expect(page.locator('#modalWrap')).toBeVisible();
+  });
+
+  /* A 5xx may come after the entry and its photo links were committed, and
+     deleting a photo removes its MinIO object first -- so nothing is
+     cleaned up here; an orphan is the safe outcome. */
+  test('keeps uploaded photos when the entry save fails server-side', async ({ page }) => {
+    const uploaded = await stubApi(page, { txStatus: 500 });
+    await openInboundModal(page);
+
+    await page.setInputFiles('#inboundPhotoLibrary', photoFiles(2));
+    await page.fill('input[name="orderNumber"]', 'ORD-TX500');
+    await page.fill('input[name="weightValue"]', '100');
+    await page.fill('input[name="palletQty"]', '1');
+    await page.click('#modalOk');
+
+    await expect(page.locator('.toast')).toContainText('Material not found', { timeout: 20000 });
+    expect(uploaded.transactions).toHaveLength(1);
+    await page.waitForTimeout(500);
+    expect(uploaded.deleted).toEqual([]);
   });
 
   test('saves an entry with no photos at all', async ({ page }) => {

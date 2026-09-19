@@ -46,7 +46,12 @@
       var data = null;
       try { data = text ? JSON.parse(text) : null; } catch (e) { /* non-JSON response */ }
       if (!res.ok) {
-        var err = new Error((data && data.message) || ('Request failed (' + res.status + ')'));
+        /* A 413 comes from the reverse proxy's body-size limit, not the API,
+           so there is no JSON message to show -- only nginx's HTML page. */
+        var fallback = res.status === 413
+          ? 'The upload is larger than the server accepts. Try fewer photos at a time.'
+          : 'Request failed (' + res.status + ')';
+        var err = new Error((data && data.message) || fallback);
         err.status = res.status;
         err.body = data;
         throw err;

@@ -1274,17 +1274,14 @@
           return;
         }
         toast('Uploading ' + files.length + (files.length === 1 ? ' photo…' : ' photos…'));
-        Photos.prepareAll(files).then(function (prepared) {
-          return Api.uploadPhotos(prepared.map(function (r) { return r.file; }), {
-            warehouseId: tx.warehouseId,
-            photoType: tx.type === 'outbound' ? 'inventory_outbound' : 'inventory_inbound',
-            jobReference: tx.orderNumber || tx.reference || undefined
+        uploadInventoryPhotos(files, {
+          warehouseId: tx.warehouseId,
+          photoType: tx.type === 'outbound' ? 'inventory_outbound' : 'inventory_inbound',
+          jobReference: tx.orderNumber || tx.reference || undefined
+        }).then(function (ids) {
+          return Api.attachTransactionPhotos(tx.id, ids).catch(function (err) {
+            return discardIfRejected(ids, err);
           });
-        }).then(function (res) {
-          var uploaded = Array.isArray(res) ? res : ((res && (res.photos || res.items)) || []);
-          var ids = uploaded.map(function (p) { return p.id; }).filter(Boolean);
-          if (!ids.length) throw new Error('The server did not return the uploaded photos.');
-          return Api.attachTransactionPhotos(tx.id, ids);
         }).then(function () {
           toast(files.length === 1 ? 'Photo added.' : files.length + ' photos added.');
           openTransactionDetailModal(txId);
@@ -1500,6 +1497,49 @@
 
   function inventoryPhotoMax() {
     return (window.Photos && Photos.MAX_PHOTOS) || 15;
+  }
+
+  /* Ids from a POST /api/photos/batch response. The endpoint returns a bare
+     array; the wrapped shapes are accepted so a contract change is caught by
+     the count check at the call site instead of silently yielding no ids. */
+  function uploadedPhotoIds(res) {
+    var list = Array.isArray(res) ? res : ((res && (res.photos || res.items)) || []);
+    return list.map(function (p) { return p && p.id; }).filter(Boolean);
+  }
+
+  /* Best-effort cleanup of photos uploaded for a save that then failed, so a
+     retry does not leave unattached objects behind in MinIO. */
+  function discardUploadedPhotos(ids) {
+    return Promise.all((ids || []).map(function (id) {
+      return Api.deletePhoto(id).catch(function () { /* the original error is what matters */ });
+    }));
+  }
+
+  /* Only a 4xx proves the entry/attach was refused before anything was
+     written. After a 5xx or a dropped connection the photos may already be
+     attached, and DELETE /api/photos/:id removes the MinIO object before the
+     row -- so there an orphan is left rather than risk a broken photo. */
+  function discardIfRejected(ids, err) {
+    var st = err && err.status;
+    return (st >= 400 && st < 500 ? discardUploadedPhotos(ids) : Promise.resolve())
+      .then(function () { throw err; });
+  }
+
+  /* Downscale, upload as one batch, and resolve the new photo ids -- only if
+     every file was stored. Anything less rejects (and removes what did get
+     stored), so callers never proceed with a partial set. */
+  function uploadInventoryPhotos(files, meta) {
+    return Photos.prepareAll(files).then(function (prepared) {
+      return Api.uploadPhotos(prepared.map(function (r) { return r.file; }), meta);
+    }).then(function (res) {
+      var ids = uploadedPhotoIds(res);
+      if (ids.length !== files.length) {
+        return discardUploadedPhotos(ids).then(function () {
+          throw new Error('the server stored ' + ids.length + ' of ' + files.length + ' photos');
+        });
+      }
+      return ids;
+    });
   }
 
   function inventoryPhotoFieldHtml() {
@@ -1791,8 +1831,30 @@
             notes: fd.notes || undefined
           };
 
-          return Api.createInventoryTransaction(payload).then(function () {
-            toast('Inbound shipment received (' + num(total) + ' ' + unitLabel + 's) and stock updated.');
+          var received = 'Inbound shipment received (' + num(total) + ' ' + unitLabel + 's)';
+          return Api.createInventoryTransaction(payload).then(function (created) {
+            if (!photoIds.length || !created || !created.id) {
+              toast(received + ' and stock updated.');
+              return;
+            }
+            /* Read the entry back before claiming the photos are on it. The
+               entry itself is saved at this point, so a shortfall is reported
+               as exactly that rather than failing the dialog (a retry would
+               record the shipment twice). */
+            return Api.getInventoryTransaction(created.id).then(function (tx) {
+              var n = (tx && tx.photos && tx.photos.length) || 0;
+              if (n < photoIds.length) {
+                toast(received + ', but only ' + n + ' of ' + photoIds.length +
+                  ' photos are attached. Open the entry from History to add the missing photos.');
+              } else {
+                toast(received + ' with ' + n + (n === 1 ? ' photo.' : ' photos.'));
+              }
+            }, function () {
+              toast(received + '. Could not confirm the photos -- open the entry from History to check them.');
+            });
+          }, function (err) {
+            return discardIfRejected(photoIds, err);
+          }).then(function () {
             renderInventory();
           });
         };
@@ -1800,24 +1862,17 @@
         var chosen = photoPicker ? photoPicker.files() : [];
         if (!chosen.length) return doSubmit([]);
 
-        /* Downscale then upload the whole set in one request. If the upload
-           fails the entry is still saved without photos -- losing a shipment
-           record because a photo did not transfer would be the worse
-           outcome -- but the operator is told explicitly, rather than the
-           silent drop this flow used to do. */
+        /* Photos first, then the entry. If the upload fails nothing is
+           saved and the dialog stays open with the selection intact, so the
+           operator can retry -- the entry is never recorded without its
+           photos behind a success message. */
         toast('Uploading ' + chosen.length + (chosen.length === 1 ? ' photo…' : ' photos…'));
-        return Photos.prepareAll(chosen).then(function (prepared) {
-          return Api.uploadPhotos(prepared.map(function (p) { return p.file; }), {
-            warehouseId: w.id,
-            photoType: 'inventory_inbound',
-            jobReference: fd.orderNumber
-          });
-        }).then(function (res) {
-          var ids = (res || []).map(function (p) { return p.id; }).filter(Boolean);
-          return doSubmit(ids);
-        }).catch(function (err) {
-          toast('Photo upload failed (' + (err.message || err) + '). Saving the entry without photos.');
-          return doSubmit([]);
+        return uploadInventoryPhotos(chosen, {
+          warehouseId: w.id,
+          photoType: 'inventory_inbound',
+          jobReference: fd.orderNumber
+        }).then(doSubmit, function (err) {
+          throw new Error('Photo upload failed: ' + String(err.message || err).replace(/\.$/, '') + '. Nothing was saved -- try again.');
         });
       });
 
@@ -5559,8 +5614,6 @@
     } else if (st === 'expired') {
       banner = '<div class="pf-banner pf-banner-warn" role="status"><svg><use href="#i-clock"></use></svg><div><strong>Expired.</strong> Update “Valid until”, save, then reopen it as a draft to send or convert it again.</div></div>';
     }
-    var notice = '<div class="pf-notice"><svg><use href="#i-doc"></use></svg><span><strong>Proforma invoice</strong> — a quotation for the customer, shipping and customs. ' +
-      'It is not a demand for payment or a tax invoice, and creates no receivable until it is converted.</span></div>';
 
     /* ---- Customer ----------------------------------------------------- */
     var customerCard =
@@ -5657,7 +5710,7 @@
       '<div class="pf-sticky" id="pfSticky"><div><span class="pf-sticky-l">Estimated total</span><strong class="mono" id="pfStickyTotal">—</strong></div>' +
       '<button type="button" class="btn btn-primary" id="pfStickySave"><svg><use href="#i-check"></use></svg>' + (d.id ? 'Save' : 'Create') + '</button></div>';
 
-    body.innerHTML = banner + notice +
+    body.innerHTML = banner +
       '<div class="pf-layout">' + customerCard + docCard + shipCard + itemsCard + notesCard + summaryCard + '</div>' + stickyBar;
 
     /* ---- Header actions ------------------------------------------------ */
