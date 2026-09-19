@@ -12,6 +12,7 @@ import { ACCOUNTING_ENTITIES, AccountingModule } from '../src/accounting/account
 import { AuditModule } from '../src/audit/audit.module';
 import { AuditEvent } from '../src/audit/entities/audit-event.entity';
 import { AuthModule } from '../src/auth/auth.module';
+import { LedgerService } from '../src/accounting/ledger.service';
 import { Customer } from '../src/customers/entities/customer.entity';
 import { CustomersModule } from '../src/customers/customers.module';
 import { DivisionsModule } from '../src/divisions/divisions.module';
@@ -22,6 +23,7 @@ import { InvoicesModule } from '../src/invoices/invoices.module';
 import { InvoicesService } from '../src/invoices/invoices.service';
 import { EmailOutbox } from '../src/mail/entities/email-outbox.entity';
 import { MailModule } from '../src/mail/mail.module';
+import { Payment } from '../src/payments/entities/payment.entity';
 import { PAYMENT_ENTITIES, PaymentsModule } from '../src/payments/payments.module';
 import { PurchaseOrderItem } from '../src/purchase-orders/entities/purchase-order-item.entity';
 import { PurchaseOrder } from '../src/purchase-orders/entities/purchase-order.entity';
@@ -326,12 +328,7 @@ describe('E2E Security: Invoice & Purchase Order APIs restricted to GreenWave Re
         await as(request(server()).get(`/api/invoices/${invoiceId}`), actor).expect(200);
         const created = await as(request(server()).post('/api/invoices').send(invoicePayload()), actor).expect(201);
         await as(request(server()).patch(`/api/invoices/${created.body.id}`).send({ notes: 'ok' }), actor).expect(200);
-        // Pre-existing, out of scope here: InvoicesService.duplicate() omits the
-        // source division, so a multi-division actor gets 400 "division is
-        // required" regardless of this guard. Asserted for single-division only.
-        if (actor.token() !== tokens.dualAdmin) {
-          await as(request(server()).post(`/api/invoices/${created.body.id}/duplicate`), actor).expect(201);
-        }
+        await as(request(server()).post(`/api/invoices/${created.body.id}/duplicate`), actor).expect(201);
         const pdf = await as(request(server()).post('/api/invoices/render-pdf').send({ html: '<p>x</p>' }), actor).expect(201);
         expect(pdf.headers['content-type']).toMatch(/pdf/);
       });
@@ -356,6 +353,114 @@ describe('E2E Security: Invoice & Purchase Order APIs restricted to GreenWave Re
       await as(request(server()).get('/api/invoices'), mgr).expect(200);
       await as(request(server()).get(`/api/invoices/${invoiceId}`), mgr).expect(200);
       await as(request(server()).post('/api/invoices').send(invoicePayload()), mgr).expect(201);
+    });
+  });
+
+  // ==========================================================================
+  describe('Invoice duplicate keeps the source division and copies no payment state', () => {
+    let sourceId: string;
+    let sourceNumber: string;
+    const journalCount = async (sourceId?: string) =>
+      Number(
+        (
+          await dataSource.query(
+            sourceId
+              ? `SELECT COUNT(*) AS n FROM journal_entries WHERE source_id = ?`
+              : `SELECT COUNT(*) AS n FROM journal_entries`,
+            sourceId ? [sourceId] : [],
+          )
+        )[0].n,
+      );
+    const dup = (actor: Actor, id = sourceId) => as(request(server()).post(`/api/invoices/${id}/duplicate`), actor);
+    const dual = (division?: string): Actor => ({ name: `dual/${division}`, token: () => tokens.dualAdmin, division });
+
+    beforeAll(async () => {
+      // A finalized, paid Recycling invoice carrying payment-link and Stripe state.
+      const created = await as(request(server()).post('/api/invoices').send(invoicePayload()), { name: 'gw', token: () => tokens.gwAdmin }).expect(201);
+      sourceId = created.body.id;
+      await app.get(LedgerService).ensureDefaultChart();
+      await as(request(server()).patch(`/api/invoices/${sourceId}`).send({ status: 'final' }), { name: 'gw', token: () => tokens.gwAdmin }).expect(200);
+      // Issuance posted once for the source (DR AR / CR Revenue / CR Sales Tax).
+      expect(await journalCount(sourceId)).toBe(1);
+      sourceNumber = String(created.body.invoiceNumber);
+      await dataSource.getRepository(Invoice).update(sourceId, {
+        paymentStatus: 'paid',
+        paidAt: new Date('2026-09-18T12:00:00Z'),
+        paymentLinkNonce: 'nonce-must-not-be-copied',
+        paymentLinkCreatedAt: new Date('2026-09-18T11:00:00Z'),
+      });
+      await dataSource.getRepository(Payment).save({
+        id: '99999999-9999-4999-8999-999999999999',
+        invoiceId: sourceId,
+        provider: 'stripe',
+        providerPaymentId: 'pi_must_not_be_copied',
+        status: 'SUCCEEDED',
+        currency: 'CAD',
+        amount: '105.00',
+        amountMinor: 10500,
+        warehouseId: WH_MR,
+        paidAt: new Date('2026-09-18T12:00:00Z'),
+        createdBy: 1,
+      });
+    });
+
+    it('regression: dual-division admin in Recycling context duplicates (was 400 "division is required")', async () => {
+      const res = await dup(dual('recycling')).expect(201);
+      expect(res.body.division).toBe('recycling');
+    });
+
+    it.each([
+      ['Recycling-only admin (no header)', (): Actor => ({ name: 'gw', token: () => tokens.gwAdmin })],
+      ['dual-division admin + X-Division: recycling', () => dual('recycling')],
+      ['dual-division admin + X-Division: greenwave', () => dual('greenwave')],
+    ])('%s → 201, same division, fresh draft with no payment/accounting state', async (_n, actor) => {
+      const journalsBefore = await journalCount();
+      const res = await dup(actor()).expect(201);
+      const copy = await dataSource.getRepository(Invoice).findOne({ where: { id: res.body.id }, relations: ['items'] });
+      const source = await dataSource.getRepository(Invoice).findOne({ where: { id: sourceId }, relations: ['items'] });
+
+      expect(copy!.id).not.toBe(sourceId);
+      expect(String(copy!.invoiceNumber)).not.toBe(sourceNumber);
+      expect(copy!.division).toBe(source!.division);
+      expect(copy!.warehouseId).toBe(source!.warehouseId);
+      expect(copy!.status).toBe('draft');
+      expect(copy!.paymentStatus).toBe('unpaid');
+      expect(copy!.paidAt).toBeNull();
+      expect(copy!.paymentLinkNonce).toBeNull();
+      expect(copy!.paymentLinkCreatedAt).toBeNull();
+      expect(Number(copy!.total)).toBe(Number(source!.total));
+      expect(copy!.items.map((i) => i.description)).toEqual(source!.items.map((i) => i.description));
+      expect(await dataSource.getRepository(Payment).count({ where: { invoiceId: copy!.id } })).toBe(0);
+      // A draft posts nothing: no journal entry for the copy, no change overall.
+      expect(await journalCount(copy!.id)).toBe(0);
+      expect(await journalCount()).toBe(journalsBefore);
+    });
+
+    it('a request body cannot move the copy to another division', async () => {
+      // Duplicate declares no body: the division comes only from the stored source.
+      const res = await dup(dual('recycling')).send({ division: 'healthcare' });
+      expect(res.status).toBe(201);
+      expect(res.body.division).toBe('recycling');
+    });
+
+    it.each([
+      ['dual-division admin + X-Division: healthcare', () => dual('healthcare')],
+      ['dual-division admin with missing context', () => dual(undefined)],
+      ['Healthcare-only admin spoofing X-Division: recycling', (): Actor => ({ name: 'hc', token: () => tokens.hcAdmin, division: 'recycling' })],
+    ])('%s → 403, nothing created', async (_n, actor) => {
+      const before = await dataSource.getRepository(Invoice).count();
+      await dup(actor()).expect(403);
+      expect(await dataSource.getRepository(Invoice).count()).toBe(before);
+    });
+
+    it('unauthorized warehouse keeps its existing 403', async () => {
+      const before = await dataSource.getRepository(Invoice).count();
+      await dup({ name: 'mgr', token: () => tokens.gwManager }, otherWhInvoiceId).expect(403);
+      expect(await dataSource.getRepository(Invoice).count()).toBe(before);
+    });
+
+    it('unknown UUID keeps its existing 404', async () => {
+      await dup({ name: 'gw', token: () => tokens.gwAdmin }, '00000000-0000-4000-8000-000000000000').expect(404);
     });
   });
 

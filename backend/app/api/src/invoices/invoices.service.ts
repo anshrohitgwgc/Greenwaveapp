@@ -369,6 +369,9 @@ export class InvoicesService {
       footer: source.footer ?? undefined,
       paymentInstructions: source.paymentInstructions ?? undefined,
       warehouseId: source.warehouseId ?? undefined,
+      // The copy stays in the source's division. Without it, create() cannot
+      // infer a division for a multi-division actor and rejects with 400.
+      division: source.division,
       status: 'draft',
       currency: source.currency ?? 'CAD',
       paymentStatus: 'unpaid',
