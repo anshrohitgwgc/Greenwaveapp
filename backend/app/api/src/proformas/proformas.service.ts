@@ -823,16 +823,22 @@ export class ProformasService {
         entityId: proforma.id,
       });
 
-      if (result.status === 'SENT' || result.status === 'SKIPPED') {
-        if (proforma.status === 'draft') {
-          await this.proformaRepo.update({ id: proforma.id, status: 'draft' }, { status: 'sent' });
-        }
+      // Only a message the mail subsystem actually dispatched moves a draft to
+      // `sent`. SKIPPED (no SMTP configured), FAILED (transport error) and
+      // DUPLICATE leave the proforma's status exactly as it was.
+      const sent = result.status === 'SENT';
+      if (sent && proforma.status === 'draft') {
+        await this.proformaRepo.update(
+          { id: proforma.id, status: 'draft' },
+          { status: 'sent' },
+        );
       }
 
       return {
-        sent: result.status === 'SENT',
+        sent,
         status: result.status,
         recipient: targetEmail,
+        ...('reason' in result ? { note: result.reason } : {}),
       };
     } catch (err) {
       this.logger.error(`Failed to send proforma email: ${err.message}`);

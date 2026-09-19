@@ -1,4 +1,4 @@
-import { MAIL_TRANSPORT } from '../src/mail/mail.service';
+import { MAIL_TRANSPORT, MailService } from '../src/mail/mail.service';
 import { gateDatabase } from './gate-database';
 /* eslint-disable */
 import { INestApplication, ValidationPipe } from '@nestjs/common';
@@ -39,6 +39,7 @@ import { PaymentRefund } from '../src/payments/entities/payment-refund.entity';
 import { ProformaInvoice } from '../src/proformas/entities/proforma-invoice.entity';
 import { ProformaInvoiceItem } from '../src/proformas/entities/proforma-invoice-item.entity';
 import { ProformasModule } from '../src/proformas/proformas.module';
+import { ProformasService } from '../src/proformas/proformas.service';
 import { RedisService } from '../src/redis/redis.service';
 import { Permission } from '../src/roles/entities/permission.entity';
 import { Role } from '../src/roles/entities/role.entity';
@@ -514,4 +515,113 @@ describe('Workstream 3: Proforma Invoices (GreenWave Recycling Non-Accounting Wo
     expect(await dataSource.getRepository(JournalEntry).count()).toBe(postings + 1);
   });
 
+  describe('6. Send only marks a proforma sent when the email was dispatched', () => {
+    const draft = async () =>
+      (
+        await request(app.getHttpServer())
+          .post('/api/proformas')
+          .set('Authorization', `Bearer ${gwAdminToken}`)
+          .send({
+            customerId: CUSTOMER_ID,
+            warehouseId: WAREHOUSE_CGY,
+            issueDate: '2026-09-17',
+            validityDate: '2026-10-17',
+            currency: 'CAD',
+            items: [{ description: 'Send status line', quantity: 1, unitPrice: 100, taxRate: 5 }],
+          })
+          .expect(201)
+      ).body.id as string;
+    const send = (id: string) =>
+      request(app.getHttpServer())
+        .post(`/api/proformas/${id}/send`)
+        .set('Authorization', `Bearer ${gwAdminToken}`)
+        .send({ email: 'billing@pacificscrap.test' })
+        .expect(200);
+    const statusOf = async (id: string) =>
+      (await dataSource.getRepository(ProformaInvoice).findOneByOrFail({ id })).status;
+    const outboxFor = (id: string) =>
+      dataSource.getRepository(EmailOutbox).find({ where: { entityId: id } });
+    const sideEffects = async () => ({
+      payments: await dataSource.getRepository(Payment).count(),
+      journals: await dataSource.getRepository(JournalEntry).count(),
+      lines: await dataSource.getRepository(JournalLine).count(),
+    });
+
+    it('delivered: draft -> sent, PDF attached, outbox SENT', async () => {
+      const transport = app.get(MAIL_TRANSPORT) as { send: jest.Mock };
+      transport.send.mockClear();
+      const id = await draft();
+      const before = await sideEffects();
+      const res = await send(id);
+      expect(res.body).toMatchObject({ sent: true, status: 'SENT' });
+      expect(await statusOf(id)).toBe('sent');
+      const attachment = transport.send.mock.calls[0][0].attachments[0];
+      expect(attachment.contentType).toBe('application/pdf');
+      expect(Buffer.isBuffer(attachment.content) && attachment.content.length > 0).toBe(true);
+      expect((await outboxFor(id)).map((o) => o.status)).toEqual(['SENT']);
+      expect(await sideEffects()).toEqual(before);
+    });
+
+    it('SMTP absent: not sent, status stays draft, outbox SKIPPED', async () => {
+      const mail = app.get(MailService) as unknown as { transport: unknown };
+      const saved = mail.transport;
+      mail.transport = null; // as in production today: no transport, no SMTP_HOST
+      try {
+        const id = await draft();
+        const before = await sideEffects();
+        const res = await send(id);
+        expect(res.body).toMatchObject({ sent: false, status: 'SKIPPED' });
+        expect(await statusOf(id)).toBe('draft');
+        expect(res.body.note).toMatch(/not configured/i);
+        expect((await outboxFor(id)).map((o) => o.status)).toEqual(['SKIPPED']);
+        expect(await sideEffects()).toEqual(before);
+      } finally {
+        mail.transport = saved;
+      }
+    });
+
+    it('SMTP transport failure: not sent, status stays draft, outbox FAILED', async () => {
+      const transport = app.get(MAIL_TRANSPORT) as { send: jest.Mock };
+      transport.send.mockRejectedValueOnce(Object.assign(new Error('connection refused'), { code: 'ECONNECTION' }));
+      const id = await draft();
+      const before = await sideEffects();
+      const res = await send(id);
+      expect(res.body).toMatchObject({ sent: false, status: 'FAILED' });
+      expect(await statusOf(id)).toBe('draft');
+      expect((await outboxFor(id)).map((o) => o.status)).toEqual(['FAILED']);
+      expect(await sideEffects()).toEqual(before);
+    });
+
+    it('accepted proforma: a failed send keeps it accepted', async () => {
+      const transport = app.get(MAIL_TRANSPORT) as { send: jest.Mock };
+      const id = await draft();
+      await request(app.getHttpServer())
+        .patch(`/api/proformas/${id}`)
+        .set('Authorization', `Bearer ${gwAdminToken}`)
+        .send({ status: 'accepted' })
+        .expect(200);
+      transport.send.mockRejectedValueOnce(new Error('transport down'));
+      const res = await send(id);
+      expect(res.body.sent).toBe(false);
+      expect(await statusOf(id)).toBe('accepted');
+    });
+
+    it('PDF failure: send is refused and the draft is untouched', async () => {
+      const id = await draft();
+      const spy = jest
+        .spyOn(app.get(ProformasService), 'renderPdf')
+        .mockRejectedValueOnce(new Error('PDF rendering unavailable'));
+      try {
+        const res = await request(app.getHttpServer())
+          .post(`/api/proformas/${id}/send`)
+          .set('Authorization', `Bearer ${gwAdminToken}`)
+          .send({ email: 'billing@pacificscrap.test' });
+        expect(res.status).toBeGreaterThanOrEqual(400);
+        expect(await statusOf(id)).toBe('draft');
+        expect(await outboxFor(id)).toHaveLength(0);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
 });

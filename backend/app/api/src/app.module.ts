@@ -10,6 +10,7 @@ import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { BankingModule } from './banking/banking.module';
 import { ChatModule } from './chat/chat.module';
+import { databaseConnectionOptions } from './common/database-connection';
 import { CsrfGuard } from './common/guards/csrf.guard';
 import { CustomersModule } from './customers/customers.module';
 import { DivisionsModule } from './divisions/divisions.module';
@@ -59,6 +60,8 @@ import { WarehousesModule } from './warehouses/warehouses.module';
         database:
           config.get<string>('DATABASE_NAME') ??
           config.get<string>('DB_DATABASE'),
+
+        ...databaseConnectionOptions(config),
 
         autoLoadEntities: true,
         synchronize: false,
