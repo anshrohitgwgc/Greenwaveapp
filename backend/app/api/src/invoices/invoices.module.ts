@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AccountingModule } from '../accounting/accounting.module';
+import { RecyclingFinanceGuard } from '../common/guards/recycling-finance.guard';
 import { Customer } from '../customers/entities/customer.entity';
 import { Payment } from '../payments/entities/payment.entity';
 import { DivisionsModule } from '../divisions/divisions.module';
@@ -19,7 +20,7 @@ import { InvoicesService } from './invoices.service';
     DivisionsModule,
   ],
   controllers: [InvoicesController],
-  providers: [InvoicesService],
+  providers: [InvoicesService, RecyclingFinanceGuard],
   exports: [InvoicesService, TypeOrmModule],
 })
 export class InvoicesModule {}

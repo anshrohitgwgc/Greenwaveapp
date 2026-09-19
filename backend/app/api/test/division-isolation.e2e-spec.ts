@@ -329,7 +329,9 @@ describe('E2E Security: Cross-division authorization & IDOR', () => {
 
       it(`   ...and each can still read their own ${label}`, async () => {
         await get(path(gwId), gwAdminToken).expect(200);
-        await get(path(hcId), hcAdminToken).expect(200);
+        // Invoices are GreenWave Recycling records (RecyclingFinanceGuard):
+        // Healthcare has no invoice access at all, even to healthcare rows.
+        await get(path(hcId), hcAdminToken).expect(label === 'invoice' ? 403 : 200);
       });
     }
 
@@ -425,8 +427,8 @@ describe('E2E Security: Cross-division authorization & IDOR', () => {
       const gwInv = await get('/invoices', gwAdminToken).expect(200);
       expect(gwInv.body.map((i: any) => i.invoiceNumber)).toEqual(['TEST-GW-1']);
 
-      const hcInv = await get('/invoices', hcAdminToken).expect(200);
-      expect(hcInv.body.map((i: any) => i.invoiceNumber)).toEqual(['TEST-HC-1']);
+      // Invoices are Recycling-only: a Healthcare actor is refused outright.
+      await get('/invoices', hcAdminToken).expect(403);
 
       const gwCust = await get('/customers', gwAdminToken).expect(200);
       expect(gwCust.body.map((c: any) => c.name)).toEqual(['Recycling Customer Ltd']);
@@ -779,8 +781,8 @@ describe('E2E Security: Cross-division authorization & IDOR', () => {
   // Invoice numbering must be unaffected by any of this
   // ====================================================================
   describe('Invoice numbering is unchanged by division scoping', () => {
-    it('numbering stays a single global series across divisions (no reuse, no per-division counter)', async () => {
-      const mk = async (token: string, division: string) => {
+    it('numbering stays a single global series; a refused Healthcare create consumes no number', async () => {
+      const mk = async (token: string, division: string, status: number) => {
         const res = await request(app.getHttpServer())
           .post('/invoices')
           .set('Authorization', `Bearer ${token}`)
@@ -790,25 +792,23 @@ describe('E2E Security: Cross-division authorization & IDOR', () => {
             warehouseId: WAREHOUSE_CGY,
             items: [{ description: 'seq', quantity: 1, unitPrice: 1 }],
           })
-          .expect(201);
+          .expect(status);
         return Number(res.body.invoiceNumber);
       };
 
-      const a = await mk(gwAdminToken, 'greenwave');
-      const b = await mk(hcAdminToken, 'healthcare');
-      const c = await mk(gwAdminToken, 'greenwave');
+      const a = await mk(gwAdminToken, 'greenwave', 201);
+      await mk(hcAdminToken, 'healthcare', 403); // invoices are Recycling-only
+      const c = await mk(gwAdminToken, 'greenwave', 201);
 
-      // Strictly increasing and never reused, regardless of which division
-      // the invoice belongs to.
-      expect(b).toBeGreaterThan(a);
-      expect(c).toBeGreaterThan(b);
-      expect(new Set([a, b, c]).size).toBe(3);
+      // Strictly sequential and never reused.
+      expect(c).toBe(a + 1);
     });
 
     it('a rejected cross-division create does not consume a number', async () => {
       const before = await request(app.getHttpServer())
         .get('/invoices/next-number')
         .set('Authorization', `Bearer ${bothAdminToken}`)
+        .set('X-Division', 'recycling')
         .expect(200);
 
       await request(app.getHttpServer())
@@ -825,6 +825,7 @@ describe('E2E Security: Cross-division authorization & IDOR', () => {
       const after = await request(app.getHttpServer())
         .get('/invoices/next-number')
         .set('Authorization', `Bearer ${bothAdminToken}`)
+        .set('X-Division', 'recycling')
         .expect(200);
 
       expect(after.body.nextNumber).toBe(before.body.nextNumber);

@@ -374,6 +374,7 @@ describe('Security: Authoritative Warehouse Access & Isolation Matrix (HTTP Inte
       await request(app.getHttpServer())
         .get(`/invoices?warehouseId=${WAREHOUSE_MR}`)
         .set('Authorization', `Bearer ${managerToken}`)
+        .set('X-Division', 'recycling') // invoices are Recycling-only; multi-division actors name their context
         .expect(403);
     });
 
@@ -476,6 +477,7 @@ describe('Security: Authoritative Warehouse Access & Isolation Matrix (HTTP Inte
       await request(app.getHttpServer())
         .get(`/invoices?warehouseId=${WAREHOUSE_MR}`)
         .set('Authorization', `Bearer ${managerToken}`)
+        .set('X-Division', 'recycling') // invoices are Recycling-only; multi-division actors name their context
         .expect(403);
     });
 
@@ -483,11 +485,13 @@ describe('Security: Authoritative Warehouse Access & Isolation Matrix (HTTP Inte
       await request(app.getHttpServer())
         .get(`/invoices?warehouseId=${WAREHOUSE_CGY}`)
         .set('Authorization', `Bearer ${managerToken}`)
+        .set('X-Division', 'recycling') // invoices are Recycling-only; multi-division actors name their context
         .expect(200);
 
       await request(app.getHttpServer())
         .get(`/invoices?warehouseId=${WAREHOUSE_ON}`)
         .set('Authorization', `Bearer ${managerToken}`)
+        .set('X-Division', 'recycling') // invoices are Recycling-only; multi-division actors name their context
         .expect(200);
     });
 

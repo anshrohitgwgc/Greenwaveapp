@@ -17,6 +17,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RecyclingFinanceGuard } from '../common/guards/recycling-finance.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
@@ -34,9 +35,13 @@ import { PurchaseOrdersService } from './purchase-orders.service';
  * Note the deliberate absence of 'manager' here, which invoices *do* allow.
  * That is the brief: only admins may create, view, edit, delete or generate
  * purchase orders.
+ *
+ * RecyclingFinanceGuard adds the division boundary on top of RBAC: purchase
+ * orders are GreenWave Recycling records, so a Healthcare-active (or
+ * context-less multi-division) request is refused on every route, by id too.
  */
 @Controller('purchase-orders')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, RecyclingFinanceGuard)
 @Roles('admin')
 export class PurchaseOrdersController {
   constructor(private readonly purchaseOrdersService: PurchaseOrdersService) {}

@@ -15,13 +15,19 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RecyclingFinanceGuard } from '../common/guards/recycling-finance.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { InvoicesService } from './invoices.service';
 
+/**
+ * Invoices are GreenWave Recycling records. RecyclingFinanceGuard enforces the
+ * active-division boundary for every route (list, by-id, create, update,
+ * duplicate, PDF) in addition to the role check below.
+ */
 @Controller('invoices')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, RecyclingFinanceGuard)
 @Roles('admin', 'manager')
 export class InvoicesController {
   constructor(private readonly invoicesService: InvoicesService) {}

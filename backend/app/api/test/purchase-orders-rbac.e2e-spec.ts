@@ -176,9 +176,14 @@ describe('E2E: Purchase Orders — admin RBAC, numbering & server-side totals', 
     }
 
     // Division access held constant: this suite asserts *role* behaviour.
+    // Purchase orders are Recycling-only (RecyclingFinanceGuard), and a
+    // multi-division actor must name its context, so grant Recycling alone;
+    // the division boundary itself is covered by
+    // invoice-po-division-isolation.e2e-spec.ts.
     await grantDivisions(
       dataSource,
       (await userRepo.find()).map((u) => u.id),
+      ['greenwave'],
     );
 
     const login = async (email: string) => {
